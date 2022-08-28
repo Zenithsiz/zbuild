@@ -34,7 +34,7 @@ use {
 	args::Args,
 	clap::StructOpt,
 	futures::{stream::FuturesUnordered, TryStreamExt},
-	std::{collections::HashMap, env, fs},
+	std::{collections::HashMap, env, fs, path::PathBuf},
 };
 
 
@@ -48,10 +48,7 @@ async fn main() -> Result<(), anyhow::Error> {
 	tracing::trace!(?args, "Arguments");
 
 	// Parse the ast
-	let ast = {
-		let file = self::find_zbuild()?;
-		serde_yaml::from_reader::<_, Ast>(file).context("Unable to parse `zbuild.yaml`")?
-	};
+	let ast = self::find_parse_zbuild_with_working_dir(args.zbuild_path)?;
 	tracing::trace!(target: "zbuild_ast", ?ast, "Parsed ast");
 
 	// Build the rules
@@ -109,6 +106,24 @@ async fn main() -> Result<(), anyhow::Error> {
 	Ok(())
 }
 
+/// Finds and parses the `zbuild` path.
+///
+/// Also sets the working directory to it's containing directory
+pub fn find_parse_zbuild_with_working_dir(zbuild_path: Option<PathBuf>) -> Result<Ast, anyhow::Error> {
+	// Open the file
+	let file = match zbuild_path {
+		Some(path) => {
+			let parent = path.parent().context("`zbuild` path has no parent directory")?;
+			env::set_current_dir(parent).context("Unable to set current directory")?;
+			fs::File::open("zbuild.yaml").context("Unable to open `zbuild.yaml` file")?
+		},
+		None => self::find_zbuild().context("Unable to find `zbuild.yaml` file")?,
+	};
+
+	// Then parse it
+	serde_yaml::from_reader::<_, Ast>(file).context("Unable to parse `zbuild.yaml`")
+}
+
 /// Finds and sets the working directory to the nearest zbuild file
 pub fn find_zbuild() -> Result<fs::File, anyhow::Error> {
 	match fs::File::open("zbuild.yaml") {
@@ -118,7 +133,10 @@ pub fn find_zbuild() -> Result<fs::File, anyhow::Error> {
 				env::set_current_dir(parent).context("Unable to set current directory")?;
 				self::find_zbuild()
 			},
-			None => anyhow::bail!("No `zbuild.yaml` file found in current or parent directories"),
+			None => anyhow::bail!(
+				"No `zbuild.yaml` file found in current or parent directories.\nYou can use `--path {{zbuild-path}}` \
+				 in order to specify the manifest's path"
+			),
 		},
 	}
 }
