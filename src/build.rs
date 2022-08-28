@@ -66,8 +66,8 @@ impl Builder {
 		self.targets.len()
 	}
 
-	/// Builds an unexpanded target
-	pub async fn build_unexpanded(&self, target: &Target<Expr>, rules: &Rules) -> Result<BuildResult, anyhow::Error> {
+	/// Builds an expression-encoded target
+	pub async fn build_expr(&self, target: &Target<Expr>, rules: &Rules) -> Result<BuildResult, anyhow::Error> {
 		// Expand the target
 		let global_expr_visitor = expand_expr::GlobalVisitor::new(&rules.aliases);
 		let target = self::expand_target(target, global_expr_visitor).context("Unable to expand target")?;
@@ -77,7 +77,6 @@ impl Builder {
 	}
 
 	/// Builds a target
-	#[async_recursion::async_recursion]
 	pub async fn build(&self, target: &Target<String>, rules: &Rules) -> Result<BuildResult, anyhow::Error> {
 		// Check if we need to build and create a new entry, if so
 		let (build_status, do_build) = match self.targets.entry(target.clone()) {
@@ -107,9 +106,11 @@ impl Builder {
 		}
 	}
 
-	/// Builds a target without checking for existing targets
+	/// Builds a target without checking if the target is already being built.
+	// TODO: Refactor this a bit, it's a pretty big function
+	#[async_recursion::async_recursion]
 	async fn build_unchecked(&self, target: &Target<String>, rules: &Rules) -> Result<BuildResult, anyhow::Error> {
-		// Find the rule to use for this target
+		// Find and expand the rule to use for this target
 		let rule = match &target {
 			// If we got a file, check which rule can make it
 			Target::File { file } => match self::find_rule_for_file(file, rules)? {
@@ -269,14 +270,15 @@ impl Builder {
 		let (output, deps) = self::parse_deps_file(dep_file).context("Unable to parse dependency file")?;
 
 		match rule.output.is_empty() {
-			// If there were no rules, make sure it matches the rule name
+			// If there were no outputs, make sure it matches the rule name
+			// TODO: Seems kinda weird for it to match the rule name, but not sure how else to check this here
 			true => anyhow::ensure!(
 				output == rule.name,
 				"Dependency file did not list the rule name as the dependency, found: {output:?}, expected {:?}",
 				rule.name
 			),
 
-			// If there were any rules, make sure the dependency file applies to one of them
+			// If there were any output, make sure the dependency file applies to one of them
 			false => anyhow::ensure!(
 				rule.output.iter().any(|rule_output| rule_output.file() == &output),
 				"Dependency file did not list any dependencies for rule output, found: {output:?}, expected any of \
@@ -458,15 +460,19 @@ fn file_modified_time(metadata: fs::Metadata) -> SystemTime {
 }
 
 /// Finds a rule for `file`
+// TODO: Not make this `O(N)` for the number of rules.
 pub fn find_rule_for_file(file: &str, rules: &Rules) -> Result<Option<Rule<String>>, anyhow::Error> {
 	for rule in rules.rules.values() {
 		let global_expr_visitor = expand_expr::GlobalVisitor::new(&rules.aliases);
 		let mut rule_output_expr_visitor = expand_expr::RuleOutputVisitor::new(global_expr_visitor, &rule.aliases);
 
 		for output in &rule.output {
+			// Expand all expressions in the output file
+			// Note: This doesn't expand patterns, so we can match those later
 			let output = output.file();
 			let file_cmpts = self::expand_expr(output, &mut rule_output_expr_visitor)?;
 
+			// Then try to match the output file to the file we need to create
 			if let Some(pats) = self::match_expr(&file_cmpts, file)
 				.with_context(|| format!("Unable to match expression inside rule {:?}", rule.name))?
 			{
