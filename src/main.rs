@@ -1,4 +1,4 @@
-//! Build system
+//! `Zbuild` build system
 
 // Features
 #![feature(
@@ -35,23 +35,13 @@ use {
 	clap::StructOpt,
 	futures::{stream::FuturesUnordered, TryStreamExt},
 	std::{collections::HashMap, env, fs},
-	tracing_subscriber::prelude::*,
 };
 
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
 	// Initialize the logger
-	let log_use_color = env::var("RUST_LOG_COLOR").map_or(true, |value| {
-		matches!(value.trim().to_uppercase().as_str(), "1" | "YES" | "TRUE")
-	});
-	tracing_subscriber::registry()
-		.with(
-			tracing_subscriber::fmt::layer()
-				.with_ansi(log_use_color)
-				.with_filter(tracing_subscriber::EnvFilter::from_default_env()),
-		)
-		.init();
+	logger::init();
 
 	// Get all args
 	let args = Args::parse();
