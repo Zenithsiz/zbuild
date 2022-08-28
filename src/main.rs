@@ -55,7 +55,7 @@ async fn main() -> Result<(), anyhow::Error> {
 	let rules = Rules::new(ast);
 	tracing::trace!(target: "zbuild_rules", ?rules, "Rules");
 
-	// Build the default rule
+	// Get the max number of jobs we can execute at once
 	let jobs = match args.jobs {
 		Some(jobs) => jobs,
 		None => std::thread::available_parallelism()
@@ -63,27 +63,37 @@ async fn main() -> Result<(), anyhow::Error> {
 			.into(),
 	};
 
+	// Then get all targets to build
 	let targets = match args.targets.is_empty() {
-		// If empty, use the default rules
+		// If none were specified, use the default rules
 		true => rules.default.clone(),
 
-		// Else get them
-		// TODO: Maybe don't infer rules?
+		// Else infer them as either rules or files
+		// TODO: Maybe be explicit about rule-name inferring?
+		//       If a file has the same name as a rule, it may be
+		//       unexpected behavior, but we can't just check if the
+		//       file exists to disambiguate, because it might not be
+		//       created yet
 		false => args
 			.targets
-			.iter()
-			.map(|target| match rules.rules.get(target) {
+			.into_iter()
+			.map(|target| match rules.rules.get(&target) {
+				// If there was a rule, use it without any patterns
+				// TODO: If it requires patterns maybe error out here?
 				Some(rule) => rules::Target::Rule {
 					rule: rules::Expr::string(rule.name.to_owned()),
 					pats: HashMap::new(),
 				},
+
+				// Else just create a file
 				None => rules::Target::File {
-					file: rules::Expr::string(target.to_owned()),
+					file: rules::Expr::string(target),
 				},
 			})
 			.collect(),
 	};
 
+	// Finally create the builder and build all targets
 	let builder = build::Builder::new(jobs);
 	targets
 		.iter()
