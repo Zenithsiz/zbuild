@@ -42,7 +42,7 @@ pub struct Rules {
 
 impl Rules {
 	/// Creates all rules from the ast
-	pub fn new(ast: Ast) -> Result<Self, anyhow::Error> {
+	pub fn new(ast: Ast) -> Self {
 		let aliases = ast
 			.aliases
 			.into_iter()
@@ -55,10 +55,10 @@ impl Rules {
 			.map(|(name, rule)| (name.clone(), Rule::new(name, rule)))
 			.collect();
 
-		Ok(Self {
+		Self {
 			aliases,
 			default,
 			rules,
-		})
+		}
 	}
 }

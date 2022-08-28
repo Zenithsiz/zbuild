@@ -52,7 +52,7 @@ async fn main() -> Result<(), anyhow::Error> {
 	tracing::trace!(target: "zbuild_ast", ?ast, "Parsed ast");
 
 	// Build the rules
-	let rules = Rules::new(ast).context("Unable to create rules")?;
+	let rules = Rules::new(ast);
 	tracing::trace!(target: "zbuild_rules", ?rules, "Rules");
 
 	// Build the default rule
