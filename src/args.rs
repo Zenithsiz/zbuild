@@ -3,7 +3,15 @@
 // Imports
 use std::path::PathBuf;
 
-/// Data from the command line
+/// zbuild build system
+///
+/// Build system based on files and rules.
+///
+/// You can create rules that may output files, have dependencies and be executed,
+/// in order to create the output files.
+///
+/// Then you may request `zbuild` to create a certain file and it will parse
+/// all rules in order to find a way to build the output
 #[derive(PartialEq, Eq, Clone, Debug)]
 #[derive(clap::Parser)]
 #[clap(author, version, about)]
