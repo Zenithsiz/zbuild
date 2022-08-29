@@ -111,7 +111,6 @@ pub fn expand_expr_string(expr: &Expr, visitor: &mut impl Visitor) -> Result<Str
 /// Expands an alias operation on the value of that alias
 fn expand_alias_op(op: AliasOp, value: String) -> Result<String, anyhow::Error> {
 	let value = match op {
-		// TODO: Not add `/` here.
 		AliasOp::DirName => {
 			// Get the path and try to pop the last segment
 			let mut path = PathBuf::from(value);
@@ -120,12 +119,9 @@ fn expand_alias_op(op: AliasOp, value: String) -> Result<String, anyhow::Error> 
 			// Then convert it back to a string
 			// Note: This should technically never fail, since the path was originally
 			//       utf-8
-			let mut path = path
-				.into_os_string()
+			path.into_os_string()
 				.into_string()
-				.expect("utf-8 path was no longer utf-8 after getting dir-name");
-			path.push('/');
-			path
+				.expect("utf-8 path was no longer utf-8 after getting dir-name")
 		},
 	};
 
