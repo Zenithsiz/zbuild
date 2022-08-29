@@ -2,43 +2,63 @@
 
 // Imports
 use {
-	crate::rules::{Alias, Expr, ExprCmpt, ExprOp, Pattern},
+	crate::rules::{AliasOp, Expr, ExprCmpt},
 	anyhow::Context,
 	std::{borrow::Cow, collections::HashMap, path::PathBuf},
 };
 
 /// Expands an expression to it's components
 pub fn expand_expr(expr: &Expr, visitor: &mut impl Visitor) -> Result<Vec<ExprCmpt>, anyhow::Error> {
-	let cmpts = match expr {
-		Expr::Op { op, expr } => {
-			let s = self::expand_expr_string(expr, visitor)
-				.with_context(|| format!("Unable to expand expression to string for operator {expr:?}"))?;
-			let s = self::expand_op(op, s)?;
-
-			vec![ExprCmpt::String(s)]
-		},
-
-		// If we got a string, simply expand it
-		Expr::String(cmpts) => cmpts.iter().try_fold::<_, _, Result<_, _>>(vec![], |mut cmpts, cmpt| {
+	// Go through all components
+	expr.cmpts
+		.iter()
+		.try_fold::<_, _, Result<_, _>>(vec![], |mut cmpts, cmpt| {
 			match cmpt {
+				// If it's a string, we keep it
 				ExprCmpt::String(_) => cmpts.push(cmpt.clone()),
-				ExprCmpt::Pattern(pat) => match visitor.visit_pat(pat) {
-					FlowControl::ExpandTo(s) => cmpts.push(ExprCmpt::String(s)),
+
+				// If it's a pattern, we visit it
+				// Note: We don't care about the operations on patterns, those are for matching
+				ExprCmpt::Pattern(pat) => match visitor.visit_pat(&pat.name) {
+					// If expanded, just replace it with a string
+					FlowControl::ExpandTo(value) => cmpts.push(ExprCmpt::String(value)),
+
+					// Else keep on Keep and error on Error
 					FlowControl::Keep => cmpts.push(cmpt.clone()),
 					FlowControl::Error => anyhow::bail!("Unknown pattern {pat:?}"),
 				},
-				ExprCmpt::Alias(alias) => match visitor.visit_alias(alias) {
-					FlowControl::ExpandTo(expr) => cmpts.extend(self::expand_expr(&expr, visitor)?),
+
+				// If it's an alias, we visit and then expand it
+				ExprCmpt::Alias(alias) => match visitor.visit_alias(&alias.name) {
+					// If expanded, check if we need to apply any operations
+					FlowControl::ExpandTo(expr) => match alias.ops.is_empty() {
+						// If not, just recursively expand it
+						true => cmpts.extend(self::expand_expr(&expr, visitor)?),
+
+						// Else expand it to a string, then apply all operations
+						// TODO: Apply operations on the expression components without expanding to a string?
+						false => {
+							// Expand
+							let value = self::expand_expr_string(&expr, visitor)?;
+
+							// Then apply all
+							let value = alias.ops.iter().try_fold(value, |value, &op| {
+								self::expand_alias_op(op, value)
+									.with_context(|| format!("Unable to apply alias operator {op:?}"))
+							})?;
+
+							cmpts.push(ExprCmpt::String(value))
+						},
+					},
+
+					// Else keep on Keep and error on Error
 					FlowControl::Keep => cmpts.push(cmpt.clone()),
 					FlowControl::Error => anyhow::bail!("Unknown alias {alias:?}"),
 				},
 			};
 
 			Ok(cmpts)
-		})?,
-	};
-
-	Ok(cmpts)
+		})
 }
 
 /// Expands an expression into a string
@@ -46,49 +66,55 @@ pub fn expand_expr(expr: &Expr, visitor: &mut impl Visitor) -> Result<Vec<ExprCm
 /// Panics if `visitor` returns `Keep`.
 // TODO: Merge neighboring strings in output.
 pub fn expand_expr_string(expr: &Expr, visitor: &mut impl Visitor) -> Result<String, anyhow::Error> {
-	let s = match expr {
-		Expr::Op { op, expr } => {
-			let expr = self::expand_expr_string(expr, visitor)?;
-			self::expand_op(op, expr)?
-		},
+	expr.cmpts
+		.iter()
+		.try_fold::<_, _, Result<_, _>>(String::new(), |mut string, cmpt| {
+			let s = match cmpt {
+				ExprCmpt::String(s) => Cow::Borrowed(s),
+				ExprCmpt::Pattern(pat) => match visitor.visit_pat(&pat.name) {
+					FlowControl::ExpandTo(s) => Cow::Owned(s),
+					FlowControl::Keep => panic!("Cannot keep unknown pattern when expanding to string"),
+					FlowControl::Error => anyhow::bail!("Unknown pattern {pat:?}"),
+				},
+				ExprCmpt::Alias(alias) => {
+					match visitor.visit_alias(&alias.name) {
+						FlowControl::ExpandTo(expr) => match alias.ops.is_empty() {
+							// If not, just recursively expand it
+							true => self::expand_expr_string(&expr, visitor).map(Cow::Owned)?,
 
-		// If we got a string, simply expand it
-		Expr::String(cmpts) => cmpts
-			.iter()
-			.try_fold::<_, _, Result<_, _>>(String::new(), |mut string, cmpt| {
-				let s = match cmpt {
-					ExprCmpt::String(s) => Cow::Borrowed(s),
-					ExprCmpt::Pattern(pat) => match visitor.visit_pat(pat) {
-						FlowControl::ExpandTo(s) => Cow::Owned(s),
+							// Else expand it to a string, then apply all operations
+							// TODO: Apply operations on the expression components without expanding to a string?
+							false => {
+								// Expand
+								let value = self::expand_expr_string(&expr, visitor)?;
+
+								// Then apply all
+								let value = alias.ops.iter().try_fold(value, |value, &op| {
+									self::expand_alias_op(op, value)
+										.with_context(|| format!("Unable to apply alias operator {op:?}"))
+								})?;
+
+								Cow::Owned(value)
+							},
+						},
 						FlowControl::Keep => panic!("Cannot keep unknown pattern when expanding to string"),
-						FlowControl::Error => anyhow::bail!("Unknown pattern {pat:?}"),
-					},
-					ExprCmpt::Alias(alias) => {
-						let expr = match visitor.visit_alias(alias) {
-							FlowControl::ExpandTo(expr) => expr,
-							FlowControl::Keep => panic!("Cannot keep unknown pattern when expanding to string"),
-							FlowControl::Error => anyhow::bail!("Unknown alias {alias:?}"),
-						};
-						let s = self::expand_expr_string(&expr, visitor)?;
-						Cow::Owned(s)
-					},
-				};
+						FlowControl::Error => anyhow::bail!("Unknown alias {alias:?}"),
+					}
+				},
+			};
 
-				string.push_str(&s);
-				Ok(string)
-			})?,
-	};
-
-	Ok(s)
+			string.push_str(&s);
+			Ok(string)
+		})
 }
 
-/// Expands an operation on an expression
-fn expand_op(op: &ExprOp, expr: String) -> Result<String, anyhow::Error> {
-	let expr = match op {
+/// Expands an alias operation on the value of that alias
+fn expand_alias_op(op: AliasOp, value: String) -> Result<String, anyhow::Error> {
+	let value = match op {
 		// TODO: Not add `/` here.
-		ExprOp::DirName => {
+		AliasOp::DirName => {
 			// Get the path and try to pop the last segment
-			let mut path = PathBuf::from(expr);
+			let mut path = PathBuf::from(value);
 			anyhow::ensure!(path.pop(), "Path {path:?} had no directory name");
 
 			// Then convert it back to a string
@@ -103,7 +129,7 @@ fn expand_op(op: &ExprOp, expr: String) -> Result<String, anyhow::Error> {
 		},
 	};
 
-	Ok(expr)
+	Ok(value)
 }
 
 /// Flow control for [`expand_expr_string`]
@@ -121,10 +147,10 @@ pub enum FlowControl<T> {
 /// Visitor for [`expand_expr_string`]
 pub trait Visitor {
 	/// Visits an alias
-	fn visit_alias(&mut self, alias: &Alias) -> FlowControl<Expr>;
+	fn visit_alias(&mut self, alias_name: &str) -> FlowControl<Expr>;
 
 	/// Visits a pattern
-	fn visit_pat(&mut self, pat: &Pattern) -> FlowControl<String>;
+	fn visit_pat(&mut self, pat_name: &str) -> FlowControl<String>;
 }
 
 /// Visitor for global aliases.
@@ -145,14 +171,14 @@ impl<'global> GlobalVisitor<'global> {
 }
 
 impl<'global> Visitor for GlobalVisitor<'global> {
-	fn visit_alias(&mut self, alias: &Alias) -> FlowControl<Expr> {
-		match self.aliases.get(&alias.name).cloned() {
+	fn visit_alias(&mut self, alias_name: &str) -> FlowControl<Expr> {
+		match self.aliases.get(alias_name).cloned() {
 			Some(expr) => FlowControl::ExpandTo(expr),
 			None => FlowControl::Error,
 		}
 	}
 
-	fn visit_pat(&mut self, _pat: &Pattern) -> FlowControl<String> {
+	fn visit_pat(&mut self, _pat: &str) -> FlowControl<String> {
 		FlowControl::Error
 	}
 }
@@ -181,14 +207,14 @@ impl<'global, 'rule> RuleOutputVisitor<'global, 'rule> {
 }
 
 impl<'global, 'rule> Visitor for RuleOutputVisitor<'global, 'rule> {
-	fn visit_alias(&mut self, alias: &Alias) -> FlowControl<Expr> {
-		match self.rule_aliases.get(&alias.name).cloned() {
+	fn visit_alias(&mut self, alias_name: &str) -> FlowControl<Expr> {
+		match self.rule_aliases.get(alias_name).cloned() {
 			Some(expr) => FlowControl::ExpandTo(expr),
-			None => self.global_visitor.visit_alias(alias),
+			None => self.global_visitor.visit_alias(alias_name),
 		}
 	}
 
-	fn visit_pat(&mut self, _pat: &Pattern) -> FlowControl<String> {
+	fn visit_pat(&mut self, _pat: &str) -> FlowControl<String> {
 		FlowControl::Keep
 	}
 }
@@ -217,12 +243,12 @@ impl<'global, 'rule, 'pats> RuleVisitor<'global, 'rule, 'pats> {
 }
 
 impl<'global, 'rule, 'pats> Visitor for RuleVisitor<'global, 'rule, 'pats> {
-	fn visit_alias(&mut self, alias: &Alias) -> FlowControl<Expr> {
-		self.rule_output_visitor.visit_alias(alias)
+	fn visit_alias(&mut self, alias_name: &str) -> FlowControl<Expr> {
+		self.rule_output_visitor.visit_alias(alias_name)
 	}
 
-	fn visit_pat(&mut self, pat: &Pattern) -> FlowControl<String> {
-		match self.pats.get(&pat.name).cloned() {
+	fn visit_pat(&mut self, pat_name: &str) -> FlowControl<String> {
+		match self.pats.get(pat_name).cloned() {
 			Some(value) => FlowControl::ExpandTo(value),
 			None => FlowControl::Error,
 		}

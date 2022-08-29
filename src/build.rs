@@ -229,7 +229,6 @@ impl Builder {
 		.max_by_key(|res| res.build_time);
 
 		let output_last_build_time = self::rule_last_build_time(&rule).ok().flatten();
-		tracing::trace!(?target, ?output_last_build_time, ?deps_res, "Check rebuild");
 		let needs_rebuilt = match (deps_res, output_last_build_time) {
 			// If not built, rebuild
 			(_, None) => true,

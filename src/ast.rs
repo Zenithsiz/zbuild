@@ -44,25 +44,9 @@ pub enum Target {
 
 /// Expression
 #[derive(Clone, Debug)]
-pub enum Expr {
-	/// Operation
-	Op {
-		/// Operation
-		op: ExprOp,
-
-		/// Expr
-		expr: Box<Self>,
-	},
-
-	/// String
-	String(Vec<ExprCmpt>),
-}
-
-/// Expression operator
-#[derive(Clone, Debug)]
-pub enum ExprOp {
-	/// Dir name
-	DirName,
+pub struct Expr {
+	/// Components
+	pub cmpts: Vec<ExprCmpt>,
 }
 
 /// Expression component
@@ -72,10 +56,24 @@ pub enum ExprCmpt {
 	String(String),
 
 	/// Pattern
-	Pattern(String),
+	Pattern { name: String, ops: Vec<PatternOp> },
 
 	/// Alias
-	Alias(String),
+	Alias { name: String, ops: Vec<AliasOp> },
+}
+
+/// Pattern operator
+#[derive(Clone, Debug)]
+pub enum PatternOp {
+	/// Non-empty
+	NonEmpty,
+}
+
+/// Alias operator
+#[derive(Clone, Debug)]
+pub enum AliasOp {
+	/// Directory name
+	DirName,
 }
 
 impl<'de> serde::Deserialize<'de> for Expr {
@@ -83,98 +81,94 @@ impl<'de> serde::Deserialize<'de> for Expr {
 	where
 		D: serde::Deserializer<'de>,
 	{
-		struct Visitor;
+		// Parse the string
+		// TODO: Allow arrays and concat them?
+		// TODO: Deserialize a `Cow<str>`?
+		let inner = String::deserialize(deserializer)?;
 
-		impl<'de> serde::de::Visitor<'de> for Visitor {
-			type Value = Expr;
-
-			fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-				write!(formatter, "Map with single key for operation or string")
-			}
-
-			fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-			where
-				A: serde::de::MapAccess<'de>,
-			{
-				// Get the entry
-				let (op, expr) = map
-					.next_entry::<String, Expr>()?
-					.ok_or_else(|| A::Error::custom("Unexpected empty map"))?;
-
-				// Make sure there isn't another one
-				if let Some((key, _)) = map.next_entry::<String, Expr>()? {
-					return Err(A::Error::custom(format!("Unexpected second map entry: {key:?}")));
-				}
-
-				// Then parse the operation
-				let op = match op.as_str() {
-					"dir_name" => ExprOp::DirName,
-					_ => return Err(A::Error::custom(format!("Unknown expression operation: {op:?}"))),
-				};
-
-				Ok(Expr::Op {
-					op,
-					expr: Box::new(expr),
-				})
-			}
-
-			fn visit_str<E>(self, mut s: &str) -> Result<Self::Value, E>
-			where
-				E: serde::de::Error,
-			{
-				let mut components = vec![];
-				loop {
-					// Try to find the next pattern / alias
-					match s.find(['$', '^']) {
-						// If we found it
-						Some(idx) => {
-							// Add the string until it, if it isn't empty
-							if !s[..idx].is_empty() {
-								components.push(ExprCmpt::String(s[..idx].to_owned()));
-							}
-
-							// Then check which one we got
-							let mut chars = s[idx..].chars();
-							let cmpt_fn = match chars.next() {
-								Some('$') => ExprCmpt::Alias,
-								Some('^') => ExprCmpt::Pattern,
-								_ => unreachable!(),
-							};
-
-							// Make sure it's valid
-							match chars.next() {
-								Some('(') => (),
-								Some(ch) => return Err(E::custom(format!("Expected `(` after `$`, found {ch:?}"))),
-								None => return Err(E::custom("Expected `(` after `$`")),
-							};
-
-							// Then read until `)`
-							s = chars.as_str();
-							let alias;
-							(alias, s) = s
-								.split_once(')')
-								.ok_or_else(|| E::custom("Alias `$(` has no closing brace"))?;
-
-							components.push(cmpt_fn(alias.to_owned()));
-						},
-
-						// If we didn't find any, the rest of the expression if a string
-						None => {
-							// Add the rest only if it isn't empty
-							if !s.is_empty() {
-								components.push(ExprCmpt::String(s.to_owned()))
-							}
-							break;
-						},
+		// Then parse all components
+		let mut cmpts = vec![];
+		let mut rest = inner.as_str();
+		loop {
+			// Try to find the next pattern / alias
+			match rest.find(['$', '^']) {
+				// If we found it
+				Some(idx) => {
+					// Add the string until the pattern / alias, if it isn't empty
+					if !rest[..idx].is_empty() {
+						cmpts.push(ExprCmpt::String(rest[..idx].to_owned()));
 					}
-				}
 
-				Ok(Expr::String(components))
+					// Then check if it was an alias or pattern
+					enum Kind {
+						Alias,
+						Pattern,
+					}
+					let mut chars = rest[idx..].chars();
+					let kind = match chars.next() {
+						Some('$') => Kind::Alias,
+						Some('^') => Kind::Pattern,
+						_ => unreachable!(),
+					};
+
+					// Ensure it starts with `(`
+					match chars.next() {
+						Some('(') => (),
+						Some(ch) => return Err(D::Error::custom(format!("Expected `(` after `$`, found {ch:?}"))),
+						None => return Err(D::Error::custom("Expected `(` after `$`")),
+					};
+
+					// Then read until `)`
+					rest = chars.as_str();
+					let inner;
+					(inner, rest) = rest
+						.split_once(')')
+						.ok_or_else(|| D::Error::custom("Alias `$(` has no closing brace"))?;
+
+					// And split all operations
+					let (name, ops) = match inner.split_once("::") {
+						Some((name, ops)) => (name, ops.split("::").collect()),
+						None => (inner, vec![]),
+					};
+
+
+					let cmpt = match kind {
+						Kind::Alias => ExprCmpt::Alias {
+							name: name.to_owned(),
+							ops:  ops
+								.into_iter()
+								.map(|op| match op.trim() {
+									"dir_name" => Ok(AliasOp::DirName),
+									op => Err(D::Error::custom(format!("Unknown alias operator {op:?}"))),
+								})
+								.collect::<Result<_, _>>()?,
+						},
+						Kind::Pattern => ExprCmpt::Pattern {
+							name: name.to_owned(),
+							ops:  ops
+								.into_iter()
+								.map(|op| match op.trim() {
+									"non_empty" => Ok(PatternOp::NonEmpty),
+									op => Err(D::Error::custom(format!("Unknown pattern operator {op:?}"))),
+								})
+								.collect::<Result<_, _>>()?,
+						},
+					};
+					cmpts.push(cmpt);
+				},
+
+				// If we didn't find any, the rest of the expression if a string
+				None => {
+					// Add the rest only if it isn't empty
+					if !rest.is_empty() {
+						cmpts.push(ExprCmpt::String(rest.to_owned()))
+					}
+					break;
+				},
 			}
 		}
 
-		// TODO: Not use `_any`?
-		deserializer.deserialize_any(Visitor)
+		Ok(Expr { cmpts })
 	}
 }
 

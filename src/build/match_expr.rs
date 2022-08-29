@@ -1,7 +1,10 @@
 //! Expression matching
 
 // Imports
-use {crate::rules::ExprCmpt, std::collections::HashMap};
+use {
+	crate::rules::{ExprCmpt, PatternOp},
+	std::collections::HashMap,
+};
 
 /// Returns if `value` matches all `cmpts` and returns all patterns resolved
 ///
@@ -30,8 +33,26 @@ pub fn match_expr(mut cmpts: &[ExprCmpt], mut value: &str) -> Result<Option<Hash
 				None => return Ok(None),
 			},
 
-			// If we're a single pattern, we fully match anything on the right
+			// If we're a single pattern, check for operators
 			[ExprCmpt::Pattern(pat)] => {
+				let mut ops = pat.ops.as_slice();
+				loop {
+					match ops {
+						// If we're empty, match everything
+						[] => break,
+
+						// On non-empty check if the rest of the value is empty
+						[PatternOp::NonEmpty, rest @ ..] => match value.is_empty() {
+							// If so, we don't match anything
+							true => return Ok(None),
+
+							// Else continue checking the rest of the operators
+							false => ops = rest,
+						},
+					}
+				}
+
+				// If we get here, match everything
 				patterns.insert(pat.name.clone(), value.to_owned());
 				cmpts = &[];
 				value = "";
