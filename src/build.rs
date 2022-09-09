@@ -119,7 +119,7 @@ impl Builder {
 				// If we didn't find it and it exists, assume it's
 				// a non-builder dependency and return it's time
 				None => {
-					let metadata = fs::metadata(&file)
+					let metadata = fs::metadata(file)
 						.with_context(|| format!("Missing file {file:?} and no rule to build it found"))?;
 					let res = BuildResult {
 						build_time: self::file_modified_time(metadata),

@@ -5,7 +5,6 @@
 	seek_stream_len,
 	let_else,
 	map_try_insert,
-	label_break_value,
 	never_type,
 	closure_lifetime_binder,
 	anonymous_lifetime_in_impl_trait,
