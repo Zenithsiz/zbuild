@@ -46,8 +46,21 @@ async fn main() -> Result<(), anyhow::Error> {
 	let args = Args::parse();
 	tracing::trace!(?args, "Arguments");
 
+	// Find the zbuild location and change the current directory to it
+	let zbuild_path = match args.zbuild_path {
+		Some(path) => path,
+		None => self::find_zbuild()?,
+	};
+	let zbuild_dir = zbuild_path.parent().context("Zbuild path had no parent")?;
+	tracing::trace!(?zbuild_path, "Found zbuild path");
+	env::set_current_dir(zbuild_dir).with_context(|| format!("Unable to set current directory to {zbuild_dir:?}"))?;
+
 	// Parse the ast
-	let ast = self::find_parse_zbuild_with_working_dir(args.zbuild_path)?;
+	let ast = {
+		let zbuild_file = fs::File::open(&zbuild_path).with_context(|| format!("Unable to open {zbuild_path:?}"))?;
+		serde_yaml::from_reader::<_, Ast>(zbuild_file)
+			.with_context(|| format!("Unable to read and parse {zbuild_path:?}"))?
+	};
 	tracing::trace!(target: "zbuild_ast", ?ast, "Parsed ast");
 
 	// Build the rules
@@ -61,6 +74,7 @@ async fn main() -> Result<(), anyhow::Error> {
 			.context("Unable to get available parallelism")?
 			.into(),
 	};
+	tracing::debug!(?jobs, "Found number of jobs to run concurrently");
 
 	// Then get all targets to build
 	let targets = match args.targets.is_empty() {
@@ -91,6 +105,7 @@ async fn main() -> Result<(), anyhow::Error> {
 			})
 			.collect(),
 	};
+	tracing::trace!(target: "zbuild_targets", ?targets, "Found targets");
 
 	// Finally create the builder and build all targets
 	let builder = build::Builder::new(jobs);
@@ -109,43 +124,27 @@ async fn main() -> Result<(), anyhow::Error> {
 		.collect::<FuturesUnordered<_>>()
 		.try_collect::<Vec<_>>()
 		.await?;
-
 	tracing::info!("Built {} targets", builder.targets().await);
 
 	Ok(())
 }
 
-/// Finds and parses the `zbuild` path.
-///
-/// Also sets the working directory to it's containing directory
-pub fn find_parse_zbuild_with_working_dir(zbuild_path: Option<PathBuf>) -> Result<Ast, anyhow::Error> {
-	// Open the file
-	let file = match zbuild_path {
-		Some(path) => {
-			let parent = path.parent().context("`zbuild` path has no parent directory")?;
-			env::set_current_dir(parent).context("Unable to set current directory")?;
-			fs::File::open("zbuild.yaml").context("Unable to open `zbuild.yaml` file")?
-		},
-		None => self::find_zbuild().context("Unable to find `zbuild.yaml` file")?,
-	};
+/// Finds the nearest zbuild file
+pub fn find_zbuild() -> Result<PathBuf, anyhow::Error> {
+	let cur_path = env::current_dir().context("Unable to get current directory")?;
+	let mut cur_path = cur_path.as_path();
 
-	// Then parse it
-	serde_yaml::from_reader::<_, Ast>(file).context("Unable to parse `zbuild.yaml`")
-}
-
-/// Finds and sets the working directory to the nearest zbuild file
-pub fn find_zbuild() -> Result<fs::File, anyhow::Error> {
-	match fs::File::open("zbuild.yaml") {
-		Ok(file) => Ok(file),
-		Err(_) => match env::current_dir().context("Unable to get current directory")?.parent() {
-			Some(parent) => {
-				env::set_current_dir(parent).context("Unable to set current directory")?;
-				self::find_zbuild()
+	loop {
+		let zbuild_path = cur_path.join("zbuild.yaml");
+		match fs::try_exists(&zbuild_path).with_context(|| format!("Unable to check if {zbuild_path:?} exists"))? {
+			true => return Ok(zbuild_path),
+			false => match cur_path.parent() {
+				Some(parent) => cur_path = parent,
+				None => anyhow::bail!(
+					"No `zbuild.yaml` file found in current or parent directories.\nYou can use `--path \
+					 {{zbuild-path}}` in order to specify the manifest's path"
+				),
 			},
-			None => anyhow::bail!(
-				"No `zbuild.yaml` file found in current or parent directories.\nYou can use `--path {{zbuild-path}}` \
-				 in order to specify the manifest's path"
-			),
-		},
+		}
 	}
 }
