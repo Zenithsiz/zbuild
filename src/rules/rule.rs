@@ -37,11 +37,11 @@ impl Rule<Expr> {
 	/// Creates a new rule from it's ast
 	pub fn new(name: String, rule: ast::Rule) -> Self {
 		let aliases = rule
-			.aliases
+			.alias
 			.into_iter()
 			.map(|(name, expr)| (name, Expr::new(expr)))
 			.collect();
-		let output = rule.output.into_iter().map(Item::new).collect();
+		let output = rule.out.into_iter().map(Item::new).collect();
 		let deps = rule.deps.into_iter().map(Item::new).collect();
 		let static_deps = rule.static_deps.into_iter().map(Item::new).collect();
 		let exec_cwd = rule.exec_cwd.map(Expr::new);

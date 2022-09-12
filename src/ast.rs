@@ -1,9 +1,12 @@
 //! Ast
 
 // Imports
-use {serde::de::Error, std::collections::HashMap};
+use {
+	serde::de::Error,
+	std::{borrow::Cow, collections::HashMap},
+};
 
-/// Ast
+/// Zbuild ast
 #[derive(Clone, Debug)]
 #[derive(serde::Deserialize)]
 pub struct Ast {
@@ -82,13 +85,11 @@ impl<'de> serde::Deserialize<'de> for Expr {
 		D: serde::Deserializer<'de>,
 	{
 		// Parse the string
-		// TODO: Allow arrays and concat them?
-		// TODO: Deserialize a `Cow<str>`?
-		let inner = String::deserialize(deserializer)?;
+		let inner = Cow::<str>::deserialize(deserializer)?;
 
 		// Then parse all components
 		let mut cmpts = vec![];
-		let mut rest = inner.as_str();
+		let mut rest = &*inner;
 		loop {
 			// Try to find the next pattern / alias
 			match rest.find(['$', '^']) {
@@ -131,7 +132,7 @@ impl<'de> serde::Deserialize<'de> for Expr {
 						None => (inner, vec![]),
 					};
 
-
+					// Finally check what it was originally and parse all operations
 					let cmpt = match kind {
 						Kind::Alias => ExprCmpt::Alias {
 							name: name.to_owned(),
@@ -177,14 +178,12 @@ impl<'de> serde::Deserialize<'de> for Expr {
 #[derive(serde::Deserialize)]
 pub struct Rule {
 	/// Aliases
-	#[serde(rename = "alias")]
 	#[serde(default)]
-	pub aliases: HashMap<String, Expr>,
+	pub alias: HashMap<String, Expr>,
 
 	/// Output items
-	#[serde(rename = "out")]
 	#[serde(default)]
-	pub output: Vec<Item>,
+	pub out: Vec<Item>,
 
 	/// Dependencies
 	#[serde(default)]
