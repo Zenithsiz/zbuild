@@ -12,9 +12,11 @@ use {
 pub struct Ast {
 	/// Aliases
 	#[serde(rename = "alias")]
+	#[serde(default)]
 	pub aliases: HashMap<String, Expr>,
 
 	/// Default target
+	#[serde(default)]
 	pub default: Vec<Target>,
 
 	/// Rules
@@ -198,6 +200,7 @@ pub struct Rule {
 	pub exec_cwd: Option<Expr>,
 
 	/// Execution
+	#[serde(default)]
 	pub exec: Vec<Command>,
 }
 
