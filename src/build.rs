@@ -15,7 +15,7 @@ use {
 		match_expr::match_expr,
 	},
 	crate::{
-		rules::{Expr, Item, Rule, Target},
+		rules::{Expr, Item, Rule, RuleItem, Target},
 		util,
 		Rules,
 	},
@@ -158,59 +158,95 @@ impl Builder {
 
 
 		#[derive(Clone, Copy, Debug)]
-		enum DepKind {
-			Regular,
-			Static,
-			Output,
+		enum Dep<'a> {
+			Regular(&'a Item<String>),
+			Static(&'a Item<String>),
+			Output(&'a Item<String>),
+			Rule(&'a RuleItem<String>),
 		}
 
 		// Then build all dependencies, also output dependencies, if built
 		let deps_res = util::chain!(
-			rule.deps.iter().map(|dep| (dep, DepKind::Regular)),
-			rule.static_deps.iter().map(|dep| (dep, DepKind::Static)),
+			rule.deps.iter().map(Dep::Regular),
+			rule.static_deps.iter().map(Dep::Static),
 			rule.output.iter().filter_map(|out| match out {
 				Item::File(_) => None,
-				Item::DepsFile(_) => Some((out, DepKind::Output)),
+				Item::DepsFile(_) => Some(Dep::Output(out)),
 			}),
+			rule.rule_deps.iter().map(Dep::Rule),
 		)
-		.map(|(dep, dep_kind)| {
+		.map(|dep| {
 			let rule = &rule;
 			async move {
-				let dep_file = dep.file();
+				struct DepFile<'a> {
+					file:   &'a String,
+					exists: bool,
+				}
+
+				let dep_file = match dep {
+					Dep::Regular(dep_item) | Dep::Static(dep_item) | Dep::Output(dep_item) => Some(DepFile {
+						file:   dep_item.file(),
+						exists: fs::try_exists(dep_item.file())
+							.with_context(|| format!("Unable to check if {} exists", dep_item.file()))?,
+					}),
+					Dep::Rule(_) => None,
+				};
 
 				// Build the dependency
-				let dep_file_exists =
-					fs::try_exists(dep_file).with_context(|| format!("Unable to check if {dep_file} exists"))?;
-				let dep_result = match (dep_kind, dep_file_exists) {
+				let dep_result = match (dep, &dep_file) {
 					// If we're static and it exists or is output, don't do anything
-					(DepKind::Static, true) | (DepKind::Output, _) => None,
+					(Dep::Static(_), Some(DepFile { exists: true, .. })) | (Dep::Output(_), Some(_)) => None,
 
 					// If:
 					// - Regular
 					// - Static but doesn't exist
 					// Then build
-					(DepKind::Regular, _) | (DepKind::Static, false) => {
-						let target = Target::File { file: dep_file.clone() };
+					(Dep::Regular(_), Some(DepFile { file, .. })) |
+					(Dep::Static(_), Some(DepFile { file, exists: false })) => {
+						let target = Target::File { file: (**file).clone() };
 						let dep_result = self
 							.build(&target, rules)
 							.await
-							.with_context(|| format!("Unable to build dependency {dep_file:?}"))?;
+							.with_context(|| format!("Unable to build dependency {file:?}"))?;
 						Some(dep_result)
 					},
+
+					(Dep::Rule(item), None) => {
+						let target = Target::Rule {
+							rule: item.name.clone(),
+							pats: item.pats.clone(),
+						};
+						let dep_result = self
+							.build(&target, rules)
+							.await
+							.with_context(|| format!("Unable to build rule dependency {:?}", item.name))?;
+						Some(dep_result)
+					},
+
+					// If a non-rule item, we always have a dep file
+					(Dep::Regular(_) | Dep::Static(_) | Dep::Output(_), None) | (Dep::Rule(_), Some(_)) =>
+						unreachable!(),
 				};
 
 				// If the dependency if a deps file, build it's dependencies too
 				let mut dep_dep_result = None;
-				if matches!(dep, Item::DepsFile { .. }) {
-					dep_dep_result = match (dep_kind, dep_file_exists) {
-						(DepKind::Regular | DepKind::Static, _) | (DepKind::Output, true) =>
-							self.build_deps_file(dep_file, rule, rules).await.with_context(|| {
-								format!("Unable to build all dependencies in dependency file {dep_file:?}")
-							})?,
+				if let Dep::Regular(dep_item) | Dep::Static(dep_item) | Dep::Output(dep_item) = dep {
+					if matches!(dep_item, Item::DepsFile { .. }) {
+						dep_dep_result = match (dep, &dep_file) {
+							(Dep::Regular(_) | Dep::Static(_), Some(DepFile { file, .. })) |
+							(Dep::Output(_), Some(DepFile { file, exists: true })) =>
+								self.build_deps_file(file, rule, rules).await.with_context(|| {
+									format!("Unable to build all dependencies in dependency file {file:?}")
+								})?,
 
-						// If it's an output and doesn't exist, don't worry about it
-						(DepKind::Output, false) => None,
-					};
+							// If it's an output and doesn't exist, don't worry about it
+							(Dep::Output(_), Some(DepFile { exists: false, .. })) => None,
+
+							// If a non-rule item, we always have a dep file
+							(Dep::Regular(_) | Dep::Static(_) | Dep::Output(_), None) | (Dep::Rule(_), _) =>
+								unreachable!(),
+						};
+					}
 				}
 
 				let res = match (dep_result, dep_dep_result) {

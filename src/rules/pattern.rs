@@ -1,7 +1,7 @@
 //! Pattern
 
 /// Pattern
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub struct Pattern {
 	/// Pattern name
 	pub name: String,
@@ -11,7 +11,7 @@ pub struct Pattern {
 }
 
 /// Pattern operator
-#[derive(Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
 pub enum PatternOp {
 	/// Non-empty
 	NonEmpty,

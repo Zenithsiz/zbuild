@@ -10,14 +10,14 @@ use {
 };
 
 /// Expression
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub struct Expr {
 	/// Components
 	pub cmpts: Vec<ExprCmpt>,
 }
 
 /// Expression component
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub enum ExprCmpt {
 	/// String
 	String(String),

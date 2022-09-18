@@ -1,11 +1,10 @@
 //! Rule
 
-use std::collections::HashMap;
-
 // Imports
 use {
-	super::{Expr, Item},
+	super::{Expr, Item, RuleItem},
 	crate::ast,
+	std::collections::HashMap,
 };
 
 /// Rule
@@ -26,6 +25,9 @@ pub struct Rule<T> {
 	/// Static dependencies
 	pub static_deps: Vec<Item<T>>,
 
+	/// Rule dependencies
+	pub rule_deps: Vec<RuleItem<T>>,
+
 	/// Execution working directory
 	pub exec_cwd: Option<T>,
 
@@ -44,6 +46,7 @@ impl Rule<Expr> {
 		let output = rule.out.into_iter().map(Item::new).collect();
 		let deps = rule.deps.into_iter().map(Item::new).collect();
 		let static_deps = rule.static_deps.into_iter().map(Item::new).collect();
+		let rule_deps = rule.rule_deps.into_iter().map(RuleItem::new).collect();
 		let exec_cwd = rule.exec_cwd.map(Expr::new);
 		let exec = rule
 			.exec
@@ -59,6 +62,7 @@ impl Rule<Expr> {
 			output,
 			deps,
 			static_deps,
+			rule_deps,
 			exec_cwd,
 			exec,
 		}

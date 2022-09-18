@@ -1,7 +1,7 @@
 //! Pattern
 
 /// Alias
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub struct Alias {
 	/// Alias name
 	pub name: String,
@@ -11,7 +11,7 @@ pub struct Alias {
 }
 
 /// Alias operator
-#[derive(Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
 pub enum AliasOp {
 	/// Directory name
 	DirName,

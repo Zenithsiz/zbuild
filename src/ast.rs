@@ -35,6 +35,18 @@ pub enum Item {
 	DepsFile { deps_file: Expr },
 }
 
+/// Rule item
+#[derive(Clone, Debug)]
+#[derive(serde::Deserialize)]
+pub struct RuleItem {
+	/// Name
+	pub name: Expr,
+
+	/// Patterns
+	#[serde(default)]
+	pub pats: HashMap<Expr, Expr>,
+}
+
 /// Target
 #[derive(Clone, Debug)]
 #[derive(serde::Deserialize)]
@@ -48,14 +60,14 @@ pub enum Target {
 }
 
 /// Expression
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub struct Expr {
 	/// Components
 	pub cmpts: Vec<ExprCmpt>,
 }
 
 /// Expression component
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub enum ExprCmpt {
 	/// String
 	String(String),
@@ -68,14 +80,14 @@ pub enum ExprCmpt {
 }
 
 /// Pattern operator
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub enum PatternOp {
 	/// Non-empty
 	NonEmpty,
 }
 
 /// Alias operator
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub enum AliasOp {
 	/// Directory name
 	DirName,
@@ -194,6 +206,10 @@ pub struct Rule {
 	/// Static dependencies
 	#[serde(default)]
 	pub static_deps: Vec<Item>,
+
+	/// Rule dependencies
+	#[serde(default)]
+	pub rule_deps: Vec<RuleItem>,
 
 	/// Execution working directory
 	#[serde(default)]

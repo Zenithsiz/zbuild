@@ -1,7 +1,7 @@
 //! Items
 
 // Imports
-use {super::Expr, crate::ast};
+use {super::Expr, crate::ast, std::collections::HashMap};
 
 /// Item
 #[derive(Clone, Debug)]
@@ -34,6 +34,30 @@ impl<T> Item<T> {
 	pub fn file(&self) -> &T {
 		match self {
 			Item::File(file) | Item::DepsFile(file) => file,
+		}
+	}
+}
+
+/// Rule Item
+#[derive(Clone, Debug)]
+pub struct RuleItem<T> {
+	/// Name
+	pub name: T,
+
+	/// Patterns
+	pub pats: HashMap<T, T>,
+}
+
+impl RuleItem<Expr> {
+	/// Creates a new item from it's `ast`.
+	pub fn new(item: ast::RuleItem) -> Self {
+		Self {
+			name: Expr::new(item.name),
+			pats: item
+				.pats
+				.into_iter()
+				.map(|(pat, expr)| (Expr::new(pat), Expr::new(expr)))
+				.collect(),
 		}
 	}
 }
