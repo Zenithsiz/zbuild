@@ -1,7 +1,11 @@
 //! Items
 
 // Imports
-use {super::Expr, crate::ast, std::collections::HashMap};
+use {
+	super::Expr,
+	crate::ast,
+	std::{collections::HashMap, fmt},
+};
 
 /// Item
 #[derive(Clone, Debug)]
@@ -38,6 +42,15 @@ impl<T> Item<T> {
 	}
 }
 
+impl<T: fmt::Display> fmt::Display for Item<T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Item::File(file) => write!(f, "file: {file}"),
+			Item::DepsFile(file) => write!(f, "dep_file: {file}"),
+		}
+	}
+}
+
 /// Rule Item
 #[derive(Clone, Debug)]
 pub struct RuleItem<T> {
@@ -59,5 +72,23 @@ impl RuleItem<Expr> {
 				.map(|(pat, expr)| (Expr::new(pat), Expr::new(expr)))
 				.collect(),
 		}
+	}
+}
+
+impl<T: fmt::Display> fmt::Display for RuleItem<T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "rule: {}", self.name)?;
+
+		if !self.pats.is_empty() {
+			write!(f, " (")?;
+
+			for (pat, value) in &self.pats {
+				write!(f, "{pat}={value}, ")?;
+			}
+
+			write!(f, ")")?;
+		}
+
+		Ok(())
 	}
 }

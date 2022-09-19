@@ -20,7 +20,6 @@ use {
 		AppError,
 		Rules,
 	},
-	anyhow::Context,
 	dashmap::{mapref::entry::Entry as DashMapEntry, DashMap},
 	filetime::FileTime,
 	futures::{pin_mut, stream::FuturesUnordered, TryStreamExt},
@@ -71,7 +70,7 @@ impl Builder {
 	pub async fn build_expr(&self, target: &Target<Expr>, rules: &Rules) -> Result<BuildResult, AppError> {
 		// Expand the target
 		let global_expr_visitor = expand_expr::GlobalVisitor::new(&rules.aliases);
-		let target = self::expand_target(target, global_expr_visitor).context("Unable to expand target")?;
+		let target = self::expand_target(target, global_expr_visitor).map_err(AppError::expand_target(target))?;
 
 		// Then build
 		self.build(&target, rules).await
@@ -96,17 +95,10 @@ impl Builder {
 		match do_build {
 			true => {
 				let res = self.build_unchecked(target, rules).await;
-				match res {
-					Ok(build_res) => build_status.finish_build(Ok(build_res)).await,
-					Err(_) => build_status.finish_build(Err(())).await,
-				}
-				res
+				build_status.finish_build(res).await
 			},
 
-			false => build_status
-				.await_built()
-				.await
-				.map_err(|()| anyhow::anyhow!("Build failed").into()),
+			false => build_status.await_built().await,
 		}
 	}
 
@@ -123,8 +115,7 @@ impl Builder {
 				// If we didn't find it and it exists, assume it's
 				// a non-builder dependency and return it's time
 				None => {
-					let metadata = fs::metadata(file)
-						.with_context(|| format!("Missing file {file:?} and no rule to build it found"))?;
+					let metadata = fs::metadata(file).map_err(AppError::missing_file(file))?;
 					let res = BuildResult {
 						build_time: self::file_modified_time(metadata),
 					};
@@ -135,12 +126,11 @@ impl Builder {
 			// If we got a rule name with patterns, find it and replace all patterns
 			Target::Rule { rule, pats } => {
 				// Find the rule and expand it
-				let rule = rules
-					.rules
-					.get(rule)
-					.with_context(|| format!("Unknown rule {rule:?}"))?;
+				let rule = rules.rules.get(rule).ok_or_else(|| AppError::UnknownRule {
+					rule_name: rule.clone(),
+				})?;
 				self::expand_rule(rule, &rules.aliases, &rule.aliases, pats)
-					.with_context(|| format!("Unable to expand rule {:?}", rule.name))?
+					.map_err(AppError::expand_rule(&rule.name))?
 			},
 		};
 		tracing::trace!(?target, ?rule, "Found rule");
@@ -152,13 +142,12 @@ impl Builder {
 			.cartesian_product(&rule.deps)
 			.find(|(out, dep)| out.file() == dep.file())
 		{
-			return Err(anyhow::anyhow!(
-				"Rule {:?} cannot contain a dependency ({dep:?}) as an output ({out:?})",
-				rule.name
-			)
-			.into());
+			return Err(AppError::RuleRecursiveOutput {
+				rule_name:       rule.name.clone(),
+				output_item_fmt: out.to_string(),
+				dep_item_fmt:    dep.to_string(),
+			});
 		}
-
 
 		#[derive(Clone, Copy, Debug)]
 		enum Dep<'a> {
@@ -210,7 +199,7 @@ impl Builder {
 						let dep_result = self
 							.build(&target, rules)
 							.await
-							.with_context(|| format!("Unable to build dependency {file:?}"))?;
+							.map_err(AppError::build_target(&target))?;
 						Some(dep_result)
 					},
 
@@ -222,7 +211,7 @@ impl Builder {
 						let dep_result = self
 							.build(&target, rules)
 							.await
-							.with_context(|| format!("Unable to build rule dependency {:?}", item.name))?;
+							.map_err(AppError::build_target(&target))?;
 						Some(dep_result)
 					},
 
@@ -237,10 +226,10 @@ impl Builder {
 					if matches!(dep_item, Item::DepsFile { .. }) {
 						dep_dep_result = match (dep, &dep_file) {
 							(Dep::Regular(_) | Dep::Static(_), Some(DepFile { file, .. })) |
-							(Dep::Output(_), Some(DepFile { file, exists: true })) =>
-								self.build_deps_file(file, rule, rules).await.with_context(|| {
-									format!("Unable to build all dependencies in dependency file {file:?}")
-								})?,
+							(Dep::Output(_), Some(DepFile { file, exists: true })) => self
+								.build_deps_file(file, rule, rules)
+								.await
+								.map_err(AppError::build_dep_file(file))?,
 
 							// If it's an output and doesn't exist, don't worry about it
 							(Dep::Output(_), Some(DepFile { exists: false, .. })) => None,
@@ -281,14 +270,14 @@ impl Builder {
 
 		// Then rebuild, if needed
 		if needs_rebuilt {
-			self.rebuild_rule(&rule).await.context("Unable to rebuild rule")?;
+			self.rebuild_rule(&rule)
+				.await
+				.map_err(AppError::build_rule(&rule.name))?;
 		}
 
 		// Then get the build time
 		// Note: If we don't have any outputs, just use the current time as the build time
-		let cur_build_time = self::rule_last_build_time(&rule)
-			.context("Unable to get built files' modified time")?
-			.unwrap_or_else(SystemTime::now);
+		let cur_build_time = self::rule_last_build_time(&rule)?.unwrap_or_else(SystemTime::now);
 		let res = BuildResult {
 			build_time: cur_build_time,
 		};
@@ -305,41 +294,39 @@ impl Builder {
 		rule: &Rule<String>,
 		rules: &Rules,
 	) -> Result<Option<BuildResult>, AppError> {
-		let (output, deps) = self::parse_deps_file(dep_file).context("Unable to parse dependency file")?;
+		let (output, deps) = self::parse_deps_file(dep_file)?;
 
 		match rule.output.is_empty() {
 			// If there were no outputs, make sure it matches the rule name
 			// TODO: Seems kinda weird for it to match the rule name, but not sure how else to check this here
 			true =>
 				if output != rule.name {
-					return Err(anyhow::anyhow!(
-						"Dependency file did not list the rule name as the dependency, found: {output:?}, expected \
-						 {:?}",
-						rule.name
-					)
-					.into());
+					return Err(AppError::DepFileMissingRuleName {
+						dep_file_path: dep_file.into(),
+						rule_name:     rule.name.clone(),
+						dep_output:    output,
+					});
 				},
 
 			// If there were any output, make sure the dependency file applies to one of them
 			false =>
 				if !rule.output.iter().any(|rule_output| rule_output.file() == &output) {
-					return Err(anyhow::anyhow!(
-						"Dependency file did not list any dependencies for rule output, found: {output:?}, expected \
-						 any of {:?}",
-						rule.output,
-					)
-					.into());
+					return Err(AppError::DepFileMissingOutputs {
+						dep_file_path: dep_file.into(),
+						rule_outputs:  rule.output.iter().map(Item::to_string).collect(),
+						dep_output:    output,
+					});
 				},
 		}
 
 		// Build all dependencies
 		let deps_res = deps
 			.into_iter()
-			.map(|dep| async {
+			.map(|dep| async move {
 				let target = Target::File { file: dep.clone() };
 				self.build(&target, rules)
 					.await
-					.with_context(move || format!("Unable to build dependency {dep:?}"))
+					.map_err(AppError::build_target(&target))
 			})
 			.collect::<FuturesUnordered<_>>()
 			.try_collect::<Vec<_>>()
@@ -353,7 +340,9 @@ impl Builder {
 	/// Rebuilds a rule
 	pub async fn rebuild_rule(&self, rule: &Rule<String>) -> Result<(), AppError> {
 		for exec in &rule.exec {
-			let (program, args) = exec.args.split_first().context("Rule executable cannot be empty")?;
+			let (program, args) = exec.args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
+				rule_name: rule.name.clone(),
+			})?;
 
 			let _exec_guard = self.exec_semaphore.acquire().await.expect("Exec semaphore was closed");
 
@@ -369,12 +358,12 @@ impl Builder {
 			// Then spawn it
 			tracing::info!(target: "zbuild_exec", "{} {}", program, args.join(" "));
 			cmd.spawn()
-				.with_context(|| format!("Unable to spawn {exec:?}"))?
+				.map_err(AppError::spawn_command(exec))?
 				.wait()
 				.await
-				.with_context(|| format!("Command {exec:?} was interrupted"))?
+				.map_err(AppError::wait_command(exec))?
 				.exit_ok()
-				.with_context(|| format!("Command {exec:?} returned error"))?;
+				.map_err(AppError::command_failed(exec))?;
 		}
 
 
@@ -394,7 +383,7 @@ pub enum BuildStatusInner {
 	/// Built
 	Built {
 		/// Built result
-		value: Result<BuildResult, ()>,
+		value: Result<BuildResult, Arc<AppError>>,
 	},
 }
 
@@ -414,24 +403,27 @@ impl BuildStatus {
 	}
 
 	/// Finishes building
-	pub async fn finish_build(&self, res: Result<BuildResult, ()>) {
+	pub async fn finish_build(&self, res: Result<BuildResult, AppError>) -> Result<BuildResult, AppError> {
 		let mut inner = self.inner.lock().await;
 		match &mut *inner {
 			BuildStatusInner::Building { wakers } => {
 				let wakers = mem::take(wakers);
-				*inner = BuildStatusInner::Built { value: res };
+				let res = res.map_err(Arc::new);
+				*inner = BuildStatusInner::Built { value: res.clone() };
 				mem::drop(inner);
 
 				for waker in wakers {
 					waker.wake();
 				}
+
+				res.map_err(AppError::Shared)
 			},
 			BuildStatusInner::Built { .. } => unreachable!("Already finished building"),
 		}
 	}
 
 	/// Awaits until the build is done
-	pub async fn await_built(&self) -> Result<BuildResult, ()> {
+	pub async fn await_built(&self) -> Result<BuildResult, AppError> {
 		std::future::poll_fn(|ctx| {
 			// Lock
 			let inner_fut = self.inner.lock();
@@ -448,7 +440,7 @@ impl BuildStatus {
 				},
 
 				// Else it's ready
-				BuildStatusInner::Built { value } => Poll::Ready(*value),
+				BuildStatusInner::Built { value } => Poll::Ready(value.clone().map_err(AppError::Shared)),
 			}
 		})
 		.await
@@ -473,10 +465,12 @@ impl BuildResult {
 // TODO: Support multiple dependencies in each file
 fn parse_deps_file(file: &str) -> Result<(String, Vec<String>), AppError> {
 	// Read it
-	let contents = fs::read_to_string(file).context("Unable to read file")?;
+	let contents = fs::read_to_string(file).map_err(AppError::read_file(file))?;
 
 	// Parse it
-	let (output, deps) = contents.split_once(':').context("File was missing `:`")?;
+	let (output, deps) = contents.split_once(':').ok_or_else(|| AppError::DepFileMissingColon {
+		dep_file_path: file.into(),
+	})?;
 	let output = output.trim().to_owned();
 	let deps = deps.split_whitespace().map(str::to_owned).collect();
 
@@ -494,8 +488,9 @@ fn rule_last_build_time(rule: &Rule<String>) -> Result<Option<SystemTime>, AppEr
 		.iter()
 		.map(|dep| {
 			let file = &dep.file();
-			let metadata = fs::metadata(file).with_context(|| format!("Unable to get metadata of {file:?}"))?;
-			Ok(self::file_modified_time(metadata))
+			fs::metadata(file)
+				.map(self::file_modified_time)
+				.map_err(AppError::read_file_metadata(file))
 		})
 		.reduce(|lhs, rhs| Ok(lhs?.min(rhs?)))
 		.transpose()
@@ -523,11 +518,9 @@ pub fn find_rule_for_file(file: &str, rules: &Rules) -> Result<Option<Rule<Strin
 			)?;
 
 			// Then try to match the output file to the file we need to create
-			if let Some(rule_pats) = self::match_expr(output, &file_cmpts, file)
-				.with_context(|| format!("Unable to match expression inside rule {:?}", rule.name))?
-			{
+			if let Some(rule_pats) = self::match_expr(output, &file_cmpts, file)? {
 				let rule = self::expand_rule(rule, &rules.aliases, &rule.aliases, &rule_pats)
-					.with_context(|| format!("Unable to expand rule {:?}", rule.name))?;
+					.map_err(AppError::expand_rule(&rule.name))?;
 				return Ok(Some(rule));
 			}
 		}

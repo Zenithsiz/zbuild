@@ -31,7 +31,7 @@ pub fn expand_rule(
 		Item::DepsFile(file) => expand_expr(file).map(Item::DepsFile),
 	};
 	let expand_rule_item = |item: &RuleItem<Expr>| {
-		anyhow::Ok(RuleItem {
+		Ok::<_, AppError>(RuleItem {
 			name: expand_expr(&item.name)?,
 			pats: item
 				.pats
