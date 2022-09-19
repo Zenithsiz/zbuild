@@ -4,13 +4,15 @@
 use {
 	crate::rules::{AliasOp, Expr, ExprCmpt},
 	anyhow::Context,
-	std::{borrow::Cow, collections::HashMap, path::PathBuf},
+	itertools::Itertools,
+	std::{collections::HashMap, path::PathBuf},
 };
 
 /// Expands an expression to it's components
 pub fn expand_expr(expr: &Expr, visitor: &mut impl Visitor) -> Result<Vec<ExprCmpt>, anyhow::Error> {
 	// Go through all components
-	expr.cmpts
+	let cmpts = expr
+		.cmpts
 		.iter()
 		.try_fold::<_, _, Result<_, _>>(vec![], |mut cmpts, cmpt| {
 			match cmpt {
@@ -36,7 +38,9 @@ pub fn expand_expr(expr: &Expr, visitor: &mut impl Visitor) -> Result<Vec<ExprCm
 						true => cmpts.extend(self::expand_expr(&expr, visitor)?),
 
 						// Else expand it to a string, then apply all operations
-						// TODO: Apply operations on the expression components without expanding to a string?
+						// Note: We expand to string even if we don't *need* to to ensure the user doesn't
+						//       add a dependency at some point, which needs a string output and suddenly
+						//       we can't resolve the operations.
 						false => {
 							// Expand
 							let value = self::expand_expr_string(&expr, visitor)?;
@@ -58,54 +62,38 @@ pub fn expand_expr(expr: &Expr, visitor: &mut impl Visitor) -> Result<Vec<ExprCm
 			};
 
 			Ok(cmpts)
+		})?;
+
+	// Then merge neighboring strings
+	// TODO: Do this in the above pass
+	let cmpts = cmpts
+		.into_iter()
+		.coalesce(|prev, next| match (prev, next) {
+			// Merge strings
+			(ExprCmpt::String(prev), ExprCmpt::String(next)) => Ok(ExprCmpt::String(prev + &next)),
+
+			// Everything else leave
+			(prev, next) => Err((prev, next)),
 		})
+		.collect();
+
+	Ok(cmpts)
 }
 
 /// Expands an expression into a string
-///
-/// Panics if `visitor` returns `Keep`.
-// TODO: Merge neighboring strings in output.
 pub fn expand_expr_string(expr: &Expr, visitor: &mut impl Visitor) -> Result<String, anyhow::Error> {
-	expr.cmpts
-		.iter()
-		.try_fold::<_, _, Result<_, _>>(String::new(), |mut string, cmpt| {
-			let s = match cmpt {
-				ExprCmpt::String(s) => Cow::Borrowed(s),
-				ExprCmpt::Pattern(pat) => match visitor.visit_pat(&pat.name) {
-					FlowControl::ExpandTo(s) => Cow::Owned(s),
-					FlowControl::Keep => panic!("Cannot keep unknown pattern when expanding to string"),
-					FlowControl::Error => anyhow::bail!("Unknown pattern {pat:?}"),
-				},
-				ExprCmpt::Alias(alias) => {
-					match visitor.visit_alias(&alias.name) {
-						FlowControl::ExpandTo(expr) => match alias.ops.is_empty() {
-							// If not, just recursively expand it
-							true => self::expand_expr_string(&expr, visitor).map(Cow::Owned)?,
+	let cmpts = self::expand_expr(expr, visitor)?.into_boxed_slice();
 
-							// Else expand it to a string, then apply all operations
-							// TODO: Apply operations on the expression components without expanding to a string?
-							false => {
-								// Expand
-								let value = self::expand_expr_string(&expr, visitor)?;
+	let s = match Box::<[_; 0]>::try_from(cmpts) {
+		Ok(box []) => "".to_owned(),
+		Err(cmpts) => match Box::<[_; 1]>::try_from(cmpts) {
+			Ok(box [ExprCmpt::String(s)]) => s,
+			Ok(box [cmpt]) => anyhow::bail!("Expression had unresolved aliases or patterns: {cmpt:?}"),
+			Err(cmpts) => anyhow::bail!("Expression had unresolved aliases or patterns: {cmpts:?}"),
+		},
+	};
 
-								// Then apply all
-								let value = alias.ops.iter().try_fold(value, |value, &op| {
-									self::expand_alias_op(op, value)
-										.with_context(|| format!("Unable to apply alias operator {op:?}"))
-								})?;
-
-								Cow::Owned(value)
-							},
-						},
-						FlowControl::Keep => panic!("Cannot keep unknown pattern when expanding to string"),
-						FlowControl::Error => anyhow::bail!("Unknown alias {alias:?}"),
-					}
-				},
-			};
-
-			string.push_str(&s);
-			Ok(string)
-		})
+	Ok(s)
 }
 
 /// Expands an alias operation on the value of that alias

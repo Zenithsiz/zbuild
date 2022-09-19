@@ -13,7 +13,8 @@
 	exit_status_error,
 	poll_ready,
 	hash_raw_entry,
-	decl_macro
+	decl_macro,
+	box_patterns
 )]
 
 // Modules
