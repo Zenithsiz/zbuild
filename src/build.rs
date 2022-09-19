@@ -111,7 +111,7 @@ impl Builder {
 	}
 
 	/// Builds a target without checking if the target is already being built.
-	// TODO: Refactor this a bit, it's a pretty big function
+	// TODO: Split this function onto smaller ones
 	#[async_recursion::async_recursion]
 	async fn build_unchecked(&self, target: &Target<String>, rules: &Rules) -> Result<BuildResult, AppError> {
 		// Find and expand the rule to use for this target
