@@ -4,7 +4,7 @@
 use {
 	super::{expand_expr, expand_expr::expand_expr_string},
 	crate::{
-		rules::{Command, DepItem, Expr, OutItem, Rule},
+		rules::{Command, DepItem, Exec, Expr, OutItem, Rule},
 		AppError,
 	},
 	std::collections::HashMap,
@@ -59,16 +59,19 @@ pub fn expand_rule(
 		.collect::<Result<_, AppError>>()?;
 	let output = rule.output.iter().map(expand_out_item).collect::<Result<_, _>>()?;
 	let deps = rule.deps.iter().map(expand_dep_item).collect::<Result<_, _>>()?;
-	let exec_cwd = rule.exec_cwd.as_ref().map(expand_expr).transpose()?;
-	let exec = rule
-		.exec
-		.iter()
-		.map(|command| {
-			Ok::<_, AppError>(Command {
-				args: command.args.iter().map(expand_expr).collect::<Result<_, _>>()?,
+	let exec = Exec {
+		cwd:  rule.exec.cwd.as_ref().map(expand_expr).transpose()?,
+		cmds: rule
+			.exec
+			.cmds
+			.iter()
+			.map(|cmd| {
+				Ok::<_, AppError>(Command {
+					args: cmd.args.iter().map(expand_expr).collect::<Result<_, _>>()?,
+				})
 			})
-		})
-		.collect::<Result<_, _>>()?;
+			.collect::<Result<_, _>>()?,
+	};
 
 
 	Ok(Rule {
@@ -76,7 +79,6 @@ pub fn expand_rule(
 		aliases,
 		output,
 		deps,
-		exec_cwd,
 		exec,
 	})
 }

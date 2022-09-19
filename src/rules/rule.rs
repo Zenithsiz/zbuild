@@ -22,11 +22,8 @@ pub struct Rule<T> {
 	/// Dependencies
 	pub deps: Vec<DepItem<T>>,
 
-	/// Execution working directory
-	pub exec_cwd: Option<T>,
-
 	/// Execution
-	pub exec: Vec<Command<T>>,
+	pub exec: Exec<T>,
 }
 
 impl Rule<Expr> {
@@ -39,25 +36,48 @@ impl Rule<Expr> {
 			.collect();
 		let output = rule.out.into_iter().map(OutItem::new).collect();
 		let deps = rule.deps.into_iter().map(DepItem::new).collect();
-		let exec_cwd = rule.exec_cwd.map(Expr::new);
-		let exec = rule
-			.exec
-			.into_iter()
-			.map(|command| Command {
-				args: command.args.into_iter().map(Expr::new).collect(),
-			})
-			.collect();
+		let exec = match rule.exec {
+			ast::Exec::OnlyCmds(cmds) => Exec {
+				cwd:  None,
+				cmds: cmds
+					.into_iter()
+					.map(|cmd| Command {
+						args: cmd.args.into_iter().map(Expr::new).collect(),
+					})
+					.collect(),
+			},
+			ast::Exec::Full { cwd, cmds } => Exec {
+				cwd:  cwd.map(Expr::new),
+				cmds: cmds
+					.into_iter()
+					.map(|cmd| Command {
+						args: cmd.args.into_iter().map(Expr::new).collect(),
+					})
+					.collect(),
+			},
+		};
 
 		Self {
 			name,
 			aliases,
 			output,
 			deps,
-			exec_cwd,
 			exec,
 		}
 	}
 }
+
+
+/// Exec
+#[derive(Clone, Debug)]
+pub struct Exec<T> {
+	/// Working directory
+	pub cwd: Option<T>,
+
+	/// Commands
+	pub cmds: Vec<Command<T>>,
+}
+
 
 /// Command
 #[derive(Clone, Debug)]

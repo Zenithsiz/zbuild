@@ -228,14 +228,36 @@ pub struct Rule {
 	#[serde(default)]
 	pub deps: Vec<DepItem>,
 
-	/// Execution working directory
-	#[serde(default)]
-	pub exec_cwd: Option<Expr>,
-
 	/// Execution
 	#[serde(default)]
-	pub exec: Vec<Command>,
+	pub exec: Exec,
 }
+
+/// Execution
+#[derive(Clone, Debug)]
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+pub enum Exec {
+	/// Only commands
+	OnlyCmds(Vec<Command>),
+
+	/// Full
+	Full {
+		/// working directory
+		#[serde(default)]
+		cwd: Option<Expr>,
+
+		/// Commands
+		cmds: Vec<Command>,
+	},
+}
+
+impl Default for Exec {
+	fn default() -> Self {
+		Self::OnlyCmds(vec![])
+	}
+}
+
 
 /// Command
 #[derive(Clone, Debug)]

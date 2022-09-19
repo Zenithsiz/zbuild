@@ -104,10 +104,10 @@ pub enum AppError {
 	},
 
 	/// Spawn command
-	#[error("Unable to spawn {command_fmt}")]
+	#[error("Unable to spawn {cmds_fmt}")]
 	SpawnCommand {
 		/// Command formatted
-		command_fmt: String,
+		cmds_fmt: String,
 
 		/// Underlying error
 		#[source]
@@ -115,10 +115,10 @@ pub enum AppError {
 	},
 
 	/// Wait for command
-	#[error("Unable to wait for {command_fmt}")]
+	#[error("Unable to wait for {cmds_fmt}")]
 	WaitCommand {
 		/// Command formatted
-		command_fmt: String,
+		cmds_fmt: String,
 
 		/// Underlying error
 		#[source]
@@ -126,10 +126,10 @@ pub enum AppError {
 	},
 
 	/// Command failed
-	#[error("Command failed {command_fmt}")]
+	#[error("Command failed {cmds_fmt}")]
 	CommandFailed {
 		/// Command formatted
-		command_fmt: String,
+		cmds_fmt: String,
 
 		/// Underlying error
 		#[source]
@@ -375,23 +375,23 @@ impl AppError {
 		}
 	}
 
-	pub fn spawn_command<T: fmt::Display>(command: &Command<T>) -> impl FnOnce(io::Error) -> Self + '_ {
+	pub fn spawn_command<T: fmt::Display>(cmds: &Command<T>) -> impl FnOnce(io::Error) -> Self + '_ {
 		move |err| Self::SpawnCommand {
-			command_fmt: command.args.iter().join(" "),
+			cmds_fmt: cmds.args.iter().join(" "),
 			err,
 		}
 	}
 
-	pub fn wait_command<T: fmt::Display>(command: &Command<T>) -> impl FnOnce(io::Error) -> Self + '_ {
+	pub fn wait_command<T: fmt::Display>(cmds: &Command<T>) -> impl FnOnce(io::Error) -> Self + '_ {
 		move |err| Self::WaitCommand {
-			command_fmt: command.args.iter().join(" "),
+			cmds_fmt: cmds.args.iter().join(" "),
 			err,
 		}
 	}
 
-	pub fn command_failed<T: fmt::Display>(command: &Command<T>) -> impl FnOnce(ExitStatusError) -> Self + '_ {
+	pub fn command_failed<T: fmt::Display>(cmds: &Command<T>) -> impl FnOnce(ExitStatusError) -> Self + '_ {
 		move |err| Self::CommandFailed {
-			command_fmt: command.args.iter().join(" "),
+			cmds_fmt: cmds.args.iter().join(" "),
 			err,
 		}
 	}

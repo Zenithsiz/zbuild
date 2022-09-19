@@ -14,7 +14,7 @@ pub use {
 	expr::{Expr, ExprCmpt},
 	item::{DepItem, OutItem},
 	pattern::{Pattern, PatternOp},
-	rule::{Command, Rule},
+	rule::{Command, Exec, Rule},
 	target::Target,
 };
 

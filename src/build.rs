@@ -376,8 +376,8 @@ impl Builder {
 	pub async fn rebuild_rule(&self, rule: &Rule<String>) -> Result<(), AppError> {
 		let _exec_guard = self.exec_semaphore.acquire().await.expect("Exec semaphore was closed");
 
-		for exec in &rule.exec {
-			let (program, args) = exec.args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
+		for cmds in &rule.exec.cmds {
+			let (program, args) = cmds.args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
 				rule_name: rule.name.clone(),
 			})?;
 
@@ -386,19 +386,19 @@ impl Builder {
 			cmd.args(args);
 
 			// Set the working directory, if we have any
-			if let Some(cwd) = &rule.exec_cwd {
+			if let Some(cwd) = &rule.exec.cwd {
 				cmd.current_dir(cwd);
 			}
 
 			// Then spawn it
 			tracing::info!(target: "zbuild_exec", "{} {}", program, args.join(" "));
 			cmd.spawn()
-				.map_err(AppError::spawn_command(exec))?
+				.map_err(AppError::spawn_command(cmds))?
 				.wait()
 				.await
-				.map_err(AppError::wait_command(exec))?
+				.map_err(AppError::wait_command(cmds))?
 				.exit_ok()
-				.map_err(AppError::command_failed(exec))?;
+				.map_err(AppError::command_failed(cmds))?;
 		}
 
 
