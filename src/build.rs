@@ -135,9 +135,7 @@ impl Builder {
 					.rules
 					.get(rule)
 					.with_context(|| format!("Unknown rule {rule:?}"))?;
-				let global_expr_visitor = expand_expr::GlobalVisitor::new(&rules.aliases);
-				let rule_output_expr_visitor = expand_expr::RuleOutputVisitor::new(global_expr_visitor, &rule.aliases);
-				self::expand_rule(rule, rule_output_expr_visitor, pats)
+				self::expand_rule(rule, &rules.aliases, &rule.aliases, pats)
 					.with_context(|| format!("Unable to expand rule {:?}", rule.name))?
 			},
 		};
@@ -498,20 +496,20 @@ fn file_modified_time(metadata: fs::Metadata) -> SystemTime {
 // TODO: Not make this `O(N)` for the number of rules.
 pub fn find_rule_for_file(file: &str, rules: &Rules) -> Result<Option<Rule<String>>, anyhow::Error> {
 	for rule in rules.rules.values() {
-		let global_expr_visitor = expand_expr::GlobalVisitor::new(&rules.aliases);
-		let mut rule_output_expr_visitor = expand_expr::RuleOutputVisitor::new(global_expr_visitor, &rule.aliases);
-
 		for output in &rule.output {
 			// Expand all expressions in the output file
 			// Note: This doesn't expand patterns, so we can match those later
 			let output = output.file();
-			let file_cmpts = self::expand_expr(output, &mut rule_output_expr_visitor)?;
+			let file_cmpts = self::expand_expr(
+				output,
+				&mut expand_expr::RuleOutputVisitor::new(&rules.aliases, &rule.aliases),
+			)?;
 
 			// Then try to match the output file to the file we need to create
-			if let Some(pats) = self::match_expr(&file_cmpts, file)
+			if let Some(rule_pats) = self::match_expr(&file_cmpts, file)
 				.with_context(|| format!("Unable to match expression inside rule {:?}", rule.name))?
 			{
-				let rule = self::expand_rule(rule, rule_output_expr_visitor, &pats)
+				let rule = self::expand_rule(rule, &rules.aliases, &rule.aliases, &rule_pats)
 					.with_context(|| format!("Unable to expand rule {:?}", rule.name))?;
 				return Ok(Some(rule));
 			}

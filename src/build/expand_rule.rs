@@ -10,12 +10,16 @@ use {
 /// Expands a rule of all it's aliases and patterns
 pub fn expand_rule(
 	rule: &Rule<Expr>,
-	rule_output_expr_visitor: expand_expr::RuleOutputVisitor,
-	pats: &HashMap<String, String>,
+	global_aliases: &HashMap<String, Expr>,
+	rule_aliases: &HashMap<String, Expr>,
+	rule_pats: &HashMap<String, String>,
 ) -> Result<Rule<String>, anyhow::Error> {
 	// Helper function to expand an expression
 	let expand_expr = for<'a> move |expr: &'a Expr| -> anyhow::Result<String> {
-		self::expand_expr_string(expr, &mut expand_expr::RuleVisitor::new(rule_output_expr_visitor, pats))
+		self::expand_expr_string(
+			expr,
+			&mut expand_expr::RuleVisitor::new(global_aliases, rule_aliases, rule_pats),
+		)
 	};
 
 	// Helper function to expand items
