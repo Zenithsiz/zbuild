@@ -32,7 +32,6 @@ pub use self::{ast::Ast, error::AppError, rules::Rules};
 
 // Imports
 use {
-	anyhow::Context,
 	args::Args,
 	clap::StructOpt,
 	futures::{stream::FuturesUnordered, TryStreamExt},
@@ -122,7 +121,7 @@ async fn main() -> Result<(), anyhow::Error> {
 				builder
 					.build_expr(target, rules)
 					.await
-					.with_context(|| format!("Unable to build {target:?}"))
+					.map_err(AppError::build_target(target))
 			}
 		})
 		.collect::<FuturesUnordered<_>>()

@@ -1,12 +1,16 @@
 //! Target
 
-use {
-	itertools::Itertools,
-	std::hash::{Hash, Hasher},
-};
-
 // Imports
-use {super::Expr, crate::ast, std::collections::HashMap};
+use {
+	super::Expr,
+	crate::ast,
+	itertools::Itertools,
+	std::{
+		collections::HashMap,
+		fmt,
+		hash::{Hash, Hasher},
+	},
+};
 
 /// Target
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -52,6 +56,30 @@ impl Hash for Target<String> {
 					pat.hash(state);
 					value.hash(state);
 				}
+			},
+		}
+	}
+}
+
+
+impl<T: fmt::Display> fmt::Display for Target<T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Target::File { file } => write!(f, "file: {file}"),
+			Target::Rule { rule, pats } => {
+				write!(f, "rule: {rule}")?;
+
+				if !pats.is_empty() {
+					write!(f, " (")?;
+
+					for (pat, value) in pats {
+						write!(f, "{pat}={value}, ")?;
+					}
+
+					write!(f, ")")?;
+				}
+
+				Ok(())
 			},
 		}
 	}

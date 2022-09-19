@@ -7,6 +7,7 @@ use {
 		pattern::{Pattern, PatternOp},
 	},
 	crate::ast,
+	std::fmt,
 };
 
 /// Expression
@@ -65,6 +66,26 @@ impl Expr {
 	pub fn string(value: String) -> Self {
 		Self {
 			cmpts: vec![ExprCmpt::String(value)],
+		}
+	}
+}
+
+impl fmt::Display for Expr {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		for cmpt in &self.cmpts {
+			write!(f, "{cmpt}")?;
+		}
+
+		Ok(())
+	}
+}
+
+impl fmt::Display for ExprCmpt {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			ExprCmpt::String(s) => write!(f, "{s}"),
+			ExprCmpt::Pattern(pat) => write!(f, "{pat}"),
+			ExprCmpt::Alias(alias) => write!(f, "{alias}"),
 		}
 	}
 }

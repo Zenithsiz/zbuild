@@ -1,11 +1,15 @@
 //! Errors
 
 // Imports
-use std::{io, path::PathBuf};
+use {
+	crate::rules::{AliasOp, Target},
+	std::{fmt, io, path::PathBuf},
+};
 
 /// App error
 ///
 /// Error that will be bubbled up to main when a fatal error occurs
+// TODO: Add `Clone`
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
 	/// Get current directory
@@ -75,6 +79,59 @@ pub enum AppError {
 	)]
 	ZBuildNotFound,
 
+	/// Path had no parent
+	#[error("Path had no parent directory {path:?}")]
+	PathParent {
+		/// Path that had no parent
+		path: PathBuf,
+	},
+
+	/// Build target
+	#[error("Unable to build target {target_fmt}")]
+	BuildTarget {
+		/// Formatted target
+		target_fmt: String,
+
+		/// Underlying error
+		#[source]
+		err: Box<Self>,
+	},
+
+	/// Unknown alias
+	#[error("Unknown alias {alias_name}")]
+	UnknownAlias {
+		/// Alias name
+		alias_name: String,
+	},
+
+	/// Unknown pattern
+	#[error("Unknown pattern {pattern_name}")]
+	UnknownPattern {
+		/// Pattern name
+		pattern_name: String,
+	},
+
+	/// Unresolved alias or patterns
+	#[error("Expression had unresolved alias or patterns: {expr_fmt} ({expr_cmpts_fmt:?})")]
+	UnresolvedAliasOrPats {
+		/// Formatted expression
+		expr_fmt: String,
+
+		/// Components
+		expr_cmpts_fmt: Vec<String>,
+	},
+
+	/// Alias operation
+	#[error("Unable to apply alias operation `{op}`")]
+	AliasOp {
+		/// Operation
+		op: AliasOp,
+
+		/// Underlying error
+		#[source]
+		err: Box<Self>,
+	},
+
 	/// Other error
 	// TODO: Remove this once we're ported all errors
 	#[error(transparent)]
@@ -120,5 +177,19 @@ impl AppError {
 
 	pub fn get_default_jobs() -> impl FnOnce(io::Error) -> Self {
 		move |err| Self::GetDefaultJobs { err }
+	}
+
+	pub fn alias_op(op: impl Into<AliasOp>) -> impl FnOnce(AppError) -> Self {
+		move |err| Self::AliasOp {
+			op:  op.into(),
+			err: Box::new(err),
+		}
+	}
+
+	pub fn build_target<T: fmt::Display>(target: &Target<T>) -> impl FnOnce(AppError) -> Self + '_ {
+		move |err| Self::BuildTarget {
+			target_fmt: target.to_string(),
+			err:        Box::new(err),
+		}
 	}
 }

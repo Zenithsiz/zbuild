@@ -2,14 +2,16 @@
 
 // Imports
 use {
-	crate::rules::{AliasOp, Expr, ExprCmpt},
-	anyhow::Context,
+	crate::{
+		rules::{AliasOp, Expr, ExprCmpt},
+		AppError,
+	},
 	itertools::Itertools,
 	std::{collections::HashMap, path::PathBuf},
 };
 
 /// Expands an expression to it's components
-pub fn expand_expr(expr: &Expr, visitor: &mut impl Visitor) -> Result<Vec<ExprCmpt>, anyhow::Error> {
+pub fn expand_expr(expr: &Expr, visitor: &mut impl Visitor) -> Result<Vec<ExprCmpt>, AppError> {
 	// Go through all components
 	let cmpts = expr
 		.cmpts
@@ -27,7 +29,10 @@ pub fn expand_expr(expr: &Expr, visitor: &mut impl Visitor) -> Result<Vec<ExprCm
 
 					// Else keep on Keep and error on Error
 					FlowControl::Keep => cmpts.push(cmpt.clone()),
-					FlowControl::Error => anyhow::bail!("Unknown pattern {pat:?}"),
+					FlowControl::Error =>
+						return Err(AppError::UnknownPattern {
+							pattern_name: pat.name.clone(),
+						}),
 				},
 
 				// If it's an alias, we visit and then expand it
@@ -47,8 +52,7 @@ pub fn expand_expr(expr: &Expr, visitor: &mut impl Visitor) -> Result<Vec<ExprCm
 
 							// Then apply all
 							let value = alias.ops.iter().try_fold(value, |value, &op| {
-								self::expand_alias_op(op, value)
-									.with_context(|| format!("Unable to apply alias operator {op:?}"))
+								self::expand_alias_op(op, value).map_err(AppError::alias_op(op))
 							})?;
 
 							cmpts.push(ExprCmpt::String(value))
@@ -57,7 +61,10 @@ pub fn expand_expr(expr: &Expr, visitor: &mut impl Visitor) -> Result<Vec<ExprCm
 
 					// Else keep on Keep and error on Error
 					FlowControl::Keep => cmpts.push(cmpt.clone()),
-					FlowControl::Error => anyhow::bail!("Unknown alias {alias:?}"),
+					FlowControl::Error =>
+						return Err(AppError::UnknownAlias {
+							alias_name: alias.name.clone(),
+						}),
 				},
 			};
 
@@ -81,28 +88,33 @@ pub fn expand_expr(expr: &Expr, visitor: &mut impl Visitor) -> Result<Vec<ExprCm
 }
 
 /// Expands an expression into a string
-pub fn expand_expr_string(expr: &Expr, visitor: &mut impl Visitor) -> Result<String, anyhow::Error> {
+pub fn expand_expr_string(expr: &Expr, visitor: &mut impl Visitor) -> Result<String, AppError> {
 	let cmpts = self::expand_expr(expr, visitor)?.into_boxed_slice();
 
-	let s = match Box::<[_; 0]>::try_from(cmpts) {
-		Ok(box []) => "".to_owned(),
+	let res = match Box::<[_; 0]>::try_from(cmpts) {
+		Ok(box []) => Ok("".to_owned()),
 		Err(cmpts) => match Box::<[_; 1]>::try_from(cmpts) {
-			Ok(box [ExprCmpt::String(s)]) => s,
-			Ok(box [cmpt]) => anyhow::bail!("Expression had unresolved aliases or patterns: {cmpt:?}"),
-			Err(cmpts) => anyhow::bail!("Expression had unresolved aliases or patterns: {cmpts:?}"),
+			Ok(box [ExprCmpt::String(s)]) => Ok(s),
+			Ok(box [cmpt]) => Err(vec![cmpt]),
+			Err(cmpts) => Err(cmpts.into_vec()),
 		},
 	};
 
-	Ok(s)
+	res.map_err(|cmpts| AppError::UnresolvedAliasOrPats {
+		expr_fmt:       expr.to_string(),
+		expr_cmpts_fmt: cmpts.into_iter().map(|cmpt| cmpt.to_string()).collect(),
+	})
 }
 
 /// Expands an alias operation on the value of that alias
-fn expand_alias_op(op: AliasOp, value: String) -> Result<String, anyhow::Error> {
+fn expand_alias_op(op: AliasOp, value: String) -> Result<String, AppError> {
 	let value = match op {
 		AliasOp::DirName => {
 			// Get the path and try to pop the last segment
 			let mut path = PathBuf::from(value);
-			anyhow::ensure!(path.pop(), "Path {path:?} had no directory name");
+			if !path.pop() {
+				return Err(AppError::PathParent { path });
+			}
 
 			// Then convert it back to a string
 			// Note: This should technically never fail, since the path was originally

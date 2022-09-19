@@ -68,7 +68,7 @@ impl Builder {
 	}
 
 	/// Builds an expression-encoded target
-	pub async fn build_expr(&self, target: &Target<Expr>, rules: &Rules) -> Result<BuildResult, anyhow::Error> {
+	pub async fn build_expr(&self, target: &Target<Expr>, rules: &Rules) -> Result<BuildResult, AppError> {
 		// Expand the target
 		let global_expr_visitor = expand_expr::GlobalVisitor::new(&rules.aliases);
 		let target = self::expand_target(target, global_expr_visitor).context("Unable to expand target")?;
@@ -78,7 +78,7 @@ impl Builder {
 	}
 
 	/// Builds a target
-	pub async fn build(&self, target: &Target<String>, rules: &Rules) -> Result<BuildResult, anyhow::Error> {
+	pub async fn build(&self, target: &Target<String>, rules: &Rules) -> Result<BuildResult, AppError> {
 		// Check if we need to build and create a new entry, if so
 		let (build_status, do_build) = match self.targets.entry(target.clone()) {
 			// If there's already a build status, check it
@@ -106,14 +106,14 @@ impl Builder {
 			false => build_status
 				.await_built()
 				.await
-				.map_err(|()| anyhow::anyhow!("Build failed")),
+				.map_err(|()| anyhow::anyhow!("Build failed").into()),
 		}
 	}
 
 	/// Builds a target without checking if the target is already being built.
 	// TODO: Refactor this a bit, it's a pretty big function
 	#[async_recursion::async_recursion]
-	async fn build_unchecked(&self, target: &Target<String>, rules: &Rules) -> Result<BuildResult, anyhow::Error> {
+	async fn build_unchecked(&self, target: &Target<String>, rules: &Rules) -> Result<BuildResult, AppError> {
 		// Find and expand the rule to use for this target
 		let rule = match &target {
 			// If we got a file, check which rule can make it
@@ -152,10 +152,11 @@ impl Builder {
 			.cartesian_product(&rule.deps)
 			.find(|(out, dep)| out.file() == dep.file())
 		{
-			anyhow::bail!(
+			return Err(anyhow::anyhow!(
 				"Rule {:?} cannot contain a dependency ({dep:?}) as an output ({out:?})",
 				rule.name
-			);
+			)
+			.into());
 		}
 
 

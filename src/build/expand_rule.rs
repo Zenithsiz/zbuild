@@ -3,7 +3,10 @@
 // Imports
 use {
 	super::{expand_expr, expand_expr::expand_expr_string},
-	crate::rules::{Command, Expr, Item, Rule, RuleItem},
+	crate::{
+		rules::{Command, Expr, Item, Rule, RuleItem},
+		AppError,
+	},
 	std::collections::HashMap,
 };
 
@@ -15,7 +18,7 @@ pub fn expand_rule(
 	rule_pats: &HashMap<String, String>,
 ) -> Result<Rule<String>, anyhow::Error> {
 	// Helper function to expand an expression
-	let expand_expr = for<'a> move |expr: &'a Expr| -> anyhow::Result<String> {
+	let expand_expr = for<'a> move |expr: &'a Expr| -> Result<String, AppError> {
 		self::expand_expr_string(
 			expr,
 			&mut expand_expr::RuleVisitor::new(global_aliases, rule_aliases, rule_pats),
