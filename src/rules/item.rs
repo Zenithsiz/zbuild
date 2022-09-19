@@ -75,11 +75,11 @@ impl DepItem<Expr> {
 			ast::DepItem::Static { item } => match item {
 				ast::StaticDepItem::File(file) => Self::File {
 					file:      Expr::new(file),
-					is_static: false,
+					is_static: true,
 				},
 				ast::StaticDepItem::DepsFile { deps_file } => Self::DepsFile {
 					file:      Expr::new(deps_file),
-					is_static: false,
+					is_static: true,
 				},
 			},
 		}
