@@ -17,6 +17,7 @@ use {
 	crate::{
 		rules::{Expr, Item, Rule, RuleItem, Target},
 		util,
+		AppError,
 		Rules,
 	},
 	anyhow::Context,
@@ -188,7 +189,7 @@ impl Builder {
 					Dep::Regular(dep_item) | Dep::Static(dep_item) | Dep::Output(dep_item) => Some(DepFile {
 						file:   dep_item.file(),
 						exists: fs::try_exists(dep_item.file())
-							.with_context(|| format!("Unable to check if {} exists", dep_item.file()))?,
+							.map_err(AppError::check_file_exists(dep_item.file()))?,
 					}),
 					Dep::Rule(_) => None,
 				};

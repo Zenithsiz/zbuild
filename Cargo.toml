@@ -17,6 +17,7 @@ tracing-subscriber = {version = "0.3.15", features = ["env-filter"]}
 
 # Error handling
 anyhow = "1.0.61"
+thiserror = "1.0.35"
 
 # Serde
 serde = {version = "1.0.143", features = ["derive"]}

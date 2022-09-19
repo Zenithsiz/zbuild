@@ -6,6 +6,7 @@
 		"filetime",
 		"itertools",
 		"mapref",
+		"thiserror",
 		"Zbuild"
 	]
 }
