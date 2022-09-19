@@ -516,7 +516,7 @@ pub fn find_rule_for_file(file: &str, rules: &Rules) -> Result<Option<Rule<Strin
 			)?;
 
 			// Then try to match the output file to the file we need to create
-			if let Some(rule_pats) = self::match_expr(&file_cmpts, file)
+			if let Some(rule_pats) = self::match_expr(output, &file_cmpts, file)
 				.with_context(|| format!("Unable to match expression inside rule {:?}", rule.name))?
 			{
 				let rule = self::expand_rule(rule, &rules.aliases, &rule.aliases, &rule_pats)

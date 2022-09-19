@@ -2,7 +2,10 @@
 
 // Imports
 use {
-	crate::rules::{ExprCmpt, PatternOp},
+	crate::{
+		rules::{Expr, ExprCmpt, PatternOp},
+		AppError,
+	},
 	std::collections::HashMap,
 };
 
@@ -11,16 +14,21 @@ use {
 /// Returns error if more than 1 pattern is found.
 ///
 /// Panics if any aliases are found
-pub fn match_expr(mut cmpts: &[ExprCmpt], mut value: &str) -> Result<Option<HashMap<String, String>>, anyhow::Error> {
+pub fn match_expr(
+	expr: &Expr,
+	cmpts: &[ExprCmpt],
+	mut value: &str,
+) -> Result<Option<HashMap<String, String>>, AppError> {
 	let mut patterns = HashMap::new();
 
 	// Until `rhs` has anything to match left
+	let mut cur_cmpts = cmpts;
 	loop {
-		match cmpts {
+		match cur_cmpts {
 			// If we start with a string, strip the prefix off
 			[ExprCmpt::String(lhs), rest @ ..] => match value.strip_prefix(lhs) {
 				Some(new_rhs) => {
-					cmpts = rest;
+					cur_cmpts = rest;
 					value = new_rhs;
 				},
 				None => return Ok(None),
@@ -29,7 +37,7 @@ pub fn match_expr(mut cmpts: &[ExprCmpt], mut value: &str) -> Result<Option<Hash
 			// If we end with a string, strip the suffix off
 			[rest @ .., ExprCmpt::String(lhs)] => match value.strip_suffix(lhs) {
 				Some(new_rhs) => {
-					cmpts = rest;
+					cur_cmpts = rest;
 					value = new_rhs;
 				},
 				None => return Ok(None),
@@ -56,13 +64,16 @@ pub fn match_expr(mut cmpts: &[ExprCmpt], mut value: &str) -> Result<Option<Hash
 
 				// If we get here, match everything
 				patterns.insert(pat.name.clone(), value.to_owned());
-				cmpts = &[];
+				cur_cmpts = &[];
 				value = "";
 			},
 
 			// If we have patterns on both sides, reject
-			[ExprCmpt::Pattern(lhs), .., ExprCmpt::Pattern(rhs)] =>
-				anyhow::bail!("Expression had more than 2 patterns: {lhs:?} and {rhs:?}"),
+			[ExprCmpt::Pattern(_), .., ExprCmpt::Pattern(_)] =>
+				return Err(AppError::MatchExprTooManyPats {
+					expr_fmt:       expr.to_string(),
+					expr_cmpts_fmt: cmpts.iter().map(ExprCmpt::to_string).collect(),
+				}),
 			// If we have aliases on any side, reject
 			[ExprCmpt::Alias(alias), ..] | [.., ExprCmpt::Alias(alias)] =>
 				unreachable!("Cannot match unexpanded alias: {alias:?}"),

@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	crate::rules::{AliasOp, Target},
+	crate::rules::{AliasOp, Expr, Target},
 	std::{fmt, io, path::PathBuf},
 };
 
@@ -97,6 +97,17 @@ pub enum AppError {
 		err: Box<Self>,
 	},
 
+	/// Expand expression
+	#[error("Unable to expand expression {expr_fmt}")]
+	ExpandExpr {
+		/// Formatted expression
+		expr_fmt: String,
+
+		/// Underlying error
+		#[source]
+		err: Box<Self>,
+	},
+
 	/// Unknown alias
 	#[error("Unknown alias {alias_name}")]
 	UnknownAlias {
@@ -114,6 +125,16 @@ pub enum AppError {
 	/// Unresolved alias or patterns
 	#[error("Expression had unresolved alias or patterns: {expr_fmt} ({expr_cmpts_fmt:?})")]
 	UnresolvedAliasOrPats {
+		/// Formatted expression
+		expr_fmt: String,
+
+		/// Components
+		expr_cmpts_fmt: Vec<String>,
+	},
+
+	/// Match expression had 2 or moore patterns
+	#[error("Match expression had 2 or more patterns: {expr_fmt} ({expr_cmpts_fmt:?})")]
+	MatchExprTooManyPats {
 		/// Formatted expression
 		expr_fmt: String,
 
@@ -190,6 +211,13 @@ impl AppError {
 		move |err| Self::BuildTarget {
 			target_fmt: target.to_string(),
 			err:        Box::new(err),
+		}
+	}
+
+	pub fn expand_expr(expr: &Expr) -> impl FnOnce(AppError) -> Self + '_ {
+		move |err| Self::ExpandExpr {
+			expr_fmt: expr.to_string(),
+			err:      Box::new(err),
 		}
 	}
 }

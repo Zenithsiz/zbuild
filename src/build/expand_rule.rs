@@ -16,7 +16,7 @@ pub fn expand_rule(
 	global_aliases: &HashMap<String, Expr>,
 	rule_aliases: &HashMap<String, Expr>,
 	rule_pats: &HashMap<String, String>,
-) -> Result<Rule<String>, anyhow::Error> {
+) -> Result<Rule<String>, AppError> {
 	// Helper function to expand an expression
 	let expand_expr = for<'a> move |expr: &'a Expr| -> Result<String, AppError> {
 		self::expand_expr_string(
@@ -37,7 +37,7 @@ pub fn expand_rule(
 				.pats
 				.iter()
 				.map(|(pat, expr)| Ok((expand_expr(pat)?, expand_expr(expr)?)))
-				.collect::<Result<_, anyhow::Error>>()?,
+				.collect::<Result<_, AppError>>()?,
 		})
 	};
 
@@ -45,7 +45,7 @@ pub fn expand_rule(
 		.aliases
 		.iter()
 		.map(|(name, expr)| try { (name.clone(), expand_expr(expr)?) })
-		.collect::<Result<_, anyhow::Error>>()?;
+		.collect::<Result<_, AppError>>()?;
 	let output = rule.output.iter().map(expand_item).collect::<Result<_, _>>()?;
 	let deps = rule.deps.iter().map(expand_item).collect::<Result<_, _>>()?;
 	let static_deps = rule.static_deps.iter().map(expand_item).collect::<Result<_, _>>()?;
@@ -55,7 +55,7 @@ pub fn expand_rule(
 		.exec
 		.iter()
 		.map(|command| {
-			Ok::<_, anyhow::Error>(Command {
+			Ok::<_, AppError>(Command {
 				args: command.args.iter().map(expand_expr).collect::<Result<_, _>>()?,
 			})
 		})
