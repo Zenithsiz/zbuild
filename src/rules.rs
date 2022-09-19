@@ -12,7 +12,7 @@ mod target;
 pub use {
 	alias::{Alias, AliasOp},
 	expr::{Expr, ExprCmpt},
-	item::{Item, RuleItem},
+	item::{DepItem, OutItem},
 	pattern::{Pattern, PatternOp},
 	rule::{Command, Rule},
 	target::Target,

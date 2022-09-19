@@ -4,7 +4,7 @@
 use {
 	super::{expand_expr, expand_expr::expand_expr_string},
 	crate::{
-		rules::{Command, Expr, Item, Rule, RuleItem},
+		rules::{Command, DepItem, Expr, OutItem, Rule},
 		AppError,
 	},
 	std::collections::HashMap,
@@ -25,20 +25,31 @@ pub fn expand_rule(
 		)
 	};
 
-	// Helper function to expand items
-	let expand_item = |item: &Item<Expr>| match item {
-		Item::File(file) => expand_expr(file).map(Item::File),
-		Item::DepsFile(file) => expand_expr(file).map(Item::DepsFile),
+	// Helper functions to expand items
+	let expand_out_item = |item: &OutItem<Expr>| match item {
+		OutItem::File { file } => Ok::<_, AppError>(OutItem::File {
+			file: expand_expr(file)?,
+		}),
+		OutItem::DepsFile { file } => Ok::<_, AppError>(OutItem::DepsFile {
+			file: expand_expr(file)?,
+		}),
 	};
-	let expand_rule_item = |item: &RuleItem<Expr>| {
-		Ok::<_, AppError>(RuleItem {
-			name: expand_expr(&item.name)?,
-			pats: item
-				.pats
+	let expand_dep_item = |item: &DepItem<Expr>| match *item {
+		DepItem::File { ref file, is_static } => Ok::<_, AppError>(DepItem::File {
+			file: expand_expr(file)?,
+			is_static,
+		}),
+		DepItem::DepsFile { ref file, is_static } => Ok::<_, AppError>(DepItem::DepsFile {
+			file: expand_expr(file)?,
+			is_static,
+		}),
+		DepItem::Rule { ref name, ref pats } => Ok::<_, AppError>(DepItem::Rule {
+			name: expand_expr(name)?,
+			pats: pats
 				.iter()
 				.map(|(pat, expr)| Ok((expand_expr(pat)?, expand_expr(expr)?)))
 				.collect::<Result<_, AppError>>()?,
-		})
+		}),
 	};
 
 	let aliases = rule
@@ -46,10 +57,8 @@ pub fn expand_rule(
 		.iter()
 		.map(|(name, expr)| try { (name.clone(), expand_expr(expr)?) })
 		.collect::<Result<_, AppError>>()?;
-	let output = rule.output.iter().map(expand_item).collect::<Result<_, _>>()?;
-	let deps = rule.deps.iter().map(expand_item).collect::<Result<_, _>>()?;
-	let static_deps = rule.static_deps.iter().map(expand_item).collect::<Result<_, _>>()?;
-	let rule_deps = rule.rule_deps.iter().map(expand_rule_item).collect::<Result<_, _>>()?;
+	let output = rule.output.iter().map(expand_out_item).collect::<Result<_, _>>()?;
+	let deps = rule.deps.iter().map(expand_dep_item).collect::<Result<_, _>>()?;
 	let exec_cwd = rule.exec_cwd.as_ref().map(expand_expr).transpose()?;
 	let exec = rule
 		.exec
@@ -67,8 +76,6 @@ pub fn expand_rule(
 		aliases,
 		output,
 		deps,
-		static_deps,
-		rule_deps,
 		exec_cwd,
 		exec,
 	})

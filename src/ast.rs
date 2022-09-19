@@ -23,11 +23,11 @@ pub struct Ast {
 	pub rules: HashMap<String, Rule>,
 }
 
-/// Item
+/// Output Item
 #[derive(Clone, Debug)]
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
-pub enum Item {
+pub enum OutItem {
 	/// File
 	File(Expr),
 
@@ -35,16 +35,41 @@ pub enum Item {
 	DepsFile { deps_file: Expr },
 }
 
-/// Rule item
+/// Dependency Item
 #[derive(Clone, Debug)]
 #[derive(serde::Deserialize)]
-pub struct RuleItem {
-	/// Name
-	pub name: Expr,
+#[serde(untagged)]
+pub enum DepItem {
+	/// File
+	File(Expr),
 
-	/// Patterns
-	#[serde(default)]
-	pub pats: HashMap<Expr, Expr>,
+	/// Rule
+	Rule {
+		rule: Expr,
+		#[serde(default)]
+		pats: HashMap<Expr, Expr>,
+	},
+
+	/// Dependencies file
+	DepsFile { deps_file: Expr },
+
+	/// Static dependency
+	Static {
+		#[serde(rename = "static")]
+		item: StaticDepItem,
+	},
+}
+
+/// Static Dependency Item
+#[derive(Clone, Debug)]
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+pub enum StaticDepItem {
+	/// File
+	File(Expr),
+
+	/// Dependencies file
+	DepsFile { deps_file: Expr },
 }
 
 /// Target
@@ -197,19 +222,11 @@ pub struct Rule {
 
 	/// Output items
 	#[serde(default)]
-	pub out: Vec<Item>,
+	pub out: Vec<OutItem>,
 
 	/// Dependencies
 	#[serde(default)]
-	pub deps: Vec<Item>,
-
-	/// Static dependencies
-	#[serde(default)]
-	pub static_deps: Vec<Item>,
-
-	/// Rule dependencies
-	#[serde(default)]
-	pub rule_deps: Vec<RuleItem>,
+	pub deps: Vec<DepItem>,
 
 	/// Execution working directory
 	#[serde(default)]

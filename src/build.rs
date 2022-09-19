@@ -15,7 +15,7 @@ use {
 		match_expr::match_expr,
 	},
 	crate::{
-		rules::{Expr, Item, Rule, RuleItem, Target},
+		rules::{DepItem, Expr, OutItem, Rule, Target},
 		util,
 		AppError,
 		Rules,
@@ -23,8 +23,8 @@ use {
 	dashmap::{mapref::entry::Entry as DashMapEntry, DashMap},
 	filetime::FileTime,
 	futures::{pin_mut, stream::FuturesUnordered, TryStreamExt},
-	itertools::Itertools,
 	std::{
+		collections::HashMap,
 		fs,
 		future::Future,
 		mem,
@@ -135,126 +135,145 @@ impl Builder {
 		};
 		tracing::trace!(?target, ?rule, "Found rule");
 
-		// Ensure no dependencies are also outputs
-		if let Some((out, dep)) = rule
-			.output
-			.iter()
-			.cartesian_product(&rule.deps)
-			.find(|(out, dep)| out.file() == dep.file())
-		{
-			return Err(AppError::RuleRecursiveOutput {
-				rule_name:       rule.name.clone(),
-				output_item_fmt: out.to_string(),
-				dep_item_fmt:    dep.to_string(),
-			});
-		}
-
+		/// Dependency
 		#[derive(Clone, Copy, Debug)]
 		enum Dep<'a> {
-			Regular(&'a Item<String>),
-			Static(&'a Item<String>),
-			Output(&'a Item<String>),
-			Rule(&'a RuleItem<String>),
+			/// File
+			File {
+				file:        &'a str,
+				is_static:   bool,
+				is_dep_file: bool,
+				is_output:   bool,
+				exists:      bool,
+			},
+
+			/// Rule
+			Rule {
+				name: &'a str,
+				pats: &'a HashMap<String, String>,
+			},
 		}
 
-		// Then build all dependencies, also output dependencies, if built
-		let deps_res = util::chain!(
-			rule.deps.iter().map(Dep::Regular),
-			rule.static_deps.iter().map(Dep::Static),
-			rule.output.iter().filter_map(|out| match out {
-				Item::File(_) => None,
-				Item::DepsFile(_) => Some(Dep::Output(out)),
-			}),
-			rule.rule_deps.iter().map(Dep::Rule),
-		)
-		.map(|dep| {
-			let rule = &rule;
-			async move {
-				struct DepFile<'a> {
-					file:   &'a String,
-					exists: bool,
-				}
+		// Gather all normal dependencies
+		let deps = rule
+			.deps
+			.iter()
+			.map(|dep| match *dep {
+				DepItem::File { ref file, is_static } => Ok(Dep::File {
+					file,
+					is_static,
+					is_dep_file: false,
+					is_output: false,
+					exists: fs::try_exists(file).map_err(AppError::check_file_exists(file))?,
+				}),
+				DepItem::DepsFile { ref file, is_static } => Ok(Dep::File {
+					file,
+					is_static,
+					is_dep_file: true,
+					is_output: false,
+					exists: fs::try_exists(file).map_err(AppError::check_file_exists(file))?,
+				}),
+				DepItem::Rule { ref name, ref pats } => Ok(Dep::Rule { name, pats }),
+			})
+			.collect::<Result<Vec<_>, _>>()?;
 
-				let dep_file = match dep {
-					Dep::Regular(dep_item) | Dep::Static(dep_item) | Dep::Output(dep_item) => Some(DepFile {
-						file:   dep_item.file(),
-						exists: fs::try_exists(dep_item.file())
-							.map_err(AppError::check_file_exists(dep_item.file()))?,
-					}),
-					Dep::Rule(_) => None,
-				};
+		// And all output dependencies
+		let out_deps = rule
+			.output
+			.iter()
+			.map(|out| match out {
+				OutItem::File { .. } => Ok(None),
+				OutItem::DepsFile { file } => Ok(Some(Dep::File {
+					file,
+					is_static: false,
+					is_dep_file: true,
+					is_output: true,
+					exists: fs::try_exists(file).map_err(AppError::check_file_exists(file))?,
+				})),
+			})
+			.filter_map(|res| res.transpose())
+			.collect::<Result<Vec<_>, _>>()?;
 
-				// Build the dependency
-				let dep_result = match (dep, &dep_file) {
-					// If we're static and it exists or is output, don't do anything
-					(Dep::Static(_), Some(DepFile { exists: true, .. })) | (Dep::Output(_), Some(_)) => None,
+		// Then build all dependencies, as well as any dependency files
+		let deps_res = util::chain!(deps, out_deps,)
+			.map(|dep| {
+				tracing::trace!(?dep, ?rule.name, "Building dependency of rule");
+				let rule = &rule;
+				async move {
+					// Get the target to build
+					let dep_target = match dep {
+						// If static, but exists, or output, don't do anything
+						Dep::File {
+							is_static: true,
+							exists: true,
+							..
+						} |
+						Dep::File { is_output: true, .. } => None,
 
-					// If:
-					// - Regular
-					// - Static but doesn't exist
-					// Then build
-					(Dep::Regular(_), Some(DepFile { file, .. })) |
-					(Dep::Static(_), Some(DepFile { file, exists: false })) => {
-						let target = Target::File { file: (**file).clone() };
-						let dep_result = self
+						// Else if non-static or static and doesn't exist, build it
+						Dep::File {
+							file, is_static: false, ..
+						} |
+						Dep::File {
+							file,
+							is_static: true,
+							exists: false,
+							..
+						} => Some(Target::File { file: file.to_owned() }),
+
+						// If a rule, execute it
+						Dep::Rule { name, pats } => Some(Target::Rule {
+							rule: name.to_owned(),
+							pats: pats.clone(),
+						}),
+					};
+
+					// Then build it
+					let dep_res = match dep_target {
+						Some(target) => self
 							.build(&target, rules)
 							.await
-							.map_err(AppError::build_target(&target))?;
-						Some(dep_result)
-					},
+							.map(Some)
+							.map_err(AppError::build_target(&target))?,
+						None => None,
+					};
 
-					(Dep::Rule(item), None) => {
-						let target = Target::Rule {
-							rule: item.name.clone(),
-							pats: item.pats.clone(),
-						};
-						let dep_result = self
-							.build(&target, rules)
+					// If the dependency if a dependency deps file or an output deps file (and exists), build it's dependencies too
+					let dep_deps_res = match dep {
+						Dep::File {
+							file,
+							is_dep_file: true,
+							is_output: false,
+							..
+						} |
+						Dep::File {
+							file,
+							is_dep_file: true,
+							is_output: true,
+							exists: true,
+							..
+						} => self
+							.build_deps_file(file, rule, rules)
 							.await
-							.map_err(AppError::build_target(&target))?;
-						Some(dep_result)
-					},
+							.map_err(AppError::build_dep_file(file))?,
 
-					// If a non-rule item, we always have a dep file
-					(Dep::Regular(_) | Dep::Static(_) | Dep::Output(_), None) | (Dep::Rule(_), Some(_)) =>
-						unreachable!(),
-				};
+						_ => None,
+					};
 
-				// If the dependency if a deps file, build it's dependencies too
-				let mut dep_dep_result = None;
-				if let Dep::Regular(dep_item) | Dep::Static(dep_item) | Dep::Output(dep_item) = dep {
-					if matches!(dep_item, Item::DepsFile { .. }) {
-						dep_dep_result = match (dep, &dep_file) {
-							(Dep::Regular(_) | Dep::Static(_), Some(DepFile { file, .. })) |
-							(Dep::Output(_), Some(DepFile { file, exists: true })) => self
-								.build_deps_file(file, rule, rules)
-								.await
-								.map_err(AppError::build_dep_file(file))?,
-
-							// If it's an output and doesn't exist, don't worry about it
-							(Dep::Output(_), Some(DepFile { exists: false, .. })) => None,
-
-							// If a non-rule item, we always have a dep file
-							(Dep::Regular(_) | Dep::Static(_) | Dep::Output(_), None) | (Dep::Rule(_), _) =>
-								unreachable!(),
-						};
-					}
+					let res = match (dep_res, dep_deps_res) {
+						(Some(dep_res), Some(dep_deps_res)) => Some(dep_res.latest(dep_deps_res)),
+						(Some(res), None) | (None, Some(res)) => Some(res),
+						(None, None) => None,
+					};
+					Ok::<_, AppError>(res)
 				}
-
-				let res = match (dep_result, dep_dep_result) {
-					(Some(dep_result), Some(dep_dep_result)) => Some(dep_result.latest(dep_dep_result)),
-					(Some(res), None) | (None, Some(res)) => Some(res),
-					(None, None) => None,
-				};
-				Ok::<_, AppError>(res)
-			}
-		})
-		.collect::<FuturesUnordered<_>>()
-		.try_collect::<Vec<_>>()
-		.await?
-		.into_iter()
-		.flatten()
-		.max_by_key(|res| res.build_time);
+			})
+			.collect::<FuturesUnordered<_>>()
+			.try_collect::<Vec<_>>()
+			.await?
+			.into_iter()
+			.flatten()
+			.max_by_key(|res| res.build_time);
 
 		let output_last_build_time = self::rule_last_build_time(&rule).ok().flatten();
 		let needs_rebuilt = match (deps_res, output_last_build_time) {
@@ -309,14 +328,19 @@ impl Builder {
 				},
 
 			// If there were any output, make sure the dependency file applies to one of them
-			false =>
-				if !rule.output.iter().any(|rule_output| rule_output.file() == &output) {
+			false => {
+				let any_matches = rule.output.iter().any(|out| match out {
+					OutItem::File { file } => file == &output,
+					OutItem::DepsFile { file } => file == &output,
+				});
+				if !any_matches {
 					return Err(AppError::DepFileMissingOutputs {
 						dep_file_path: dep_file.into(),
-						rule_outputs:  rule.output.iter().map(Item::to_string).collect(),
+						rule_outputs:  rule.output.iter().map(OutItem::to_string).collect(),
 						dep_output:    output,
 					});
-				},
+				}
+			},
 		}
 
 		// Build all dependencies
@@ -486,8 +510,11 @@ fn rule_last_build_time(rule: &Rule<String>) -> Result<Option<SystemTime>, AppEr
 	//       files are at-least that old
 	rule.output
 		.iter()
-		.map(|dep| {
-			let file = &dep.file();
+		.map(|item| {
+			let file = match item {
+				OutItem::File { file } => file,
+				OutItem::DepsFile { file } => file,
+			};
 			fs::metadata(file)
 				.map(self::file_modified_time)
 				.map_err(AppError::read_file_metadata(file))
@@ -511,7 +538,10 @@ pub fn find_rule_for_file(file: &str, rules: &Rules) -> Result<Option<Rule<Strin
 		for output in &rule.output {
 			// Expand all expressions in the output file
 			// Note: This doesn't expand patterns, so we can match those later
-			let output = output.file();
+			let output = match output {
+				OutItem::File { file } => file,
+				OutItem::DepsFile { file } => file,
+			};
 			let file_cmpts = self::expand_expr(
 				output,
 				&mut expand_expr::RuleOutputVisitor::new(&rules.aliases, &rule.aliases),

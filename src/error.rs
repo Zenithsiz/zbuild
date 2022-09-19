@@ -276,19 +276,6 @@ pub enum AppError {
 		err: Box<Self>,
 	},
 
-	/// Rule recursive output
-	#[error("Rule {rule_name} cannot contain a dependency ({dep_item_fmt}) as an output ({output_item_fmt})")]
-	RuleRecursiveOutput {
-		/// Rule name
-		rule_name: String,
-
-		/// Output as a formatted item
-		output_item_fmt: String,
-
-		/// Dependency
-		dep_item_fmt: String,
-	},
-
 	/// Dependency file missing `:`
 	#[error("Dependency file {dep_file_path:?} was missing a `:`")]
 	DepFileMissingColon {

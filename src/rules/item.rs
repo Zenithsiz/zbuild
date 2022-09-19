@@ -7,88 +7,111 @@ use {
 	std::{collections::HashMap, fmt},
 };
 
-/// Item
+
+/// Output Item
 #[derive(Clone, Debug)]
-pub enum Item<T> {
+pub enum OutItem<T> {
 	/// File
-	File(T),
+	File { file: T },
 
 	/// Dependencies file
-	DepsFile(T),
+	DepsFile { file: T },
 }
 
-impl Item<Expr> {
+impl OutItem<Expr> {
 	/// Creates a new item from it's `ast`.
-	pub fn new(item: ast::Item) -> Self {
+	pub fn new(item: ast::OutItem) -> Self {
 		match item {
-			ast::Item::File(file) => {
-				let file = Expr::new(file);
-				Item::File(file)
-			},
-			ast::Item::DepsFile { deps_file } => {
-				let deps_file = Expr::new(deps_file);
-				Item::DepsFile(deps_file)
+			ast::OutItem::File(file) => Self::File { file: Expr::new(file) },
+			ast::OutItem::DepsFile { deps_file } => Self::DepsFile {
+				file: Expr::new(deps_file),
 			},
 		}
 	}
 }
 
-impl<T> Item<T> {
-	/// Returns the file of this item
-	pub fn file(&self) -> &T {
-		match self {
-			Item::File(file) | Item::DepsFile(file) => file,
-		}
-	}
-}
-
-impl<T: fmt::Display> fmt::Display for Item<T> {
+impl<T: fmt::Display> fmt::Display for OutItem<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			Item::File(file) => write!(f, "file: {file}"),
-			Item::DepsFile(file) => write!(f, "dep_file: {file}"),
+			OutItem::File { file } => write!(f, "{file}"),
+			OutItem::DepsFile { file } => write!(f, "dep_file: {file}"),
 		}
 	}
 }
 
-/// Rule Item
+
+/// Dependency Item
 #[derive(Clone, Debug)]
-pub struct RuleItem<T> {
-	/// Name
-	pub name: T,
+pub enum DepItem<T> {
+	/// File
+	File { file: T, is_static: bool },
 
-	/// Patterns
-	pub pats: HashMap<T, T>,
+	/// Dependencies file
+	DepsFile { file: T, is_static: bool },
+
+	/// Rule
+	Rule { name: T, pats: HashMap<T, T> },
 }
 
-impl RuleItem<Expr> {
+impl DepItem<Expr> {
 	/// Creates a new item from it's `ast`.
-	pub fn new(item: ast::RuleItem) -> Self {
-		Self {
-			name: Expr::new(item.name),
-			pats: item
-				.pats
-				.into_iter()
-				.map(|(pat, expr)| (Expr::new(pat), Expr::new(expr)))
-				.collect(),
+	pub fn new(item: ast::DepItem) -> Self {
+		match item {
+			ast::DepItem::File(file) => Self::File {
+				file:      Expr::new(file),
+				is_static: false,
+			},
+			ast::DepItem::Rule { rule, pats } => Self::Rule {
+				name: Expr::new(rule),
+				pats: pats
+					.into_iter()
+					.map(|(pat, value)| (Expr::new(pat), Expr::new(value)))
+					.collect(),
+			},
+			ast::DepItem::DepsFile { deps_file } => Self::DepsFile {
+				file:      Expr::new(deps_file),
+				is_static: false,
+			},
+			ast::DepItem::Static { item } => match item {
+				ast::StaticDepItem::File(file) => Self::File {
+					file:      Expr::new(file),
+					is_static: false,
+				},
+				ast::StaticDepItem::DepsFile { deps_file } => Self::DepsFile {
+					file:      Expr::new(deps_file),
+					is_static: false,
+				},
+			},
 		}
 	}
 }
 
-impl<T: fmt::Display> fmt::Display for RuleItem<T> {
+impl<T: fmt::Display> fmt::Display for DepItem<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "rule: {}", self.name)?;
+		match self {
+			DepItem::File { file, is_static } => match is_static {
+				true => write!(f, "static: {file}"),
+				false => write!(f, "{file}"),
+			},
+			DepItem::DepsFile { file, is_static } => match is_static {
+				true => write!(f, "static: dep_file: {file}"),
+				false => write!(f, "dep_file: {file}"),
+			},
+			DepItem::Rule { name, pats } => {
+				write!(f, "rule: {}", name)?;
 
-		if !self.pats.is_empty() {
-			write!(f, " (")?;
+				if !pats.is_empty() {
+					write!(f, " (")?;
 
-			for (pat, value) in &self.pats {
-				write!(f, "{pat}={value}, ")?;
-			}
+					for (pat, value) in pats {
+						write!(f, "{pat}={value}, ")?;
+					}
 
-			write!(f, ")")?;
+					write!(f, ")")?;
+				}
+
+				Ok(())
+			},
 		}
-
-		Ok(())
 	}
 }

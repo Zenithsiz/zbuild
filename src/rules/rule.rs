@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	super::{Expr, Item, RuleItem},
+	super::{DepItem, Expr, OutItem},
 	crate::ast,
 	std::collections::HashMap,
 };
@@ -17,16 +17,10 @@ pub struct Rule<T> {
 	pub aliases: HashMap<String, T>,
 
 	/// Output items
-	pub output: Vec<Item<T>>,
+	pub output: Vec<OutItem<T>>,
 
 	/// Dependencies
-	pub deps: Vec<Item<T>>,
-
-	/// Static dependencies
-	pub static_deps: Vec<Item<T>>,
-
-	/// Rule dependencies
-	pub rule_deps: Vec<RuleItem<T>>,
+	pub deps: Vec<DepItem<T>>,
 
 	/// Execution working directory
 	pub exec_cwd: Option<T>,
@@ -43,10 +37,8 @@ impl Rule<Expr> {
 			.into_iter()
 			.map(|(name, expr)| (name, Expr::new(expr)))
 			.collect();
-		let output = rule.out.into_iter().map(Item::new).collect();
-		let deps = rule.deps.into_iter().map(Item::new).collect();
-		let static_deps = rule.static_deps.into_iter().map(Item::new).collect();
-		let rule_deps = rule.rule_deps.into_iter().map(RuleItem::new).collect();
+		let output = rule.out.into_iter().map(OutItem::new).collect();
+		let deps = rule.deps.into_iter().map(DepItem::new).collect();
 		let exec_cwd = rule.exec_cwd.map(Expr::new);
 		let exec = rule
 			.exec
@@ -61,8 +53,6 @@ impl Rule<Expr> {
 			aliases,
 			output,
 			deps,
-			static_deps,
-			rule_deps,
 			exec_cwd,
 			exec,
 		}
