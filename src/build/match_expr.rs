@@ -8,7 +8,9 @@ use {
 
 /// Returns if `value` matches all `cmpts` and returns all patterns resolved
 ///
-/// Returns error if any aliases are found, or if more than 1 pattern is found.
+/// Returns error if more than 1 pattern is found.
+///
+/// Panics if any aliases are found
 pub fn match_expr(mut cmpts: &[ExprCmpt], mut value: &str) -> Result<Option<HashMap<String, String>>, anyhow::Error> {
 	let mut patterns = HashMap::new();
 
@@ -63,7 +65,7 @@ pub fn match_expr(mut cmpts: &[ExprCmpt], mut value: &str) -> Result<Option<Hash
 				anyhow::bail!("Expression had more than 2 patterns: {lhs:?} and {rhs:?}"),
 			// If we have aliases on any side, reject
 			[ExprCmpt::Alias(alias), ..] | [.., ExprCmpt::Alias(alias)] =>
-				anyhow::bail!("Cannot match unexpanded alias: {alias:?}"),
+				unreachable!("Cannot match unexpanded alias: {alias:?}"),
 
 			// If we're empty, we match an empty string
 			[] => match value {
