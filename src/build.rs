@@ -339,12 +339,12 @@ impl Builder {
 
 	/// Rebuilds a rule
 	pub async fn rebuild_rule(&self, rule: &Rule<String>) -> Result<(), AppError> {
+		let _exec_guard = self.exec_semaphore.acquire().await.expect("Exec semaphore was closed");
+
 		for exec in &rule.exec {
 			let (program, args) = exec.args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
 				rule_name: rule.name.clone(),
 			})?;
-
-			let _exec_guard = self.exec_semaphore.acquire().await.expect("Exec semaphore was closed");
 
 			// Create the command
 			let mut cmd = Command::new(program);
