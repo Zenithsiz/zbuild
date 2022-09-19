@@ -257,7 +257,7 @@ impl Builder {
 					(Some(res), None) | (None, Some(res)) => Some(res),
 					(None, None) => None,
 				};
-				Ok::<_, anyhow::Error>(res)
+				Ok::<_, AppError>(res)
 			}
 		})
 		.collect::<FuturesUnordered<_>>()
@@ -304,25 +304,32 @@ impl Builder {
 		dep_file: &str,
 		rule: &Rule<String>,
 		rules: &Rules,
-	) -> Result<Option<BuildResult>, anyhow::Error> {
+	) -> Result<Option<BuildResult>, AppError> {
 		let (output, deps) = self::parse_deps_file(dep_file).context("Unable to parse dependency file")?;
 
 		match rule.output.is_empty() {
 			// If there were no outputs, make sure it matches the rule name
 			// TODO: Seems kinda weird for it to match the rule name, but not sure how else to check this here
-			true => anyhow::ensure!(
-				output == rule.name,
-				"Dependency file did not list the rule name as the dependency, found: {output:?}, expected {:?}",
-				rule.name
-			),
+			true =>
+				if output != rule.name {
+					return Err(anyhow::anyhow!(
+						"Dependency file did not list the rule name as the dependency, found: {output:?}, expected \
+						 {:?}",
+						rule.name
+					)
+					.into());
+				},
 
 			// If there were any output, make sure the dependency file applies to one of them
-			false => anyhow::ensure!(
-				rule.output.iter().any(|rule_output| rule_output.file() == &output),
-				"Dependency file did not list any dependencies for rule output, found: {output:?}, expected any of \
-				 {:?}",
-				rule.output,
-			),
+			false =>
+				if !rule.output.iter().any(|rule_output| rule_output.file() == &output) {
+					return Err(anyhow::anyhow!(
+						"Dependency file did not list any dependencies for rule output, found: {output:?}, expected \
+						 any of {:?}",
+						rule.output,
+					)
+					.into());
+				},
 		}
 
 		// Build all dependencies
@@ -344,7 +351,7 @@ impl Builder {
 	}
 
 	/// Rebuilds a rule
-	pub async fn rebuild_rule(&self, rule: &Rule<String>) -> Result<(), anyhow::Error> {
+	pub async fn rebuild_rule(&self, rule: &Rule<String>) -> Result<(), AppError> {
 		for exec in &rule.exec {
 			let (program, args) = exec.args.split_first().context("Rule executable cannot be empty")?;
 
@@ -464,7 +471,7 @@ impl BuildResult {
 
 /// Parses a dependencies file
 // TODO: Support multiple dependencies in each file
-fn parse_deps_file(file: &str) -> Result<(String, Vec<String>), anyhow::Error> {
+fn parse_deps_file(file: &str) -> Result<(String, Vec<String>), AppError> {
 	// Read it
 	let contents = fs::read_to_string(file).context("Unable to read file")?;
 
@@ -480,7 +487,7 @@ fn parse_deps_file(file: &str) -> Result<(String, Vec<String>), anyhow::Error> {
 ///
 /// Returns `Err` if any files didn't exist,
 /// Returns `Ok(None)` if rule has no outputs
-fn rule_last_build_time(rule: &Rule<String>) -> Result<Option<SystemTime>, anyhow::Error> {
+fn rule_last_build_time(rule: &Rule<String>) -> Result<Option<SystemTime>, AppError> {
 	// Note: We get the time of the oldest file in order to ensure all
 	//       files are at-least that old
 	rule.output
@@ -488,7 +495,7 @@ fn rule_last_build_time(rule: &Rule<String>) -> Result<Option<SystemTime>, anyho
 		.map(|dep| {
 			let file = &dep.file();
 			let metadata = fs::metadata(file).with_context(|| format!("Unable to get metadata of {file:?}"))?;
-			Ok::<_, anyhow::Error>(self::file_modified_time(metadata))
+			Ok(self::file_modified_time(metadata))
 		})
 		.reduce(|lhs, rhs| Ok(lhs?.min(rhs?)))
 		.transpose()
@@ -504,7 +511,7 @@ fn file_modified_time(metadata: fs::Metadata) -> SystemTime {
 
 /// Finds a rule for `file`
 // TODO: Not make this `O(N)` for the number of rules.
-pub fn find_rule_for_file(file: &str, rules: &Rules) -> Result<Option<Rule<String>>, anyhow::Error> {
+pub fn find_rule_for_file(file: &str, rules: &Rules) -> Result<Option<Rule<String>>, AppError> {
 	for rule in rules.rules.values() {
 		for output in &rule.output {
 			// Expand all expressions in the output file
