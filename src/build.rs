@@ -44,7 +44,7 @@ use {
 /// Builder
 #[derive(Debug)]
 pub struct Builder {
-	/// All targets' status
+	/// All targets' build status
 	targets: DashMap<Target<String>, BuildStatus>,
 
 	/// Command execution semaphore
@@ -95,7 +95,10 @@ impl Builder {
 		match do_build {
 			true => {
 				let res = self.build_unchecked(target, rules).await;
-				build_status.finish_build(res.as_ref().map_err(|_| ()).copied()).await;
+				match res {
+					Ok(build_res) => build_status.finish_build(Ok(build_res)).await,
+					Err(_) => build_status.finish_build(Err(())).await,
+				}
 				res
 			},
 
@@ -426,11 +429,16 @@ impl BuildStatus {
 			pin_mut!(inner_fut);
 			let mut inner = inner_fut.poll(ctx).ready()?;
 
+			// Check if built
 			match &mut *inner {
+				// If not, add a waker and return pending
+				// Note: Since we're holding onto the lock, we don't need to double check here
 				BuildStatusInner::Building { wakers } => {
 					wakers.push(ctx.waker().clone());
 					Poll::Pending
 				},
+
+				// Else it's ready
 				BuildStatusInner::Built { value } => Poll::Ready(*value),
 			}
 		})

@@ -126,7 +126,7 @@ async fn main() -> Result<(), anyhow::Error> {
 		.collect::<FuturesUnordered<_>>()
 		.try_collect::<Vec<_>>()
 		.await?;
-	tracing::info!("Built {} targets", builder.targets().await);
+	tracing::info!("Checked {} targets", builder.targets().await);
 
 	Ok(())
 }
