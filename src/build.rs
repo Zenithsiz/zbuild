@@ -22,7 +22,7 @@ use {
 	},
 	dashmap::{mapref::entry::Entry as DashMapEntry, DashMap},
 	filetime::FileTime,
-	futures::{pin_mut, stream::FuturesUnordered, TryStreamExt},
+	futures::{pin_mut, stream::FuturesUnordered, StreamExt, TryStreamExt},
 	std::{
 		collections::HashMap,
 		fs,
@@ -61,9 +61,17 @@ impl Builder {
 		}
 	}
 
-	/// Returns the number of targets
-	pub async fn targets(&self) -> usize {
-		self.targets.len()
+	/// Returns all targets built.
+	///
+	/// If any target is still being build, ignores it.
+	pub async fn targets(&self) -> HashMap<Target<String>, Result<BuildResult, AppError>> {
+		self.targets
+			.iter()
+			.map(async move |entry| Some((entry.key().clone(), entry.value().build_result().await?)))
+			.collect::<FuturesUnordered<_>>()
+			.filter_map(async move |opt| opt)
+			.collect()
+			.await
 	}
 
 	/// Builds an expression-encoded target
@@ -118,6 +126,7 @@ impl Builder {
 					let metadata = fs::metadata(file).map_err(AppError::missing_file(file))?;
 					let res = BuildResult {
 						build_time: self::file_modified_time(metadata),
+						built:      false,
 					};
 					return Ok(res);
 				},
@@ -284,8 +293,9 @@ impl Builder {
 			(None, Some(_)) => false,
 
 			// If output build time is earlier than last dependency, build
-			(Some(deps_res), Some(output_build_time)) => deps_res.build_time > output_build_time,
+			(Some(deps_res), Some(output_last_build_time)) => deps_res.build_time > output_last_build_time,
 		};
+		tracing::trace!(?needs_rebuilt, ?target, ?deps_res, ?output_last_build_time, "Rebuild");
 
 		// Then rebuild, if needed
 		if needs_rebuilt {
@@ -299,6 +309,7 @@ impl Builder {
 		let cur_build_time = self::rule_last_build_time(&rule)?.unwrap_or_else(SystemTime::now);
 		let res = BuildResult {
 			build_time: cur_build_time,
+			built:      needs_rebuilt,
 		};
 
 		Ok(res)
@@ -407,7 +418,7 @@ pub enum BuildStatusInner {
 	/// Built
 	Built {
 		/// Built result
-		value: Result<BuildResult, Arc<AppError>>,
+		res: Result<BuildResult, Arc<AppError>>,
 	},
 }
 
@@ -433,7 +444,7 @@ impl BuildStatus {
 			BuildStatusInner::Building { wakers } => {
 				let wakers = mem::take(wakers);
 				let res = res.map_err(Arc::new);
-				*inner = BuildStatusInner::Built { value: res.clone() };
+				*inner = BuildStatusInner::Built { res: res.clone() };
 				mem::drop(inner);
 
 				for waker in wakers {
@@ -443,6 +454,15 @@ impl BuildStatus {
 				res.map_err(AppError::Shared)
 			},
 			BuildStatusInner::Built { .. } => unreachable!("Already finished building"),
+		}
+	}
+
+	/// Returns the build result, if any
+	pub async fn build_result(&self) -> Option<Result<BuildResult, AppError>> {
+		let mut inner = self.inner.lock().await;
+		match &mut *inner {
+			BuildStatusInner::Building { .. } => None,
+			BuildStatusInner::Built { res } => Some(res.clone().map_err(AppError::Shared)),
 		}
 	}
 
@@ -464,7 +484,7 @@ impl BuildStatus {
 				},
 
 				// Else it's ready
-				BuildStatusInner::Built { value } => Poll::Ready(value.clone().map_err(AppError::Shared)),
+				BuildStatusInner::Built { res } => Poll::Ready(res.clone().map_err(AppError::Shared)),
 			}
 		})
 		.await
@@ -475,7 +495,10 @@ impl BuildStatus {
 #[derive(Clone, Copy, Debug)]
 pub struct BuildResult {
 	/// Build time
-	build_time: SystemTime,
+	pub build_time: SystemTime,
+
+	/// If built from a rule
+	pub built: bool,
 }
 
 impl BuildResult {

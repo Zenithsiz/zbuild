@@ -15,7 +15,8 @@
 	hash_raw_entry,
 	decl_macro,
 	box_patterns,
-	try_blocks
+	try_blocks,
+	async_closure
 )]
 
 // Modules
@@ -127,7 +128,15 @@ async fn main() -> Result<(), anyhow::Error> {
 		.collect::<FuturesUnordered<_>>()
 		.try_collect::<Vec<_>>()
 		.await?;
-	tracing::info!("Checked {} targets", builder.targets().await);
+
+	let targets = builder.targets().await;
+	let total_targets = targets.len();
+	let built_targets = targets
+		.iter()
+		.filter(|(_, res)| res.as_ref().map_or(false, |res| res.built))
+		.count();
+	tracing::info!("Build {built_targets} targets");
+	tracing::info!("Checked {total_targets} targets");
 
 	Ok(())
 }
