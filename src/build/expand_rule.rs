@@ -14,27 +14,22 @@ pub fn expand_rule(
 	pats: &HashMap<String, String>,
 ) -> Result<Rule<String>, anyhow::Error> {
 	// Helper function to expand an expression
-	let mut rule_expr_visitor = expand_expr::RuleVisitor::new(rule_output_expr_visitor, pats);
-	let mut expand_expr = |expr| self::expand_expr_string(expr, &mut rule_expr_visitor);
-
-	// Helper function to expand an item
-	let mut rule_expr_visitor = expand_expr::RuleVisitor::new(rule_output_expr_visitor, pats);
-	let mut expand_item = |item: &Item<Expr>| match item {
-		Item::File(file) => self::expand_expr_string(file, &mut rule_expr_visitor).map(Item::File),
-		Item::DepsFile(file) => self::expand_expr_string(file, &mut rule_expr_visitor).map(Item::DepsFile),
+	let expand_expr = for<'a> move |expr: &'a Expr| -> anyhow::Result<String> {
+		self::expand_expr_string(expr, &mut expand_expr::RuleVisitor::new(rule_output_expr_visitor, pats))
 	};
-	let expand_rule_item = |item: &RuleItem<Expr>, rule_expr_visitor: &mut _| {
-		Ok::<_, anyhow::Error>(RuleItem {
-			name: self::expand_expr_string(&item.name, rule_expr_visitor)?,
+
+	// Helper function to expand items
+	let expand_item = |item: &Item<Expr>| match item {
+		Item::File(file) => expand_expr(file).map(Item::File),
+		Item::DepsFile(file) => expand_expr(file).map(Item::DepsFile),
+	};
+	let expand_rule_item = |item: &RuleItem<Expr>| {
+		anyhow::Ok(RuleItem {
+			name: expand_expr(&item.name)?,
 			pats: item
 				.pats
 				.iter()
-				.map(|(pat, expr)| {
-					Ok((
-						self::expand_expr_string(pat, rule_expr_visitor)?,
-						self::expand_expr_string(expr, rule_expr_visitor)?,
-					))
-				})
+				.map(|(pat, expr)| Ok((expand_expr(pat)?, expand_expr(expr)?)))
 				.collect::<Result<_, anyhow::Error>>()?,
 		})
 	};
@@ -42,27 +37,19 @@ pub fn expand_rule(
 	let aliases = rule
 		.aliases
 		.iter()
-		.map(|(name, expr)| expand_expr(expr).map(|expr| (name.clone(), expr)))
-		.collect::<Result<_, _>>()?;
-	let output = rule.output.iter().map(&mut expand_item).collect::<Result<_, _>>()?;
-	let deps = rule.deps.iter().map(&mut expand_item).collect::<Result<_, _>>()?;
-	let static_deps = rule
-		.static_deps
-		.iter()
-		.map(&mut expand_item)
-		.collect::<Result<_, _>>()?;
-	let rule_deps = rule
-		.rule_deps
-		.iter()
-		.map(|item| expand_rule_item(item, &mut rule_expr_visitor))
-		.collect::<Result<_, _>>()?;
-	let exec_cwd = rule.exec_cwd.as_ref().map(&mut expand_expr).transpose()?;
+		.map(|(name, expr)| try { (name.clone(), expand_expr(expr)?) })
+		.collect::<Result<_, anyhow::Error>>()?;
+	let output = rule.output.iter().map(expand_item).collect::<Result<_, _>>()?;
+	let deps = rule.deps.iter().map(expand_item).collect::<Result<_, _>>()?;
+	let static_deps = rule.static_deps.iter().map(expand_item).collect::<Result<_, _>>()?;
+	let rule_deps = rule.rule_deps.iter().map(expand_rule_item).collect::<Result<_, _>>()?;
+	let exec_cwd = rule.exec_cwd.as_ref().map(expand_expr).transpose()?;
 	let exec = rule
 		.exec
 		.iter()
 		.map(|command| {
 			Ok::<_, anyhow::Error>(Command {
-				args: command.args.iter().map(&mut expand_expr).collect::<Result<_, _>>()?,
+				args: command.args.iter().map(expand_expr).collect::<Result<_, _>>()?,
 			})
 		})
 		.collect::<Result<_, _>>()?;

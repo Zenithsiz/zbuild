@@ -14,7 +14,8 @@
 	poll_ready,
 	hash_raw_entry,
 	decl_macro,
-	box_patterns
+	box_patterns,
+	try_blocks
 )]
 
 // Modules
