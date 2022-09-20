@@ -2,11 +2,15 @@
 
 zbuild is a modern makefile-like build automation tool.
 
+# Guide
+
+See the [Guide](./GUIDE.md) for a proper introduction to zbuild.
+
 # Example
 
 Zbuild uses a yaml file to specify all rules. It will look for for the nearest `zbuild.yaml` file in the current or parent directories.
 
-Assuming the following directory structure for your project:
+If you have a project in C, with the following directory structure, the zbuild specified can build your project.
 
 ```
 my_proj/
@@ -19,7 +23,7 @@ my_proj/
 		b.c
 ```
 
-This zbuild manifest can build anything in the `build` directory
+`zbuild.yaml`:
 
 ```yaml
 # Global aliases
@@ -50,26 +54,16 @@ rules:
       input: $(src_dir)/^(name).c
 
     # Output items
-    # These are the items that your rule outputs.
-    #
-    # They may contain files, simply represented by strings, or
-    # make-like dependency files, represented by `deps_file: <file>`.
-    # If these dependency files exist at the start of the program, all dependencies within it will be considered.
+    # These are the items that your rule outputs.considered.
     out: [$(output)]
 
     # Dependencies
     # These are the items that your rule requires.
-    #
-    # These may contain files (simply strings), dependency files (`deps_file: <file>`), other rules (`rule: <rule-name>`) or
-    # static items `static: <non-rule item>`.
-    #
-    # Static dependencies are only built if they don't exist. if they are out of date, as long as they exist, they won't be rebuilt
     deps: [$(input)]
 
     # Execution
     #
-    # Specifies an array of commands to execute to build this
-    # rule. Each command is an array of arguments.
+    # Specifies an array of commands to execute to build this rule. Each command is an array of arguments. It will not be passed to a shell, but instead be executed as-is
     exec:
       - [gcc, $(input), -c, -o, $(output)]
 
@@ -80,3 +74,19 @@ rules:
     exec:
       - [gcc, $(build_dir)/a.o, $(build_dir)/b.o, -o, $(build_dir)/my_proj.out]
 ```
+
+Then simply run `zbuild` and it will build (or rebuild, if out of date) the final binary.
+
+# Installation
+
+You may download the latest release from the [releases page](https://github.com/Zenithsiz/zbuild/releases).
+
+You may also compile it yourself, with a nightly rust compiled (>= rustc 1.65.0-nightly (59e7a308e 2022-09-11), may work with older) and install it by:
+
+1. Clone the repo
+
+   `git clone https://github.com/Zenithsiz/zbuild`
+
+2. Build + install
+
+   `cargo install --path zbuild`
