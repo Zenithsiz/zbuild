@@ -78,11 +78,6 @@ impl Builder {
 			.await
 	}
 
-	/// Returns the dependencies graph
-	pub fn deps_graph(&self) -> &RwLock<petgraph::Graph<Target<String>, ()>> {
-		&self.deps_graph
-	}
-
 	/// Builds an expression-encoded target
 	pub async fn build_expr(&self, target: &Target<Expr>, rules: &Rules) -> Result<BuildResult, AppError> {
 		// Expand the target

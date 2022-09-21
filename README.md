@@ -81,7 +81,7 @@ Then simply run `zbuild` and it will build (or rebuild, if out of date) the fina
 
 You may download the latest release from the [releases page](https://github.com/Zenithsiz/zbuild/releases).
 
-You may also compile it yourself, with a nightly rust compiled (>= rustc 1.65.0-nightly (59e7a308e 2022-09-11), may work with older) and install it by:
+You may also compile it yourself, with a nightly rust compiled (>= rustc 1.66.0-nightly (432abd86f 2022-09-20), may work with older) and install it by:
 
 1. Clone the repo
 

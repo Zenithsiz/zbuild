@@ -3,7 +3,6 @@
 // Features
 #![feature(
 	seek_stream_len,
-	let_else,
 	map_try_insert,
 	never_type,
 	closure_lifetime_binder,
@@ -135,7 +134,7 @@ async fn main() -> Result<(), anyhow::Error> {
 		.iter()
 		.filter(|(_, res)| res.as_ref().map_or(false, |res| res.built))
 		.count();
-	tracing::info!("Build {built_targets} targets");
+	tracing::info!("Built {built_targets} targets");
 	tracing::info!("Checked {total_targets} targets");
 
 	Ok(())
