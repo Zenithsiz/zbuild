@@ -34,7 +34,7 @@ use {
 	},
 	tokio::{
 		process::Command,
-		sync::{Mutex, Semaphore},
+		sync::{Mutex, RwLock, Semaphore},
 	},
 };
 
@@ -44,6 +44,9 @@ use {
 /// Builder
 #[derive(Debug)]
 pub struct Builder {
+	/// Dependency graph
+	deps_graph: RwLock<petgraph::Graph<Target<String>, ()>>,
+
 	/// All targets' build status
 	targets: DashMap<Target<String>, BuildStatus>,
 
@@ -56,6 +59,7 @@ impl Builder {
 	pub fn new(jobs: usize) -> Self {
 		let targets = DashMap::<Target<String>, BuildStatus>::new();
 		Self {
+			deps_graph: RwLock::new(petgraph::Graph::new()),
 			targets,
 			exec_semaphore: Semaphore::new(jobs),
 		}
@@ -72,6 +76,11 @@ impl Builder {
 			.filter_map(async move |opt| opt)
 			.collect()
 			.await
+	}
+
+	/// Returns the dependencies graph
+	pub fn deps_graph(&self) -> &RwLock<petgraph::Graph<Target<String>, ()>> {
+		&self.deps_graph
 	}
 
 	/// Builds an expression-encoded target
@@ -114,6 +123,9 @@ impl Builder {
 	// TODO: Split this function onto smaller ones
 	#[async_recursion::async_recursion]
 	async fn build_unchecked(&self, target: &Target<String>, rules: &Rules) -> Result<BuildResult, AppError> {
+		// Add this to the dependency graph
+		let target_node = self.deps_graph.write().await.add_node(target.clone());
+
 		// Find and expand the rule to use for this target
 		let rule = match &target {
 			// If we got a file, check which rule can make it
@@ -126,6 +138,7 @@ impl Builder {
 					let metadata = fs::metadata(file).map_err(AppError::missing_file(file))?;
 					let res = BuildResult {
 						build_time: self::file_modified_time(metadata),
+						dep_node:   target_node,
 						built:      false,
 					};
 					return Ok(res);
@@ -239,11 +252,19 @@ impl Builder {
 
 					// Then build it, if we should
 					let dep_res = match dep_target {
-						Some(target) => self
-							.build(&target, rules)
-							.await
-							.map(Some)
-							.map_err(AppError::build_target(&target))?,
+						Some(target) => {
+							let res = self
+								.build(&target, rules)
+								.await
+								.map(Some)
+								.map_err(AppError::build_target(&target))?;
+
+							if let Some(res) = res {
+								self.deps_graph.write().await.update_edge(target_node, res.dep_node, ());
+							}
+
+							res
+						},
 						None => None,
 					};
 
@@ -261,10 +282,19 @@ impl Builder {
 							is_output: true,
 							exists: true,
 							..
-						} => self
-							.build_deps_file(file, rule, rules)
-							.await
-							.map_err(AppError::build_dep_file(file))?,
+						} => {
+							let res = self
+								.build_deps_file(file, rule, rules)
+								.await
+								.map_err(AppError::build_dep_file(file))?;
+
+							if let Some(res) = res {
+								// TODO: Are the dependencies on the target or on the dependency?
+								self.deps_graph.write().await.update_edge(target_node, res.dep_node, ());
+							}
+
+							res
+						},
 
 						_ => None,
 					};
@@ -316,6 +346,7 @@ impl Builder {
 		let cur_build_time = self::rule_last_build_time(&rule)?.unwrap_or_else(SystemTime::now);
 		let res = BuildResult {
 			build_time: cur_build_time,
+			dep_node:   target_node,
 			built:      needs_rebuilt,
 		};
 
@@ -503,6 +534,9 @@ impl BuildStatus {
 pub struct BuildResult {
 	/// Build time
 	pub build_time: SystemTime,
+
+	/// Dependency node
+	pub dep_node: petgraph::graph::NodeIndex,
 
 	/// If built from a rule
 	pub built: bool,
