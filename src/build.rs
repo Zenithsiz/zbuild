@@ -120,8 +120,8 @@ impl Builder {
 			Target::File { file } => match self::find_rule_for_file(file, rules)? {
 				Some(rule) => rule,
 
-				// If we didn't find it and it exists, assume it's
-				// a non-builder dependency and return it's time
+				// Else, if no rule can make it, we'll assume it's an existing file
+				// and return it's modification date as the build time.
 				None => {
 					let metadata = fs::metadata(file).map_err(AppError::missing_file(file))?;
 					let res = BuildResult {
@@ -230,14 +230,14 @@ impl Builder {
 							..
 						} => Some(Target::File { file: file.to_owned() }),
 
-						// If a rule, execute it
+						// If a rule, execute it, regardless if it's out of date.
 						Dep::Rule { name, pats } => Some(Target::Rule {
 							rule: name.to_owned(),
 							pats: pats.clone(),
 						}),
 					};
 
-					// Then build it
+					// Then build it, if we should
 					let dep_res = match dep_target {
 						Some(target) => self
 							.build(&target, rules)
@@ -269,6 +269,9 @@ impl Builder {
 						_ => None,
 					};
 
+					// Finally select the latest time between the dependency and
+					// the dependency's dependencies.
+					// If none, we don't have a build time
 					let res = match (dep_res, dep_deps_res) {
 						(Some(dep_res), Some(dep_deps_res)) => Some(dep_res.latest(dep_deps_res)),
 						(Some(res), None) | (None, Some(res)) => Some(res),
@@ -281,21 +284,25 @@ impl Builder {
 			.try_collect::<Vec<_>>()
 			.await?
 			.into_iter()
+			// Note: We get `None` when there were no dependencies for the rule
 			.flatten()
 			.max_by_key(|res| res.build_time);
 
-		let output_last_build_time = self::rule_last_build_time(&rule).ok().flatten();
-		let needs_rebuilt = match (deps_res, output_last_build_time) {
-			// If not built, rebuild
-			(_, None) => true,
+		// Afterwards check the last time we've built the rule and compare it with
+		// the dependency build times.
+		let rule_last_build_time = self::rule_last_build_time(&rule);
+		let needs_rebuilt = match (deps_res, &rule_last_build_time) {
+			// If any files were missing, or we had no outputs, build
+			(_, Err(_) | Ok(None)) => true,
 
-			// If no dependencies and built, don't rebuild
-			(None, Some(_)) => false,
+			// If no dependencies and all outputs exist, don't rebuild
+			(None, Ok(_)) => false,
 
-			// If output build time is earlier than last dependency, build
-			(Some(deps_res), Some(output_last_build_time)) => deps_res.build_time > output_last_build_time,
+			// If we have dependencies and outputs, rebuild if the dependencies are
+			// newer than the outputs
+			(Some(deps_res), Ok(Some(rule_last_build_time))) => deps_res.build_time > *rule_last_build_time,
 		};
-		tracing::trace!(?needs_rebuilt, ?target, ?deps_res, ?output_last_build_time, "Rebuild");
+		tracing::trace!(?needs_rebuilt, ?target, ?deps_res, ?rule_last_build_time, "Rebuild");
 
 		// Then rebuild, if needed
 		if needs_rebuilt {
@@ -317,7 +324,7 @@ impl Builder {
 
 	/// Builds all dependencies of a `deps` file.
 	///
-	/// Returns the time of the latest built dependency, if any
+	/// Returns the latest modification date of the dependencies
 	async fn build_deps_file(
 		&self,
 		dep_file: &str,
