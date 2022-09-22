@@ -34,18 +34,28 @@ use {
 	},
 	tokio::{
 		process::Command,
-		sync::{Mutex, RwLock, Semaphore},
+		sync::{broadcast, Mutex, Semaphore},
 	},
 };
 
 // TODO: If the user zbuild file is not generated properly, it can
 //       make us deadlock, check for cycles somehow
 
+/// Event
+#[derive(Clone, Debug)]
+pub enum Event {
+	/// Target dependency
+	TargetDep {
+		target: Target<String>,
+		dep:    Target<String>,
+	},
+}
+
 /// Builder
 #[derive(Debug)]
 pub struct Builder {
-	/// Dependency graph
-	deps_graph: RwLock<petgraph::Graph<Target<String>, ()>>,
+	/// Event sender
+	event_tx: broadcast::Sender<Event>,
 
 	/// All targets' build status
 	targets: DashMap<Target<String>, BuildStatus>,
@@ -57,12 +67,29 @@ pub struct Builder {
 impl Builder {
 	/// Creates a new builder
 	pub fn new(jobs: usize) -> Self {
-		let targets = DashMap::<Target<String>, BuildStatus>::new();
+		// Note: we don't care about the receiver, since we can
+		//       just create them from the sender
+		let (event_tx, _) = broadcast::channel(1);
+
 		Self {
-			deps_graph: RwLock::new(petgraph::Graph::new()),
-			targets,
+			event_tx,
+			targets: DashMap::<Target<String>, BuildStatus>::new(),
 			exec_semaphore: Semaphore::new(jobs),
 		}
+	}
+
+	/// Sends ann event, if any are subscribed
+	fn send_event(&self, make_event: impl FnOnce() -> Event) {
+		// Note: We're fine with the possible desync here when
+		//       someone subscribes after the check
+		if self.event_tx.receiver_count() != 0 {
+			let _ = self.event_tx.send(make_event());
+		}
+	}
+
+	/// Subscribes to builder events
+	pub fn subscribe_events(&self) -> broadcast::Receiver<Event> {
+		self.event_tx.subscribe()
 	}
 
 	/// Returns all targets built.
@@ -118,9 +145,6 @@ impl Builder {
 	// TODO: Split this function onto smaller ones
 	#[async_recursion::async_recursion]
 	async fn build_unchecked(&self, target: &Target<String>, rules: &Rules) -> Result<BuildResult, AppError> {
-		// Add this to the dependency graph
-		let target_node = self.deps_graph.write().await.add_node(target.clone());
-
 		// Find and expand the rule to use for this target
 		let rule = match &target {
 			// If we got a file, check which rule can make it
@@ -133,7 +157,6 @@ impl Builder {
 					let metadata = fs::metadata(file).map_err(AppError::missing_file(file))?;
 					let res = BuildResult {
 						build_time: self::file_modified_time(metadata),
-						dep_node:   target_node,
 						built:      false,
 					};
 					return Ok(res);
@@ -247,19 +270,14 @@ impl Builder {
 
 					// Then build it, if we should
 					let dep_res = match dep_target {
-						Some(target) => {
-							let res = self
-								.build(&target, rules)
-								.await
-								.map(Some)
-								.map_err(AppError::build_target(&target))?;
-
-							if let Some(res) = res {
-								self.deps_graph.write().await.update_edge(target_node, res.dep_node, ());
-							}
-
-							res
-						},
+						Some(dep_target) => self
+							.build(&dep_target, rules)
+							.await
+							.map(|res| {
+								self.send_event(|| Event::TargetDep { target: target.clone(), dep: dep_target.clone() });
+								Some(res)
+							})
+							.map_err(AppError::build_target(&dep_target))?,
 						None => None,
 					};
 
@@ -277,19 +295,10 @@ impl Builder {
 							is_output: true,
 							exists: true,
 							..
-						} => {
-							let res = self
-								.build_deps_file(file, rule, rules)
-								.await
-								.map_err(AppError::build_dep_file(file))?;
-
-							if let Some(res) = res {
-								// TODO: Are the dependencies on the target or on the dependency?
-								self.deps_graph.write().await.update_edge(target_node, res.dep_node, ());
-							}
-
-							res
-						},
+						} => self
+							.build_deps_file(target, file, rule, rules)
+							.await
+							.map_err(AppError::build_dep_file(file))?,
 
 						_ => None,
 					};
@@ -341,7 +350,6 @@ impl Builder {
 		let cur_build_time = self::rule_last_build_time(&rule)?.unwrap_or_else(SystemTime::now);
 		let res = BuildResult {
 			build_time: cur_build_time,
-			dep_node:   target_node,
 			built:      needs_rebuilt,
 		};
 
@@ -353,6 +361,7 @@ impl Builder {
 	/// Returns the latest modification date of the dependencies
 	async fn build_deps_file(
 		&self,
+		parent_target: &Target<String>,
 		dep_file: &str,
 		rule: &Rule<String>,
 		rules: &Rules,
@@ -391,10 +400,14 @@ impl Builder {
 		let deps_res = deps
 			.into_iter()
 			.map(|dep| async move {
-				let target = Target::File { file: dep.clone() };
-				self.build(&target, rules)
+				let dep_target = Target::File { file: dep.clone() };
+				self.send_event(|| Event::TargetDep {
+					target: parent_target.clone(),
+					dep:    dep_target.clone(),
+				});
+				self.build(&dep_target, rules)
 					.await
-					.map_err(AppError::build_target(&target))
+					.map_err(AppError::build_target(&dep_target))
 			})
 			.collect::<FuturesUnordered<_>>()
 			.try_collect::<Vec<_>>()
@@ -529,9 +542,6 @@ impl BuildStatus {
 pub struct BuildResult {
 	/// Build time
 	pub build_time: SystemTime,
-
-	/// Dependency node
-	pub dep_node: petgraph::graph::NodeIndex,
 
 	/// If built from a rule
 	pub built: bool,
