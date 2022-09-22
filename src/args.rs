@@ -32,4 +32,8 @@ pub struct Args {
 	/// Defaults to available parallelism
 	#[clap(long = "jobs", short = 'j')]
 	pub jobs: Option<usize>,
+
+	/// Watch for file changes and rebuild any necessary targets
+	#[clap(long = "watch", short = 'w')]
+	pub watch: bool,
 }

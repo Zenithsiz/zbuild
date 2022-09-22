@@ -28,6 +28,7 @@ use {
 		fs,
 		future::Future,
 		mem,
+		path::Path,
 		sync::Arc,
 		task::{Poll, Waker},
 		time::{Duration, SystemTime},
@@ -40,6 +41,8 @@ use {
 
 // TODO: If the user zbuild file is not generated properly, it can
 //       make us deadlock, check for cycles somehow
+
+// TODO: Make targets use paths for their files
 
 /// Builder
 #[derive(Debug)]
@@ -78,26 +81,128 @@ impl Builder {
 			.await
 	}
 
+	/// Normalizes all targets to their absolute path
+	///
+	/// Might remove targets if an error occurs
+	// TODO: Do this as we go along, instead of at the end
+	pub fn normalize_targets(&mut self) -> Result<(), AppError> {
+		for (target, status) in mem::take(&mut self.targets).into_iter() {
+			let target = match target {
+				// Normalize file paths
+				Target::File { file } => Target::File {
+					file: Path::new(&file)
+						.canonicalize()
+						.map_err(AppError::canonicalize_file(&file))?
+						.to_string_lossy()
+						.into_owned(),
+				},
+
+				// Keep rules as they are
+				target @ Target::Rule { .. } => target,
+			};
+
+			self.targets.insert(target, status);
+		}
+
+		Ok(())
+	}
+
+	/// Builds all reverse dependencies of `target`, if needed.
+	///
+	/// Returns `Ok(None)` if the target isn't part of any dependency
+	pub async fn build_reverse_deps(
+		&self,
+		target: &Target<String>,
+		rules: &Rules,
+	) -> Result<Option<BuildResult>, AppError> {
+		// Get the node of the target
+		let target_node = match self.targets.get(target) {
+			Some(target_node) => target_node.await_built().await?.dep_node,
+			None => return Ok(None),
+		};
+
+		let res = self.build_reverse_deps_node(target, target_node, rules).await?;
+		Ok(Some(res))
+	}
+
+	/// Builds all reverse dependencies of `target_node`, if needed
+	#[async_recursion::async_recursion]
+	async fn build_reverse_deps_node(
+		&self,
+		target: &Target<String>,
+		target_node: petgraph::graph::NodeIndex,
+		rules: &Rules,
+	) -> Result<BuildResult, AppError> {
+		// Find all reverse dependencies
+		let dep_graph = self.deps_graph.read().await;
+		let rev_deps = dep_graph
+			.neighbors(target_node)
+			.map(|rev_dep| {
+				let rev_target = dep_graph
+					.node_weight(rev_dep)
+					.expect("Node didn't exist in graph")
+					.clone();
+
+				(rev_target, rev_dep)
+			})
+			.collect::<Vec<_>>();
+		mem::drop(dep_graph);
+
+		// Then reverse-build all of them
+		for (rev_target, rev_dep) in rev_deps {
+			tracing::trace!(?target, ?rev_target, "Found reverse dependency");
+
+			self.targets
+				.get(&rev_target)
+				.expect("Target didn't exist")
+				.reset_build()
+				.await;
+			self.build_reverse_deps_node(&rev_target, rev_dep, rules).await?;
+		}
+
+		// Then build the target
+		self.build(target, rules, true).await
+	}
+
 	/// Builds an expression-encoded target
-	pub async fn build_expr(&self, target: &Target<Expr>, rules: &Rules) -> Result<BuildResult, AppError> {
+	pub async fn build_expr(
+		&self,
+		target: &Target<Expr>,
+		rules: &Rules,
+		force_rebuild: bool,
+	) -> Result<BuildResult, AppError> {
 		// Expand the target
 		let global_expr_visitor = expand_expr::GlobalVisitor::new(&rules.aliases);
 		let target = self::expand_target(target, global_expr_visitor).map_err(AppError::expand_target(target))?;
 
 		// Then build
-		self.build(&target, rules).await
+		self.build(&target, rules, force_rebuild).await
 	}
 
 	/// Builds a target
-	pub async fn build(&self, target: &Target<String>, rules: &Rules) -> Result<BuildResult, AppError> {
+	pub async fn build(
+		&self,
+		target: &Target<String>,
+		rules: &Rules,
+		force_rebuild: bool,
+	) -> Result<BuildResult, AppError> {
 		// Check if we need to build and create a new entry, if so
 		let (build_status, do_build) = match self.targets.entry(target.clone()) {
-			// If there's already a build status, check it
-			DashMapEntry::Occupied(entry) => (entry.get().clone(), false),
+			// If occupied, build if forced
+			DashMapEntry::Occupied(mut entry) => {
+				// If we're forcing a rebuild, change the entry back to building
+				if force_rebuild {
+					entry.get_mut().reset_build().await;
+				}
 
-			// Else if it's vacant, take responsibility for building
+				(entry.get().clone(), force_rebuild)
+			},
+
+			// Else regardless is forced or not, if it's vacant, take responsibility for building
 			DashMapEntry::Vacant(entry) => {
-				let build_status = BuildStatus::new();
+				mem::drop(entry);
+				let target_dep = self.deps_graph.write().await.add_node(target.clone()); // TODO: This deadlocks because of the match
+				let build_status = BuildStatus::new(target_dep);
 				entry.insert(build_status.clone());
 				(build_status, true)
 			},
@@ -106,7 +211,9 @@ impl Builder {
 		// Then check if we need to build
 		match do_build {
 			true => {
-				let res = self.build_unchecked(target, rules).await;
+				let res = self
+					.build_unchecked(target, build_status.dep_node(), rules, force_rebuild)
+					.await;
 				build_status.finish_build(res).await
 			},
 
@@ -117,10 +224,13 @@ impl Builder {
 	/// Builds a target without checking if the target is already being built.
 	// TODO: Split this function onto smaller ones
 	#[async_recursion::async_recursion]
-	async fn build_unchecked(&self, target: &Target<String>, rules: &Rules) -> Result<BuildResult, AppError> {
-		// Add this to the dependency graph
-		let target_node = self.deps_graph.write().await.add_node(target.clone());
-
+	async fn build_unchecked(
+		&self,
+		target: &Target<String>,
+		target_node: petgraph::graph::NodeIndex,
+		rules: &Rules,
+		force_rebuild: bool,
+	) -> Result<BuildResult, AppError> {
 		// Find and expand the rule to use for this target
 		let rule = match &target {
 			// If we got a file, check which rule can make it
@@ -212,7 +322,7 @@ impl Builder {
 			.collect::<Result<Vec<_>, _>>()?;
 
 		// Then build all dependencies, as well as any dependency files
-		let deps_res = util::chain!(deps, out_deps,)
+		let deps_res = util::chain!(deps, out_deps)
 			.map(|dep| {
 				tracing::trace!(?dep, ?rule.name, "Building dependency of rule");
 				let rule = &rule;
@@ -249,7 +359,7 @@ impl Builder {
 					let dep_res = match dep_target {
 						Some(target) => {
 							let res = self
-								.build(&target, rules)
+								.build(&target, rules, force_rebuild)
 								.await
 								.map(Some)
 								.map_err(AppError::build_target(&target))?;
@@ -279,7 +389,7 @@ impl Builder {
 							..
 						} => {
 							let res = self
-								.build_deps_file(file, rule, rules)
+								.build_deps_file(file, rule, rules, force_rebuild)
 								.await
 								.map_err(AppError::build_dep_file(file))?;
 
@@ -356,6 +466,7 @@ impl Builder {
 		dep_file: &str,
 		rule: &Rule<String>,
 		rules: &Rules,
+		force_rebuild: bool,
 	) -> Result<Option<BuildResult>, AppError> {
 		let (output, deps) = self::parse_deps_file(dep_file)?;
 
@@ -392,7 +503,7 @@ impl Builder {
 			.into_iter()
 			.map(|dep| async move {
 				let target = Target::File { file: dep.clone() };
-				self.build(&target, rules)
+				self.build(&target, rules, force_rebuild)
 					.await
 					.map_err(AppError::build_target(&target))
 			})
@@ -460,13 +571,33 @@ pub enum BuildStatusInner {
 pub struct BuildStatus {
 	/// Inner
 	inner: Arc<Mutex<BuildStatusInner>>,
+
+	/// Dependency node
+	dep_node: petgraph::graph::NodeIndex,
 }
 
 impl BuildStatus {
 	/// Creates a new build subscriber
-	pub fn new() -> Self {
+	pub fn new(dep_node: petgraph::graph::NodeIndex<u32>) -> Self {
 		Self {
 			inner: Arc::new(Mutex::new(BuildStatusInner::Building { wakers: vec![] })),
+			dep_node,
+		}
+	}
+
+	/// Returns the dependency node of this build status
+	pub fn dep_node(&self) -> petgraph::graph::NodeIndex<u32> {
+		self.dep_node
+	}
+
+	/// Resets the build
+	///
+	/// Panics if not built
+	pub async fn reset_build(&self) {
+		let mut inner = self.inner.lock().await;
+		match &mut *inner {
+			BuildStatusInner::Building { .. } => unreachable!("Already finished building"),
+			BuildStatusInner::Built { .. } => *inner = BuildStatusInner::Building { wakers: vec![] },
 		}
 	}
 
@@ -531,6 +662,7 @@ pub struct BuildResult {
 	pub build_time: SystemTime,
 
 	/// Dependency node
+	// TODO: Not have this duplicated here?
 	pub dep_node: petgraph::graph::NodeIndex,
 
 	/// If built from a rule

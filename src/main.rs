@@ -15,7 +15,9 @@
 	decl_macro,
 	box_patterns,
 	try_blocks,
-	async_closure
+	async_closure,
+	let_chains,
+	if_let_guard
 )]
 
 // Modules
@@ -34,8 +36,14 @@ pub use self::{ast::Ast, error::AppError, rules::Rules};
 use {
 	args::Args,
 	clap::StructOpt,
-	futures::{stream::FuturesUnordered, TryStreamExt},
-	std::{collections::HashMap, env, fs, path::PathBuf},
+	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
+	notify::Watcher,
+	std::{
+		collections::HashMap,
+		env,
+		fs,
+		path::{Path, PathBuf},
+	},
 };
 
 
@@ -111,7 +119,7 @@ async fn main() -> Result<(), anyhow::Error> {
 	tracing::trace!(target: "zbuild_targets", ?targets, "Found targets");
 
 	// Finally create the builder and build all targets
-	let builder = build::Builder::new(jobs);
+	let mut builder = build::Builder::new(jobs);
 	targets
 		.iter()
 		.map(|target| {
@@ -119,7 +127,7 @@ async fn main() -> Result<(), anyhow::Error> {
 			let rules = &rules;
 			async move {
 				builder
-					.build_expr(target, rules)
+					.build_expr(target, rules, false)
 					.await
 					.map_err(AppError::build_target(target))
 			}
@@ -127,6 +135,78 @@ async fn main() -> Result<(), anyhow::Error> {
 		.collect::<FuturesUnordered<_>>()
 		.try_collect::<Vec<_>>()
 		.await?;
+
+
+	// Finally, if we're watching events, process them
+	// TODO: Start watching before this?
+	// TODO: Wrap errors here
+	if args.watch {
+		let (event_tx, event_rx) = tokio::sync::mpsc::channel(jobs);
+		let mut watcher = notify::RecommendedWatcher::new(
+			move |event| {
+				let _ = event_tx.blocking_send(event);
+			},
+			notify::Config::default(),
+		)?;
+
+		// Normalize all targets in builder
+		// TODO: Do this by default as we go along?
+		builder.normalize_targets()?;
+
+		// Add all targets to the watcher
+		for (target, _) in builder.targets().await {
+			if let rules::Target::File { file } = target {
+				watcher.watch(Path::new(&file), notify::RecursiveMode::NonRecursive)?;
+			}
+		}
+
+		// Then watch all targets
+		// TODO: Add new targets?
+		let builder = &builder;
+		let rules = &rules;
+		tracing::info!("Starting to watch for all targets");
+		tokio_stream::wrappers::ReceiverStream::new(event_rx)
+			.filter_map(|event| async move {
+				let event = match event {
+					Ok(event) => event,
+					Err(err) => {
+						tracing::warn!("Error while watching: {:?}", anyhow::Error::from(err));
+						return None;
+					},
+				};
+
+				let targets = event
+					.paths
+					.into_iter()
+					.map(async move |path| {
+						tracing::info!("Changed: {path:?}");
+
+						let target = rules::Target::File {
+							file: path.to_string_lossy().into_owned(),
+						};
+						let res = builder
+							.build_reverse_deps(&target, rules)
+							.await
+							.map_err(AppError::build_target(&target))?;
+
+						match res {
+							Some(res) => tracing::trace!(?res, "Rebuild reverse dependencies: {path:?}"),
+							None => tracing::info!("Ignoring: {path:?}"),
+						}
+
+						Ok::<_, AppError>(())
+					})
+					.collect::<FuturesUnordered<_>>();
+
+				Some(targets)
+			})
+			.flat_map_unordered(None, |f| f)
+			.collect::<Vec<_>>()
+			.await
+			.into_iter()
+			.collect::<Result<_, _>>()?;
+	}
+
 
 	let targets = builder.targets().await;
 	let total_targets = targets.len();

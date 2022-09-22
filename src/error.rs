@@ -81,6 +81,17 @@ pub enum AppError {
 		err: io::Error,
 	},
 
+	/// Canonicalize file
+	#[error("Unable to canonicalize file {file_path:?}")]
+	CanonicalizeFile {
+		/// File we failed to canonicalize
+		file_path: PathBuf,
+
+		/// Underlying error
+		#[source]
+		err: io::Error,
+	},
+
 	/// Missing file
 	#[error("Missing file {file_path:?} and no rule to build it found")]
 	MissingFile {
@@ -356,6 +367,13 @@ impl AppError {
 
 	pub fn check_file_exists(file_path: impl Into<PathBuf>) -> impl FnOnce(io::Error) -> Self {
 		move |err| Self::CheckFileExists {
+			file_path: file_path.into(),
+			err,
+		}
+	}
+
+	pub fn canonicalize_file(file_path: impl Into<PathBuf>) -> impl FnOnce(io::Error) -> Self {
+		move |err| Self::CanonicalizeFile {
 			file_path: file_path.into(),
 			err,
 		}
