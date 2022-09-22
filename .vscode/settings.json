@@ -4,6 +4,7 @@
 		"Cmpt",
 		"cmpts",
 		"dashmap",
+		"debouncer",
 		"filetime",
 		"itertools",
 		"mapref",

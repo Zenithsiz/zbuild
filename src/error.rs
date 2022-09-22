@@ -18,6 +18,11 @@ pub enum AppError {
 	#[error(transparent)]
 	Shared(Arc<Self>),
 
+	/// Other
+	// TODO: Removes usages of this, it's for quick prototyping
+	#[error(transparent)]
+	Other(#[from] anyhow::Error),
+
 	/// Get current directory
 	#[error("Unable to get current directory")]
 	GetCurrentDir {

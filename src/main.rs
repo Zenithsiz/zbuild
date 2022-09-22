@@ -26,9 +26,10 @@ mod error;
 mod logger;
 mod rules;
 mod util;
+mod watcher;
 
 // Exports
-pub use self::{ast::Ast, error::AppError, rules::Rules};
+pub use self::{ast::Ast, build::Builder, error::AppError, rules::Rules};
 
 // Imports
 use {
@@ -36,6 +37,7 @@ use {
 	clap::StructOpt,
 	futures::{stream::FuturesUnordered, TryStreamExt},
 	std::{collections::HashMap, env, fs, path::PathBuf},
+	watcher::Watcher,
 };
 
 
@@ -110,8 +112,16 @@ async fn main() -> Result<(), anyhow::Error> {
 	};
 	tracing::trace!(target: "zbuild_targets", ?targets, "Found targets");
 
-	// Finally create the builder and build all targets
-	let builder = build::Builder::new(jobs);
+	// Create the builder
+	let builder = Builder::new(jobs);
+
+	// Then create the watcher, if we're watching
+	let watcher = args
+		.watch
+		.then(|| Watcher::new(builder.subscribe_events()))
+		.transpose()?;
+
+	// Finally build all targets
 	targets
 		.iter()
 		.map(|target| {
@@ -127,6 +137,12 @@ async fn main() -> Result<(), anyhow::Error> {
 		.collect::<FuturesUnordered<_>>()
 		.try_collect::<Vec<_>>()
 		.await?;
+
+	// Then, if we have a watcher, watch all the dependencies
+	if let Some(watcher) = watcher {
+		tracing::info!("Starting to watch for all targets");
+		watcher.watch_rebuild(&builder, &rules).await?;
+	}
 
 	let targets = builder.targets().await;
 	let total_targets = targets.len();

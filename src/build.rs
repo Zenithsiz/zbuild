@@ -34,7 +34,7 @@ use {
 	},
 	tokio::{
 		process::Command,
-		sync::{broadcast, Mutex, Semaphore},
+		sync::{Mutex, Semaphore},
 	},
 };
 
@@ -44,8 +44,8 @@ use {
 /// Event
 #[derive(Clone, Debug)]
 pub enum Event {
-	/// Target dependency
-	TargetDep {
+	/// Target dependency built
+	TargetDepBuilt {
 		target: Target<String>,
 		dep:    Target<String>,
 	},
@@ -55,7 +55,13 @@ pub enum Event {
 #[derive(Debug)]
 pub struct Builder {
 	/// Event sender
-	event_tx: broadcast::Sender<Event>,
+	event_tx: async_broadcast::Sender<Event>,
+
+	/// Event receiver
+	// Note: We don't care about the receiver, since we can
+	//       just create them from the sender, but if dropped
+	//       it closes the channel, so we need to keep it around.
+	_event_rx: async_broadcast::InactiveReceiver<Event>,
 
 	/// All targets' build status
 	targets: DashMap<Target<String>, BuildStatus>,
@@ -67,29 +73,25 @@ pub struct Builder {
 impl Builder {
 	/// Creates a new builder
 	pub fn new(jobs: usize) -> Self {
-		// Note: we don't care about the receiver, since we can
-		//       just create them from the sender
-		let (event_tx, _) = broadcast::channel(1);
+		let (event_tx, event_rx) = async_broadcast::broadcast(jobs);
+		let event_rx = event_rx.deactivate();
 
 		Self {
 			event_tx,
+			_event_rx: event_rx,
 			targets: DashMap::<Target<String>, BuildStatus>::new(),
 			exec_semaphore: Semaphore::new(jobs),
 		}
 	}
 
 	/// Sends ann event, if any are subscribed
-	fn send_event(&self, make_event: impl FnOnce() -> Event) {
-		// Note: We're fine with the possible desync here when
-		//       someone subscribes after the check
-		if self.event_tx.receiver_count() != 0 {
-			let _ = self.event_tx.send(make_event());
-		}
+	async fn send_event(&self, make_event: impl FnOnce() -> Event) {
+		let _ = self.event_tx.broadcast(make_event()).await;
 	}
 
 	/// Subscribes to builder events
-	pub fn subscribe_events(&self) -> broadcast::Receiver<Event> {
-		self.event_tx.subscribe()
+	pub fn subscribe_events(&self) -> async_broadcast::Receiver<Event> {
+		self.event_tx.new_receiver()
 	}
 
 	/// Returns all targets built.
@@ -103,6 +105,13 @@ impl Builder {
 			.filter_map(async move |opt| opt)
 			.collect()
 			.await
+	}
+
+	/// Marks a target as outdated
+	pub async fn mark_outdated(&self, _target: &Target<String>) -> Result<(), AppError> {
+		// TODO: Actually set the target as outdated
+
+		Ok(())
 	}
 
 	/// Builds an expression-encoded target
@@ -215,7 +224,7 @@ impl Builder {
 				}),
 				DepItem::Rule { ref name, ref pats } => Ok(Dep::Rule { name, pats }),
 			})
-			.collect::<Result<Vec<_>, _>>()?;
+			.collect::<Result<Vec<_>, AppError>>()?;
 
 		// And all output dependencies
 		let out_deps = rule
@@ -232,7 +241,7 @@ impl Builder {
 				})),
 			})
 			.filter_map(|res| res.transpose())
-			.collect::<Result<Vec<_>, _>>()?;
+			.collect::<Result<Vec<_>, AppError>>()?;
 
 		// Then build all dependencies, as well as any dependency files
 		let deps_res = util::chain!(deps, out_deps,)
@@ -270,14 +279,16 @@ impl Builder {
 
 					// Then build it, if we should
 					let dep_res = match dep_target {
-						Some(dep_target) => self
-							.build(&dep_target, rules)
-							.await
-							.map(|res| {
-								self.send_event(|| Event::TargetDep { target: target.clone(), dep: dep_target.clone() });
-								Some(res)
-							})
-							.map_err(AppError::build_target(&dep_target))?,
+						Some(dep_target) => {
+							let res = self
+								.build(&dep_target, rules)
+								.await
+								.map_err(AppError::build_target(&dep_target))?;
+
+							self.send_event(|| Event::TargetDepBuilt { target: target.clone(), dep: dep_target.clone() }).await;
+
+							Some(res)
+						},
 						None => None,
 					};
 
@@ -401,13 +412,18 @@ impl Builder {
 			.into_iter()
 			.map(|dep| async move {
 				let dep_target = Target::File { file: dep.clone() };
-				self.send_event(|| Event::TargetDep {
+				let res = self
+					.build(&dep_target, rules)
+					.await
+					.map_err(AppError::build_target(&dep_target))?;
+
+				self.send_event(|| Event::TargetDepBuilt {
 					target: parent_target.clone(),
 					dep:    dep_target.clone(),
-				});
-				self.build(&dep_target, rules)
-					.await
-					.map_err(AppError::build_target(&dep_target))
+				})
+				.await;
+
+				Ok::<_, AppError>(res)
 			})
 			.collect::<FuturesUnordered<_>>()
 			.try_collect::<Vec<_>>()
