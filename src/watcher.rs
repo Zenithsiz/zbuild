@@ -1,17 +1,18 @@
 //! Target watcher
 
-use std::time::Duration;
+// TODO: Should we react when rule outputs are changed, or only on leaf-dependencies
 
-use crate::Rules;
-
+// Imports
 use {
-	crate::{build, rules::Target, AppError, Builder},
+	crate::{build, rules::Target, AppError, Builder, Rules},
 	anyhow::Context,
 	dashmap::{DashMap, DashSet},
 	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
+	notify_debouncer_mini::Debouncer,
 	std::{
 		path::{Path, PathBuf},
 		sync::Arc,
+		time::Duration,
 	},
 	tokio_stream::wrappers::ReceiverStream,
 };
@@ -23,12 +24,14 @@ struct RevDep {
 	target: Target<String>,
 
 	/// All parent targets
-	parents: DashSet<Target<String>>,
+	parents: Arc<DashSet<Target<String>>>,
 }
 
 /// Target watcher
-#[derive(Debug)]
 pub struct Watcher {
+	/// Watcher
+	watcher: Debouncer<notify::RecommendedWatcher>,
+
 	/// Reverse dependencies
 	rev_deps: Arc<DashMap<PathBuf, RevDep>>,
 
@@ -41,7 +44,7 @@ impl Watcher {
 	pub fn new(builder_event_rx: async_broadcast::Receiver<build::Event>) -> Result<Self, AppError> {
 		// Create the watcher
 		let (fs_event_tx, fs_event_rx) = tokio::sync::mpsc::channel(16);
-		let mut watcher =
+		let watcher =
 			notify_debouncer_mini::new_debouncer(Duration::from_secs(1), None, move |fs_events| match fs_events {
 				Ok(fs_events) =>
 					for fs_event in fs_events {
@@ -65,7 +68,15 @@ impl Watcher {
 					.map(move |event| {
 						tracing::trace!(?event, "Watcher build event");
 						match event {
-							build::Event::TargetDepBuilt { target, dep } => {
+							build::Event::TargetDepBuilt { target, dep, is_static } => {
+								// Ignore static dependencies
+								// TODO: If the event is a removal event, we might care about a removal, or should
+								//       we enforce to the user that static items really should live for as long as
+								//       zbuild lives for?
+								if is_static {
+									return;
+								}
+
 								// Ignore non-file targets and canonicalize file ones
 								let dep_path = match &dep {
 									Target::File { file } => match Path::new(file).canonicalize() {
@@ -79,14 +90,13 @@ impl Watcher {
 								};
 
 								rev_deps
-									.entry(dep_path.clone())
+									.entry(dep_path)
 									.or_insert_with(|| RevDep {
 										target:  dep,
-										parents: DashSet::new(),
+										parents: Arc::new(DashSet::new()),
 									})
 									.parents
 									.insert(target);
-								let _ = watcher.watcher().watch(&dep_path, notify::RecursiveMode::NonRecursive);
 							},
 						}
 					})
@@ -97,13 +107,23 @@ impl Watcher {
 		});
 
 		Ok(Self {
+			watcher,
 			rev_deps,
 			fs_event_stream: ReceiverStream::new(fs_event_rx),
 		})
 	}
 
 	/// Watches over all files and rebuilds any changed files
-	pub async fn watch_rebuild(self, builder: &Builder, rules: &Rules) -> Result<(), AppError> {
+	pub async fn watch_rebuild(mut self, builder: &Builder, rules: &Rules) -> Result<(), AppError> {
+		// Watch each target we have the reverse dependencies of
+		for entry in self.rev_deps.iter() {
+			let path = entry.key();
+			self.watcher
+				.watcher()
+				.watch(path, notify::RecursiveMode::NonRecursive)
+				.with_context(|| format!("Unable to watch path {path:?}"))?;
+		}
+
 		let rev_deps = &self.rev_deps;
 		self.fs_event_stream
 			.then(async move |event| {
@@ -116,28 +136,45 @@ impl Watcher {
 					},
 				};
 
-				tracing::info!("Changed: {path:?}");
-
 				// Then get the reverse dependencies
 				let rev_dep = match rev_deps.get(&path) {
 					Some(rev_dep) => rev_dep.clone(),
 					None => return Ok(()),
 				};
+				tracing::info!("Changed: {:?}", rev_dep.target);
+				tracing::trace!(?rev_dep, "Reverse dependencies");
 
-				// Mark the dependency as outdated
-				builder.mark_outdated(&rev_dep.target).await?;
-
-				// Then rebuild all parents
-				rev_dep
+				// Note: We clone the parents so we don't hold onto the rev dep lock for too long
+				let dep_parents = rev_dep
 					.parents
 					.iter()
 					.map(|target| (*target).clone())
-					.collect::<Vec<_>>()
-					.into_iter()
+					.collect::<Vec<_>>();
+
+
+				// Reset the dependency and all parents' builds
+				futures::try_join!(
+					builder.reset_build(&rev_dep.target),
+					dep_parents
+						.iter()
+						.map(async move |target| builder.reset_build(target).await)
+						.collect::<FuturesUnordered<_>>()
+						.try_collect::<()>()
+				)?;
+
+				// Then rebuild them
+				// Note: We do this separately to ensure that when we have the following scenario:
+				//       A ----> B
+				//        \- C -/
+				//       We don't first rebuild B fully, then C gets rebuilt, and B gets rebuilt *again*,
+				//       unnecessarily. By resetting B and C, building B first will build C, then C won't
+				//       get rebuilt.
+				dep_parents
+					.iter()
 					.map(async move |target| {
 						tracing::info!("Rechecking: {target:?}");
-						builder.mark_outdated(&target).await?;
-						builder.build(&target, rules).await.res()?;
+						let (res, _) = builder.build(target, rules, false).await;
+						res?;
 						Ok::<_, AppError>(())
 					})
 					.collect::<FuturesUnordered<_>>()

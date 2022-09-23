@@ -129,7 +129,7 @@ async fn main() -> Result<(), anyhow::Error> {
 			let rules = &rules;
 			async move {
 				builder
-					.build_expr(target, rules)
+					.build_expr(target, rules, false)
 					.await
 					.map_err(AppError::build_target(target))
 			}
