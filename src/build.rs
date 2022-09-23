@@ -20,21 +20,18 @@ use {
 		AppError,
 		Rules,
 	},
-	dashmap::{mapref::entry::Entry as DashMapEntry, DashMap},
+	dashmap::DashMap,
 	filetime::FileTime,
-	futures::{pin_mut, stream::FuturesUnordered, StreamExt, TryStreamExt},
+	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
 	std::{
 		collections::HashMap,
 		fs,
-		future::Future,
-		mem,
 		sync::Arc,
-		task::{Poll, Waker},
 		time::{Duration, SystemTime},
 	},
 	tokio::{
 		process::Command,
-		sync::{Mutex, Semaphore},
+		sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock, Semaphore},
 	},
 };
 
@@ -64,7 +61,7 @@ pub struct Builder {
 	_event_rx: async_broadcast::InactiveReceiver<Event>,
 
 	/// All targets' build status
-	targets: DashMap<Target<String>, BuildStatus>,
+	targets: DashMap<Target<String>, BuildLock>,
 
 	/// Command execution semaphore
 	exec_semaphore: Semaphore,
@@ -79,14 +76,18 @@ impl Builder {
 		Self {
 			event_tx,
 			_event_rx: event_rx,
-			targets: DashMap::<Target<String>, BuildStatus>::new(),
+			targets: DashMap::<Target<String>, BuildLock>::new(),
 			exec_semaphore: Semaphore::new(jobs),
 		}
 	}
 
 	/// Sends ann event, if any are subscribed
 	async fn send_event(&self, make_event: impl FnOnce() -> Event) {
-		let _ = self.event_tx.broadcast(make_event()).await;
+		// Note: We only send them if there are any receivers (excluding ours, which is inactive),
+		//       to ensure we don't deadlock waiting for someone to read the events
+		if self.event_tx.receiver_count() > 0 {
+			let _ = self.event_tx.broadcast(make_event()).await;
+		}
 	}
 
 	/// Subscribes to builder events
@@ -100,7 +101,10 @@ impl Builder {
 	pub async fn targets(&self) -> HashMap<Target<String>, Result<BuildResult, AppError>> {
 		self.targets
 			.iter()
-			.map(async move |entry| Some((entry.key().clone(), entry.value().build_result().await?)))
+			.map(async move |entry| {
+				let res = entry.value().res().await?;
+				Some((entry.key().clone(), res))
+			})
 			.collect::<FuturesUnordered<_>>()
 			.filter_map(async move |opt| opt)
 			.collect()
@@ -115,38 +119,37 @@ impl Builder {
 	}
 
 	/// Builds an expression-encoded target
-	pub async fn build_expr(&self, target: &Target<Expr>, rules: &Rules) -> Result<BuildResult, AppError> {
+	pub async fn build_expr(&self, target: &Target<Expr>, rules: &Rules) -> Result<BuildLockDepGuard, AppError> {
 		// Expand the target
 		let global_expr_visitor = expand_expr::GlobalVisitor::new(&rules.aliases);
 		let target = self::expand_target(target, global_expr_visitor).map_err(AppError::expand_target(target))?;
 
 		// Then build
-		self.build(&target, rules).await
+		Ok(self.build(&target, rules).await)
 	}
 
 	/// Builds a target
-	pub async fn build(&self, target: &Target<String>, rules: &Rules) -> Result<BuildResult, AppError> {
-		// Check if we need to build and create a new entry, if so
-		let (build_status, do_build) = match self.targets.entry(target.clone()) {
-			// If there's already a build status, check it
-			DashMapEntry::Occupied(entry) => (entry.get().clone(), false),
+	pub async fn build(&self, target: &Target<String>, rules: &Rules) -> BuildLockDepGuard {
+		tracing::trace!(?target, "Building target");
 
-			// Else if it's vacant, take responsibility for building
-			DashMapEntry::Vacant(entry) => {
-				let build_status = BuildStatus::new();
-				entry.insert(build_status.clone());
-				(build_status, true)
-			},
-		};
+		// Get the built lock, or create it
+		let build_lock = self
+			.targets
+			.entry(target.clone())
+			.or_insert_with(BuildLock::new)
+			.clone();
 
-		// Then check if we need to build
-		match do_build {
-			true => {
+		// Then try to get the lock as a dependency
+		let build_guard = build_lock.lock_build().await;
+		match build_guard.try_into_dep() {
+			// If we got it, we were built, so just return the guard
+			Ok(build_guard) => build_guard,
+
+			// Else build first
+			Err(build_guard) => {
 				let res = self.build_unchecked(target, rules).await;
-				build_status.finish_build(res).await
+				build_guard.finish(res)
 			},
-
-			false => build_status.await_built().await,
 		}
 	}
 
@@ -158,15 +161,20 @@ impl Builder {
 		let rule = match &target {
 			// If we got a file, check which rule can make it
 			Target::File { file } => match self::find_rule_for_file(file, rules)? {
-				Some(rule) => rule,
+				Some(rule) => {
+					tracing::trace!(?target, ?rule.name, "Found target rule");
+					rule
+				},
 
 				// Else, if no rule can make it, we'll assume it's an existing file
 				// and return it's modification date as the build time.
 				None => {
 					let metadata = fs::metadata(file).map_err(AppError::missing_file(file))?;
+					let build_time = self::file_modified_time(metadata);
+					tracing::trace!(?target, ?build_time, "Found target file");
 					let res = BuildResult {
-						build_time: self::file_modified_time(metadata),
-						built:      false,
+						build_time,
+						built: false,
 					};
 					return Ok(res);
 				},
@@ -182,7 +190,7 @@ impl Builder {
 					.map_err(AppError::expand_rule(&rule.name))?
 			},
 		};
-		tracing::trace!(?target, ?rule, "Found rule");
+
 
 		/// Dependency
 		#[derive(Clone, Copy, Debug)]
@@ -246,9 +254,11 @@ impl Builder {
 		// Then build all dependencies, as well as any dependency files
 		let deps_res = util::chain!(deps, out_deps,)
 			.map(|dep| {
-				tracing::trace!(?dep, ?rule.name, "Building dependency of rule");
+				tracing::trace!(?target, ?rule.name, ?dep, "Found target rule dependency");
 				let rule = &rule;
 				async move {
+					tracing::trace!(?target, ?rule.name, ?dep, "Building target rule dependency");
+
 					// Get the target to build
 					let dep_target = match dep {
 						// If static, but exists, or output, don't do anything
@@ -283,13 +293,18 @@ impl Builder {
 							let res = self
 								.build(&dep_target, rules)
 								.await
+								.res()
 								.map_err(AppError::build_target(&dep_target))?;
+							tracing::trace!(?target, ?rule.name, ?dep, ?res, "Built target rule dependency");
 
 							self.send_event(|| Event::TargetDepBuilt { target: target.clone(), dep: dep_target.clone() }).await;
 
 							Some(res)
 						},
-						None => None,
+						None => {
+							tracing::trace!(?target, ?rule.name, ?dep, "Skipping target rule dependency");
+							None
+						},
 					};
 
 					// If the dependency if a dependency deps file or an output deps file (and exists), build it's dependencies too
@@ -332,6 +347,7 @@ impl Builder {
 			// Note: We get `None` when there were no dependencies for the rule
 			.flatten()
 			.max_by_key(|res| res.build_time);
+		tracing::trace!(?target, ?rule.name, ?deps_res, "Built target rule dependencies");
 
 		// Afterwards check the last time we've built the rule and compare it with
 		// the dependency build times.
@@ -347,10 +363,10 @@ impl Builder {
 			// newer than the outputs
 			(Some(deps_res), Ok(Some(rule_last_build_time))) => deps_res.build_time > *rule_last_build_time,
 		};
-		tracing::trace!(?needs_rebuilt, ?target, ?deps_res, ?rule_last_build_time, "Rebuild");
 
 		// Then rebuild, if needed
 		if needs_rebuilt {
+			tracing::trace!(?target, ?rule.name, "Rebuilding target rule");
 			self.rebuild_rule(&rule)
 				.await
 				.map_err(AppError::build_rule(&rule.name))?;
@@ -377,6 +393,7 @@ impl Builder {
 		rule: &Rule<String>,
 		rules: &Rules,
 	) -> Result<Option<BuildResult>, AppError> {
+		tracing::trace!(target=?parent_target, ?rule.name, ?dep_file, "Building dependencies of target rule dependency-file");
 		let (output, deps) = self::parse_deps_file(dep_file)?;
 
 		match rule.output.is_empty() {
@@ -410,20 +427,24 @@ impl Builder {
 		// Build all dependencies
 		let deps_res = deps
 			.into_iter()
-			.map(|dep| async move {
+			.map(|dep| {
 				let dep_target = Target::File { file: dep.clone() };
-				let res = self
-					.build(&dep_target, rules)
-					.await
-					.map_err(AppError::build_target(&dep_target))?;
+				tracing::trace!(?rule.name, ?dep, "Found rule dependency");
+				async move {
+					let res = self
+						.build(&dep_target, rules)
+						.await
+						.res()
+						.map_err(AppError::build_target(&dep_target))?;
 
-				self.send_event(|| Event::TargetDepBuilt {
-					target: parent_target.clone(),
-					dep:    dep_target.clone(),
-				})
-				.await;
+					self.send_event(|| Event::TargetDepBuilt {
+						target: parent_target.clone(),
+						dep:    dep_target.clone(),
+					})
+					.await;
 
-				Ok::<_, AppError>(res)
+					Ok::<_, AppError>(res)
+				}
 			})
 			.collect::<FuturesUnordered<_>>()
 			.try_collect::<Vec<_>>()
@@ -468,88 +489,95 @@ impl Builder {
 	}
 }
 
-/// Build status inner
+/// Build state
 #[derive(Clone, Debug)]
-pub enum BuildStatusInner {
-	/// Building
-	Building {
-		/// Wakers
-		wakers: Vec<Waker>,
-	},
-
-	/// Built
-	Built {
-		/// Built result
-		res: Result<BuildResult, Arc<AppError>>,
-	},
+pub struct BuildState {
+	/// Result, if built
+	res: Option<Result<BuildResult, Arc<AppError>>>,
 }
 
-/// Build status
+/// Build lock
 #[derive(Clone, Debug)]
-pub struct BuildStatus {
-	/// Inner
-	inner: Arc<Mutex<BuildStatusInner>>,
+pub struct BuildLock {
+	/// State
+	state: Arc<RwLock<BuildState>>,
 }
 
-impl BuildStatus {
-	/// Creates a new build subscriber
+impl BuildLock {
+	/// Creates a new build lock
 	pub fn new() -> Self {
 		Self {
-			inner: Arc::new(Mutex::new(BuildStatusInner::Building { wakers: vec![] })),
+			state: Arc::new(RwLock::new(BuildState { res: None })),
 		}
 	}
 
-	/// Finishes building
-	pub async fn finish_build(&self, res: Result<BuildResult, AppError>) -> Result<BuildResult, AppError> {
-		let mut inner = self.inner.lock().await;
-		match &mut *inner {
-			BuildStatusInner::Building { wakers } => {
-				let wakers = mem::take(wakers);
-				let res = res.map_err(Arc::new);
-				*inner = BuildStatusInner::Built { res: res.clone() };
-				mem::drop(inner);
-
-				for waker in wakers {
-					waker.wake();
-				}
-
-				res.map_err(AppError::Shared)
-			},
-			BuildStatusInner::Built { .. } => unreachable!("Already finished building"),
+	/// Locks the build lock for building
+	pub async fn lock_build(&self) -> BuildLockBuildGuard {
+		BuildLockBuildGuard {
+			state: self.state.clone().write_owned().await,
 		}
 	}
 
-	/// Returns the build result, if any
-	pub async fn build_result(&self) -> Option<Result<BuildResult, AppError>> {
-		let mut inner = self.inner.lock().await;
-		match &mut *inner {
-			BuildStatusInner::Building { .. } => None,
-			BuildStatusInner::Built { res } => Some(res.clone().map_err(AppError::Shared)),
+	/// Retrieves the result of this state.
+	///
+	/// Waits for any builders too finish
+	pub async fn res(&self) -> Option<Result<BuildResult, AppError>> {
+		self.state
+			.read()
+			.await
+			.res
+			.clone()
+			.map(|res| res.map_err(AppError::Shared))
+	}
+}
+
+/// Build lock build guard
+pub struct BuildLockBuildGuard {
+	/// State
+	state: OwnedRwLockWriteGuard<BuildState>,
+}
+
+impl BuildLockBuildGuard {
+	/// Returns the result of the build
+	pub fn res(&self) -> Option<Result<BuildResult, AppError>> {
+		self.state.res.clone().map(|res| res.map_err(AppError::Shared))
+	}
+
+	/// Turns this build lock into a dependency lock, if built
+	pub fn try_into_dep(self) -> Result<BuildLockDepGuard, Self> {
+		match self.res() {
+			// If we're built, create the dep guard
+			Some(_) => Ok(BuildLockDepGuard {
+				state: self.state.downgrade(),
+			}),
+			None => Err(self),
 		}
 	}
 
-	/// Awaits until the build is done
-	pub async fn await_built(&self) -> Result<BuildResult, AppError> {
-		std::future::poll_fn(|ctx| {
-			// Lock
-			let inner_fut = self.inner.lock();
-			pin_mut!(inner_fut);
-			let mut inner = inner_fut.poll(ctx).ready()?;
+	/// Finishes a build and downgrades the build guard into a
+	/// dependency guard
+	pub fn finish(mut self, res: Result<BuildResult, AppError>) -> BuildLockDepGuard {
+		self.state.res = Some(res.map_err(Arc::new));
+		BuildLockDepGuard {
+			state: self.state.downgrade(),
+		}
+	}
+}
 
-			// Check if built
-			match &mut *inner {
-				// If not, add a waker and return pending
-				// Note: Since we're holding onto the lock, we don't need to double check here
-				BuildStatusInner::Building { wakers } => {
-					wakers.push(ctx.waker().clone());
-					Poll::Pending
-				},
+/// Build lock dependency guard
+pub struct BuildLockDepGuard {
+	/// State
+	state: OwnedRwLockReadGuard<BuildState>,
+}
 
-				// Else it's ready
-				BuildStatusInner::Built { res } => Poll::Ready(res.clone().map_err(AppError::Shared)),
-			}
-		})
-		.await
+impl BuildLockDepGuard {
+	/// Returns the result of the build
+	pub fn res(&self) -> Result<BuildResult, AppError> {
+		self.state
+			.res
+			.clone()
+			.expect("Dependency guard has a non-built state")
+			.map_err(AppError::Shared)
 	}
 }
 

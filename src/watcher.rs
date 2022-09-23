@@ -45,7 +45,7 @@ impl Watcher {
 			notify_debouncer_mini::new_debouncer(Duration::from_secs(1), None, move |fs_events| match fs_events {
 				Ok(fs_events) =>
 					for fs_event in fs_events {
-						tracing::trace!(?fs_event, "Watcher event");
+						tracing::trace!(?fs_event, "Watcher fs event");
 						let _ = fs_event_tx.blocking_send(fs_event);
 					},
 				Err(errs) =>
@@ -60,33 +60,40 @@ impl Watcher {
 		let rev_deps = Arc::new(DashMap::new());
 		tokio::task::spawn({
 			let rev_deps = Arc::clone(&rev_deps);
-			builder_event_rx
-				.map(move |event| match event {
-					build::Event::TargetDepBuilt { target, dep } => {
-						// Ignore non-file targets and canonicalize file ones
-						let dep_path = match &dep {
-							Target::File { file } => match Path::new(file).canonicalize() {
-								Ok(path) => path,
-								Err(err) => {
-									tracing::warn!("Unable to canonicalize {file:?}: {err:?}");
-									return;
-								},
-							},
-							Target::Rule { .. } => return,
-						};
+			async move {
+				builder_event_rx
+					.map(move |event| {
+						tracing::trace!(?event, "Watcher build event");
+						match event {
+							build::Event::TargetDepBuilt { target, dep } => {
+								// Ignore non-file targets and canonicalize file ones
+								let dep_path = match &dep {
+									Target::File { file } => match Path::new(file).canonicalize() {
+										Ok(path) => path,
+										Err(err) => {
+											tracing::warn!("Unable to canonicalize {file:?}: {err:?}");
+											return;
+										},
+									},
+									Target::Rule { .. } => return,
+								};
 
-						rev_deps
-							.entry(dep_path.clone())
-							.or_insert_with(|| RevDep {
-								target:  dep,
-								parents: DashSet::new(),
-							})
-							.parents
-							.insert(target);
-						let _ = watcher.watcher().watch(&dep_path, notify::RecursiveMode::NonRecursive);
-					},
-				})
-				.collect::<()>()
+								rev_deps
+									.entry(dep_path.clone())
+									.or_insert_with(|| RevDep {
+										target:  dep,
+										parents: DashSet::new(),
+									})
+									.parents
+									.insert(target);
+								let _ = watcher.watcher().watch(&dep_path, notify::RecursiveMode::NonRecursive);
+							},
+						}
+					})
+					.collect::<()>()
+					.await;
+				tracing::trace!("Watcher task exited");
+			}
 		});
 
 		Ok(Self {
@@ -130,7 +137,7 @@ impl Watcher {
 					.map(async move |target| {
 						tracing::info!("Rechecking: {target:?}");
 						builder.mark_outdated(&target).await?;
-						builder.build(&target, rules).await?;
+						builder.build(&target, rules).await.res()?;
 						Ok::<_, AppError>(())
 					})
 					.collect::<FuturesUnordered<_>>()
