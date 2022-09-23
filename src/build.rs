@@ -25,12 +25,13 @@ use {
 	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
 	std::{
 		collections::HashMap,
-		fs,
 		mem,
+		path::Path,
 		sync::Arc,
 		time::{Duration, SystemTime},
 	},
 	tokio::{
+		fs,
 		process::Command,
 		sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock, Semaphore},
 	},
@@ -42,9 +43,6 @@ use {
 // TODO: By implementing locks at the target-level, we might get races
 //       when a single rule has multiple targets that each want to be
 //       built simultaneously
-
-// TODO: `fs::metadata` isn't async-aware, so it might slow us down a lot
-//       when every target is up to date, so see alternatives
 
 /// Event
 #[derive(Clone, Debug)]
@@ -106,7 +104,7 @@ impl Builder {
 
 	/// Returns all targets built.
 	///
-	/// If any target is still being build, ignores it.
+	/// Waits for targets being built
 	pub async fn targets(&self) -> HashMap<Target<String>, Result<BuildResult, AppError>> {
 		self.targets
 			.iter()
@@ -214,7 +212,7 @@ impl Builder {
 				// Else, if no rule can make it, we'll assume it's an existing file
 				// and return it's modification date as the build time.
 				None => {
-					let metadata = fs::metadata(file).map_err(AppError::missing_file(file))?;
+					let metadata = fs::metadata(file).await.map_err(AppError::missing_file(file))?;
 					let build_time = self::file_modified_time(metadata);
 					tracing::trace!(?target, ?build_time, "Found target file");
 					let res = BuildResult {
@@ -261,41 +259,45 @@ impl Builder {
 		let normal_deps = rule
 			.deps
 			.iter()
-			.map(|dep| match *dep {
+			.map(async move |dep| match *dep {
 				DepItem::File { ref file, is_static } => Ok(Dep::File {
 					file,
 					is_static,
 					is_dep_file: false,
 					is_output: false,
-					exists: fs::try_exists(file).map_err(AppError::check_file_exists(file))?,
+					exists: fs_try_exists(file).await.map_err(AppError::check_file_exists(file))?,
 				}),
 				DepItem::DepsFile { ref file, is_static } => Ok(Dep::File {
 					file,
 					is_static,
 					is_dep_file: true,
 					is_output: false,
-					exists: fs::try_exists(file).map_err(AppError::check_file_exists(file))?,
+					exists: fs_try_exists(file).await.map_err(AppError::check_file_exists(file))?,
 				}),
 				DepItem::Rule { ref name, ref pats } => Ok(Dep::Rule { name, pats }),
 			})
-			.collect::<Result<Vec<_>, AppError>>()?;
+			.collect::<FuturesUnordered<_>>()
+			.try_collect::<Vec<_>>()
+			.await?;
 
 		// And all output dependencies
 		let out_deps = rule
 			.output
 			.iter()
-			.map(|out| match out {
+			.map(async move |out| match out {
 				OutItem::File { .. } => Ok(None),
 				OutItem::DepsFile { file } => Ok(Some(Dep::File {
 					file,
 					is_static: false,
 					is_dep_file: true,
 					is_output: true,
-					exists: fs::try_exists(file).map_err(AppError::check_file_exists(file))?,
+					exists: fs_try_exists(file).await.map_err(AppError::check_file_exists(file))?,
 				})),
 			})
-			.filter_map(|res| res.transpose())
-			.collect::<Result<Vec<_>, AppError>>()?;
+			.collect::<FuturesUnordered<_>>()
+			.filter_map(async move |res| res.transpose())
+			.try_collect::<Vec<_>>()
+			.await?;
 
 		// Then build all dependencies, as well as any dependency files
 		let deps = util::chain!(normal_deps, out_deps)
@@ -397,7 +399,7 @@ impl Builder {
 					let deps = util::chain!(dep_res.zip(dep_guard), dep_deps.into_iter()).collect::<Vec<_>>();
 					tracing::trace!(?target, ?rule.name, ?dep, ?deps, "Built target rule dependency dependencies");
 
-					Ok::<_, AppError>(deps)
+					Ok(deps)
 				}
 			})
 			.collect::<FuturesUnordered<_>>()
@@ -416,7 +418,7 @@ impl Builder {
 
 		// Afterwards check the last time we've built the rule and compare it with
 		// the dependency build times.
-		let rule_last_build_time = self::rule_last_build_time(&rule);
+		let rule_last_build_time = self::rule_last_build_time(&rule).await;
 		let needs_rebuilt = match (deps_last_build_time, &rule_last_build_time) {
 			// If any files were missing, or we had no outputs, build
 			(_, Err(_) | Ok(None)) => true,
@@ -440,7 +442,7 @@ impl Builder {
 
 		// Then get the build time
 		// Note: If we don't have any outputs, just use the current time as the build time
-		let cur_build_time = self::rule_last_build_time(&rule)?.unwrap_or_else(SystemTime::now);
+		let cur_build_time = self::rule_last_build_time(&rule).await?.unwrap_or_else(SystemTime::now);
 		let res = BuildResult {
 			build_time: cur_build_time,
 			built: needs_rebuilt,
@@ -461,7 +463,7 @@ impl Builder {
 		rules: &Rules,
 	) -> Result<Vec<(BuildResult, BuildLockDepGuard)>, AppError> {
 		tracing::trace!(target=?parent_target, ?rule.name, ?dep_file, "Building dependencies of target rule dependency-file");
-		let (output, deps) = self::parse_deps_file(dep_file)?;
+		let (output, deps) = self::parse_deps_file(dep_file).await?;
 
 		match rule.output.is_empty() {
 			// If there were no outputs, make sure it matches the rule name
@@ -508,7 +510,7 @@ impl Builder {
 					})
 					.await;
 
-					Ok::<_, AppError>((res, dep_guard))
+					Ok((res, dep_guard))
 				}
 			})
 			.collect::<FuturesUnordered<_>>()
@@ -590,7 +592,7 @@ impl BuildLock {
 
 	/// Retrieves the result of this state.
 	///
-	/// Waits for any builders too finish
+	/// Waits for any builders to finish
 	pub async fn res(&self) -> Option<Result<BuildResult, AppError>> {
 		self.state
 			.read()
@@ -670,9 +672,9 @@ impl BuildResult {
 
 /// Parses a dependencies file
 // TODO: Support multiple dependencies in each file
-fn parse_deps_file(file: &str) -> Result<(String, Vec<String>), AppError> {
+async fn parse_deps_file(file: &str) -> Result<(String, Vec<String>), AppError> {
 	// Read it
-	let contents = fs::read_to_string(file).map_err(AppError::read_file(file))?;
+	let contents = fs::read_to_string(file).await.map_err(AppError::read_file(file))?;
 
 	// Parse it
 	let (output, deps) = contents.split_once(':').ok_or_else(|| AppError::DepFileMissingColon {
@@ -688,26 +690,32 @@ fn parse_deps_file(file: &str) -> Result<(String, Vec<String>), AppError> {
 ///
 /// Returns `Err` if any files didn't exist,
 /// Returns `Ok(None)` if rule has no outputs
-fn rule_last_build_time(rule: &Rule<String>) -> Result<Option<SystemTime>, AppError> {
+async fn rule_last_build_time(rule: &Rule<String>) -> Result<Option<SystemTime>, AppError> {
 	// Note: We get the time of the oldest file in order to ensure all
 	//       files are at-least that old
-	rule.output
+	let built_time = rule
+		.output
 		.iter()
-		.map(|item| {
+		.map(async move |item| {
 			let file = match item {
 				OutItem::File { file } => file,
 				OutItem::DepsFile { file } => file,
 			};
 			fs::metadata(file)
+				.await
 				.map(self::file_modified_time)
 				.map_err(AppError::read_file_metadata(file))
 		})
-		.reduce(|lhs, rhs| Ok(lhs?.min(rhs?)))
-		.transpose()
+		.collect::<FuturesUnordered<_>>()
+		.try_collect::<Vec<_>>()
+		.await?
+		.into_iter()
+		.min();
+	Ok(built_time)
 }
 
 /// Returns the file modified time
-fn file_modified_time(metadata: fs::Metadata) -> SystemTime {
+fn file_modified_time(metadata: std::fs::Metadata) -> SystemTime {
 	let file_time = FileTime::from_last_modification_time(&metadata);
 	let unix_offset = Duration::new(file_time.unix_seconds() as u64, file_time.nanoseconds());
 
@@ -741,4 +749,13 @@ pub fn find_rule_for_file(file: &str, rules: &Rules) -> Result<Option<Rule<Strin
 
 	// If we got here, there was no matching rule
 	Ok(None)
+}
+
+/// Async `std::fs_try_exists`
+async fn fs_try_exists(path: impl AsRef<Path>) -> Result<bool, std::io::Error> {
+	match fs::metadata(path).await {
+		Ok(_) => Ok(true),
+		Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+		Err(err) => Err(err),
+	}
 }

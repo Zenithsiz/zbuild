@@ -21,7 +21,7 @@ pub enum AppError {
 	/// Other
 	// TODO: Removes usages of this, it's for quick prototyping
 	#[error(transparent)]
-	Other(#[from] anyhow::Error),
+	Other(anyhow::Error),
 
 	/// Get current directory
 	#[error("Unable to get current directory")]

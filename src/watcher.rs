@@ -56,7 +56,8 @@ impl Watcher {
 						tracing::warn!("Error while watching: {:?}", anyhow::Error::from(err))
 					},
 			})
-			.context("Unable to create file watcher")?;
+			.context("Unable to create file watcher")
+			.map_err(AppError::Other)?;
 
 		// Then create the task to register all dependencies
 		// TODO: Not do this?
@@ -121,7 +122,8 @@ impl Watcher {
 			self.watcher
 				.watcher()
 				.watch(path, notify::RecursiveMode::NonRecursive)
-				.with_context(|| format!("Unable to watch path {path:?}"))?;
+				.with_context(|| format!("Unable to watch path {path:?}"))
+				.map_err(AppError::Other)?;
 		}
 
 		let rev_deps = &self.rev_deps;
