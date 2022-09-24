@@ -32,7 +32,7 @@ impl Rule<Expr> {
 		let aliases = rule
 			.alias
 			.into_iter()
-			.map(|(name, expr)| (name, Expr::new(expr)))
+			.map(|(alias_name, expr)| (alias_name, Expr::new(expr)))
 			.collect();
 		let output = rule.out.into_iter().map(OutItem::new).collect();
 		let deps = rule.deps.into_iter().map(DepItem::new).collect();

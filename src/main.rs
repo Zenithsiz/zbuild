@@ -20,7 +20,44 @@
 	lint_reasons
 )]
 // Lints
-#![warn(clippy::pedantic, clippy::nursery)]
+#![forbid(unsafe_code)]
+#![warn(
+	clippy::pedantic,
+	clippy::nursery,
+	clippy::as_conversions,
+	clippy::as_underscore,
+	clippy::assertions_on_result_states,
+	clippy::clone_on_ref_ptr,
+	clippy::create_dir,
+	clippy::deref_by_slicing,
+	clippy::empty_drop,
+	clippy::empty_structs_with_brackets,
+	clippy::exhaustive_enums,
+	clippy::filetype_is_file,
+	clippy::format_push_string,
+	clippy::get_unwrap,
+	clippy::if_then_some_else_none,
+	clippy::indexing_slicing,
+	clippy::map_err_ignore,
+	clippy::mixed_read_write_in_expression,
+	clippy::mod_module_files,
+	clippy::rc_buffer,
+	clippy::rc_mutex,
+	clippy::rest_pat_in_fully_bound_structs,
+	clippy::same_name_method,
+	// Note: Good lint, but has a few too many false positives
+	//       so just enable every once in a while to check if
+	//       there are any true positive cases
+	//clippy::shadow_unrelated,
+	clippy::str_to_string,
+	clippy::string_slice,
+	clippy::string_to_string,
+	clippy::try_err,
+	clippy::unnecessary_self_imports,
+	clippy::unneeded_field_pattern,
+	clippy::unwrap_used,
+	clippy::verbose_file_reads,
+)]
 #![allow(clippy::match_bool, clippy::single_match_else)] // Matching boolean-likes looks better than if/else
 #![allow(clippy::items_after_statements)] // We'd prefer a lint that would trigger usages of it in previous statements
 #![allow(clippy::missing_errors_doc)] // TODO: Create errors on a per-function basic to avoid doing this
@@ -90,7 +127,7 @@ async fn main() -> Result<(), anyhow::Error> {
 	tracing::debug!(?jobs, "Found number of jobs to run concurrently");
 
 	// Then get all targets to build
-	let targets = match args.targets.is_empty() {
+	let targets_to_build = match args.targets.is_empty() {
 		// If none were specified, use the default rules
 		true => rules.default.clone(),
 
@@ -120,7 +157,7 @@ async fn main() -> Result<(), anyhow::Error> {
 			})
 			.collect(),
 	};
-	tracing::trace!(target: "zbuild_targets", ?targets, "Found targets");
+	tracing::trace!(target: "zbuild_targets", ?targets_to_build, "Found targets");
 
 	// Create the builder
 	let builder = Builder::new(jobs);
@@ -132,7 +169,7 @@ async fn main() -> Result<(), anyhow::Error> {
 		.transpose()?;
 
 	// Finally build all targets
-	targets
+	targets_to_build
 		.iter()
 		.map(|target| {
 			let builder = &builder;

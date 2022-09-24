@@ -38,9 +38,9 @@ pub fn expand_expr(expr: &Expr, visitor: &mut impl Visitor) -> Result<Vec<ExprCm
 				// If it's an alias, we visit and then expand it
 				ExprCmpt::Alias(alias) => match visitor.visit_alias(&alias.name) {
 					// If expanded, check if we need to apply any operations
-					FlowControl::ExpandTo(expr) => match alias.ops.is_empty() {
+					FlowControl::ExpandTo(alias_expr) => match alias.ops.is_empty() {
 						// If not, just recursively expand it
-						true => cmpts.extend(self::expand_expr(&expr, visitor)?),
+						true => cmpts.extend(self::expand_expr(&alias_expr, visitor)?),
 
 						// Else expand it to a string, then apply all operations
 						// Note: We expand to string even if we don't *need* to to ensure the user doesn't
@@ -48,9 +48,10 @@ pub fn expand_expr(expr: &Expr, visitor: &mut impl Visitor) -> Result<Vec<ExprCm
 						//       we can't resolve the operations.
 						false => {
 							// Expand
-							let value = self::expand_expr_string(&expr, visitor)?;
+							let value = self::expand_expr_string(&alias_expr, visitor)?;
 
 							// Then apply all
+							#[allow(clippy::shadow_unrelated)] // They are the same value
 							let value = alias.ops.iter().try_fold(value, |value, &op| {
 								self::expand_alias_op(op, value).map_err(AppError::alias_op(op))
 							})?;
@@ -89,9 +90,8 @@ pub fn expand_expr(expr: &Expr, visitor: &mut impl Visitor) -> Result<Vec<ExprCm
 
 /// Expands an expression into a string
 pub fn expand_expr_string(expr: &Expr, visitor: &mut impl Visitor) -> Result<String, AppError> {
-	let cmpts = self::expand_expr(expr, visitor)?.into_boxed_slice();
-
-	let res = match Box::<[_; 0]>::try_from(cmpts) {
+	let expr_cmpts = self::expand_expr(expr, visitor)?.into_boxed_slice();
+	let res = match Box::<[_; 0]>::try_from(expr_cmpts) {
 		Ok(box []) => Ok(String::new()),
 		Err(cmpts) => match Box::<[_; 1]>::try_from(cmpts) {
 			Ok(box [ExprCmpt::String(s)]) => Ok(s),

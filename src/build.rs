@@ -176,7 +176,9 @@ impl Builder {
 			//       lock here.
 			None => {
 				mem::drop(build_guard);
+				#[allow(clippy::shadow_unrelated)] // They are the same even if redeclared
 				let mut build_guard = build_lock.lock_build().await;
+
 				match build_guard.res() {
 					// If we got it in the meantime, return it
 					Some(res) => (res, build_guard.into_dep()),
@@ -381,8 +383,8 @@ impl Builder {
 
 		let deps_last_build_time = deps
 			.iter()
-			.filter(|(target, ..)| !target.is_static())
-			.map(|(_, res, _)| res.build_time)
+			.filter(|(dep_target, ..)| !dep_target.is_static())
+			.map(|(_, dep_res, _)| dep_res.build_time)
 			.max();
 		tracing::trace!(?target, ?rule.name, ?deps_last_build_time, ?deps, "Built target rule dependencies");
 
@@ -549,14 +551,14 @@ impl BuildLock {
 	/// Locks the build lock for building
 	pub async fn lock_build(&self) -> BuildLockBuildGuard {
 		BuildLockBuildGuard {
-			state: self.state.clone().write_owned().await,
+			state: Arc::clone(&self.state).write_owned().await,
 		}
 	}
 
 	/// Locks the build lock as a dependency
 	pub async fn lock_dep(&self) -> BuildLockDepGuard {
 		BuildLockDepGuard {
-			state: self.state.clone().read_owned().await,
+			state: Arc::clone(&self.state).read_owned().await,
 		}
 	}
 
@@ -684,8 +686,13 @@ async fn rule_last_build_time(rule: &Rule<String>) -> Result<Option<SystemTime>,
 #[allow(clippy::needless_pass_by_value)] // We use it in `.map`, which makes it convenient to receive by value
 fn file_modified_time(metadata: std::fs::Metadata) -> SystemTime {
 	let file_time = FileTime::from_last_modification_time(&metadata);
-	#[allow(clippy::cast_sign_loss)] // Duration only allows positive unix seconds
-	let unix_offset = Duration::new(file_time.unix_seconds() as u64, file_time.nanoseconds());
+	let unix_offset = Duration::new(
+		file_time
+			.unix_seconds()
+			.try_into()
+			.expect("File time was before unix epoch"),
+		file_time.nanoseconds(),
+	);
 
 	SystemTime::UNIX_EPOCH + unix_offset
 }
@@ -697,16 +704,16 @@ pub fn find_rule_for_file(file: &str, rules: &Rules) -> Result<Option<Rule<Strin
 		for output in &rule.output {
 			// Expand all expressions in the output file
 			// Note: This doesn't expand patterns, so we can match those later
-			let output = match output {
-				OutItem::File { file } | OutItem::DepsFile { file } => file,
+			let output_file = match output {
+				OutItem::File { file: output_file } | OutItem::DepsFile { file: output_file } => output_file,
 			};
 			let file_cmpts = self::expand_expr(
-				output,
+				output_file,
 				&mut expand_expr::RuleOutputVisitor::new(&rules.aliases, &rule.aliases),
 			)?;
 
 			// Then try to match the output file to the file we need to create
-			if let Some(rule_pats) = self::match_expr(output, &file_cmpts, file)? {
+			if let Some(rule_pats) = self::match_expr(output_file, &file_cmpts, file)? {
 				let rule = self::expand_rule(rule, &rules.aliases, &rule.aliases, &rule_pats)
 					.map_err(AppError::expand_rule(&rule.name))?;
 				return Ok(Some(rule));

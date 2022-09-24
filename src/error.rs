@@ -12,6 +12,7 @@ use {
 /// Error that will be bubbled up to main when a fatal error occurs
 // TODO: Not use debug output sometimes?
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum AppError {
 	/// Shared
 	// TODO: Is this a good idea? Should we just use `Arc<AppError>` here relevant?

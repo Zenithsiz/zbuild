@@ -119,16 +119,17 @@ pub enum AliasOp {
 }
 
 impl<'de> serde::Deserialize<'de> for Expr {
+	#[allow(clippy::indexing_slicing, clippy::string_slice)] // We verify the indexes are correct
 	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
 	where
 		D: serde::Deserializer<'de>,
 	{
 		// Parse the string
-		let inner = Cow::<str>::deserialize(deserializer)?;
+		let expr_str = Cow::<str>::deserialize(deserializer)?;
 
 		// Then parse all components
 		let mut cmpts = vec![];
-		let mut rest = &*inner;
+		let mut rest = &*expr_str;
 		loop {
 			// Try to find the next pattern / alias
 			match rest.find(['$', '^']) {
