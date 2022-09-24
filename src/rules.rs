@@ -42,6 +42,7 @@ pub struct Rules {
 
 impl Rules {
 	/// Creates all rules from the ast
+	#[must_use]
 	pub fn new(ast: Ast) -> Self {
 		let aliases = ast
 			.aliases

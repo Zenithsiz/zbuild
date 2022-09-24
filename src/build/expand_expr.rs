@@ -55,7 +55,7 @@ pub fn expand_expr(expr: &Expr, visitor: &mut impl Visitor) -> Result<Vec<ExprCm
 								self::expand_alias_op(op, value).map_err(AppError::alias_op(op))
 							})?;
 
-							cmpts.push(ExprCmpt::String(value))
+							cmpts.push(ExprCmpt::String(value));
 						},
 					},
 
@@ -92,7 +92,7 @@ pub fn expand_expr_string(expr: &Expr, visitor: &mut impl Visitor) -> Result<Str
 	let cmpts = self::expand_expr(expr, visitor)?.into_boxed_slice();
 
 	let res = match Box::<[_; 0]>::try_from(cmpts) {
-		Ok(box []) => Ok("".to_owned()),
+		Ok(box []) => Ok(String::new()),
 		Err(cmpts) => match Box::<[_; 1]>::try_from(cmpts) {
 			Ok(box [ExprCmpt::String(s)]) => Ok(s),
 			Ok(box [cmpt]) => Err(vec![cmpt]),

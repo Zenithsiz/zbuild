@@ -16,8 +16,15 @@
 	box_patterns,
 	try_blocks,
 	async_closure,
-	let_chains
+	let_chains,
+	lint_reasons
 )]
+// Lints
+#![warn(clippy::pedantic)]
+#![allow(clippy::match_bool, clippy::single_match_else)] // Matching boolean-likes looks better than if/else
+#![allow(clippy::items_after_statements)] // We'd prefer a lint that would trigger usages of it in previous statements
+#![allow(clippy::missing_errors_doc)] // TODO: Create errors on a per-function basic to avoid doing this
+#![allow(clippy::module_name_repetitions)] // This is how we organize some modules
 
 // Modules
 mod args;
@@ -100,7 +107,7 @@ async fn main() -> Result<(), anyhow::Error> {
 				// If there was a rule, use it without any patterns
 				// TODO: If it requires patterns maybe error out here?
 				Some(rule) => rules::Target::Rule {
-					rule: rules::Expr::string(rule.name.to_owned()),
+					rule: rules::Expr::string(rule.name.clone()),
 					pats: HashMap::new(),
 				},
 

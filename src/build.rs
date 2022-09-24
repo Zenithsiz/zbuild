@@ -75,6 +75,7 @@ pub struct Builder {
 
 impl Builder {
 	/// Creates a new builder
+	#[must_use]
 	pub fn new(jobs: usize) -> Self {
 		let (event_tx, event_rx) = async_broadcast::broadcast(jobs);
 		let event_rx = event_rx.deactivate();
@@ -92,7 +93,10 @@ impl Builder {
 		// Note: We only send them if there are any receivers (excluding ours, which is inactive),
 		//       to ensure we don't deadlock waiting for someone to read the events
 		if self.event_tx.receiver_count() > 0 {
-			let _ = self.event_tx.broadcast(make_event()).await;
+			self.event_tx
+				.broadcast(make_event())
+				.await
+				.expect("Event channel was closed");
 		}
 	}
 
@@ -189,7 +193,7 @@ impl Builder {
 	}
 
 	/// Builds a target without checking if the target is already being built.
-	// TODO: Split this function onto smaller ones
+	#[expect(clippy::too_many_lines)] // TODO: Split this function onto smaller ones
 	#[async_recursion::async_recursion]
 	async fn build_unchecked(&self, target: &Target<String>, rules: &Rules) -> Result<BuildResult, AppError> {
 		// Find and expand the rule to use for this target
@@ -445,8 +449,7 @@ impl Builder {
 			// If there were any output, make sure the dependency file applies to one of them
 			false => {
 				let any_matches = rule.output.iter().any(|out| match out {
-					OutItem::File { file } => file == &output,
-					OutItem::DepsFile { file } => file == &output,
+					OutItem::File { file } | OutItem::DepsFile { file } => file == &output,
 				});
 				if !any_matches {
 					return Err(AppError::DepFileMissingOutputs {
@@ -662,8 +665,7 @@ async fn rule_last_build_time(rule: &Rule<String>) -> Result<Option<SystemTime>,
 		.iter()
 		.map(async move |item| {
 			let file = match item {
-				OutItem::File { file } => file,
-				OutItem::DepsFile { file } => file,
+				OutItem::File { file } | OutItem::DepsFile { file } => file,
 			};
 			fs::metadata(file)
 				.await
@@ -679,8 +681,10 @@ async fn rule_last_build_time(rule: &Rule<String>) -> Result<Option<SystemTime>,
 }
 
 /// Returns the file modified time
+#[allow(clippy::needless_pass_by_value)] // We use it in `.map`, which makes it convenient to receive by value
 fn file_modified_time(metadata: std::fs::Metadata) -> SystemTime {
 	let file_time = FileTime::from_last_modification_time(&metadata);
+	#[allow(clippy::cast_sign_loss)] // Duration only allows positive unix seconds
 	let unix_offset = Duration::new(file_time.unix_seconds() as u64, file_time.nanoseconds());
 
 	SystemTime::UNIX_EPOCH + unix_offset
@@ -694,8 +698,7 @@ pub fn find_rule_for_file(file: &str, rules: &Rules) -> Result<Option<Rule<Strin
 			// Expand all expressions in the output file
 			// Note: This doesn't expand patterns, so we can match those later
 			let output = match output {
-				OutItem::File { file } => file,
-				OutItem::DepsFile { file } => file,
+				OutItem::File { file } | OutItem::DepsFile { file } => file,
 			};
 			let file_cmpts = self::expand_expr(
 				output,

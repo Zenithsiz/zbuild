@@ -26,7 +26,7 @@ pub fn expand_target(
 				.iter()
 				.map(|(pat, expr)| {
 					Ok((
-						pat.to_owned(),
+						pat.clone(),
 						self::expand_expr_string(expr, &mut global_expr_visitor)
 							.map_err(AppError::expand_expr(expr))?,
 					))

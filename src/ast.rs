@@ -201,7 +201,7 @@ impl<'de> serde::Deserialize<'de> for Expr {
 				None => {
 					// Add the rest only if it isn't empty
 					if !rest.is_empty() {
-						cmpts.push(ExprCmpt::String(rest.to_owned()))
+						cmpts.push(ExprCmpt::String(rest.to_owned()));
 					}
 					break;
 				},
