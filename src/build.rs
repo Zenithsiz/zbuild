@@ -632,13 +632,6 @@ pub struct BuildResult {
 	pub built: bool,
 }
 
-impl BuildResult {
-	/// Returns the latest of two build results
-	pub fn latest(self, other: Self) -> Self {
-		std::cmp::max_by_key(self, other, |res| res.build_time)
-	}
-}
-
 /// Parses a dependencies file
 // TODO: Support multiple dependencies in each file
 async fn parse_deps_file(file: &str) -> Result<(String, Vec<String>), AppError> {

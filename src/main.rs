@@ -73,11 +73,9 @@ mod rules;
 mod util;
 mod watcher;
 
-// Exports
-pub use self::{ast::Ast, build::Builder, error::AppError, rules::Rules};
-
 // Imports
 use {
+	self::{ast::Ast, build::Builder, error::AppError, rules::Rules},
 	args::Args,
 	clap::StructOpt,
 	futures::{stream::FuturesUnordered, TryStreamExt},
