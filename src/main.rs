@@ -68,6 +68,7 @@ mod args;
 mod ast;
 mod build;
 mod error;
+mod expand;
 mod logger;
 mod rules;
 mod util;
@@ -75,7 +76,7 @@ mod watcher;
 
 // Imports
 use {
-	self::{ast::Ast, build::Builder, error::AppError, rules::Rules},
+	self::{ast::Ast, build::Builder, error::AppError, expand::Expander, rules::Rules},
 	args::Args,
 	clap::StructOpt,
 	futures::{stream::FuturesUnordered, TryStreamExt},

@@ -1,18 +1,14 @@
 //! Build
 
 // Modules
-mod expand_expr;
-mod expand_rule;
-mod expand_target;
+mod expand_visitor;
 mod lock;
 mod match_expr;
 
 // Imports
 use {
 	self::{
-		expand_expr::{expand_expr, expand_expr_string},
-		expand_rule::expand_rule,
-		expand_target::expand_target,
+		expand_visitor::{GlobalVisitor, RuleOutputVisitor, RuleVisitor},
 		lock::{BuildLock, BuildLockDepGuard, BuildResult},
 		match_expr::match_expr,
 	},
@@ -20,6 +16,7 @@ use {
 		rules::{DepItem, Expr, OutItem, Rule, Target},
 		util,
 		AppError,
+		Expander,
 		Rules,
 	},
 	dashmap::DashMap,
@@ -63,6 +60,9 @@ pub struct Builder {
 	//       it closes the channel, so we need to keep it around.
 	_event_rx: async_broadcast::InactiveReceiver<Event>,
 
+	/// Expander
+	expander: Expander,
+
 	/// All targets' build status
 	targets: DashMap<Target<String>, BuildLock>,
 
@@ -80,6 +80,7 @@ impl Builder {
 		Self {
 			event_tx,
 			_event_rx: event_rx,
+			expander: Expander::new(),
 			targets: DashMap::<Target<String>, BuildLock>::new(),
 			exec_semaphore: Semaphore::new(jobs),
 		}
@@ -140,8 +141,10 @@ impl Builder {
 		rules: &Rules,
 	) -> Result<(Result<BuildResult, AppError>, BuildLockDepGuard), AppError> {
 		// Expand the target
-		let global_expr_visitor = expand_expr::GlobalVisitor::new(&rules.aliases);
-		let target = self::expand_target(target, global_expr_visitor).map_err(AppError::expand_target(target))?;
+		let target = self
+			.expander
+			.expand_target(target, &mut GlobalVisitor::new(&rules.aliases))
+			.map_err(AppError::expand_target(target))?;
 
 		// Then build
 		Ok(self.build(&target, rules).await)
@@ -198,7 +201,7 @@ impl Builder {
 		// Find and expand the rule to use for this target
 		let rule = match *target {
 			// If we got a file, check which rule can make it
-			Target::File { ref file, .. } => match self::find_rule_for_file(file, rules)? {
+			Target::File { ref file, .. } => match self.find_rule_for_file(file, rules)? {
 				Some(rule) => {
 					tracing::trace!(?target, ?rule.name, "Found target rule");
 					rule
@@ -224,7 +227,8 @@ impl Builder {
 				let rule = rules.rules.get(rule).ok_or_else(|| AppError::UnknownRule {
 					rule_name: rule.clone(),
 				})?;
-				self::expand_rule(rule, &rules.aliases, &rule.aliases, pats)
+				self.expander
+					.expand_rule(rule, &mut RuleVisitor::new(&rules.aliases, &rule.aliases, pats))
 					.map_err(AppError::expand_rule(&rule.name))?
 			},
 		};
@@ -521,6 +525,35 @@ impl Builder {
 
 		Ok(())
 	}
+
+	/// Finds a rule for `file`
+	// TODO: Not make this `O(N)` for the number of rules.
+	pub fn find_rule_for_file(&self, file: &str, rules: &Rules) -> Result<Option<Rule<String>>, AppError> {
+		for rule in rules.rules.values() {
+			for output in &rule.output {
+				// Expand all expressions in the output file
+				// Note: This doesn't expand patterns, so we can match those later
+				let output_file = match output {
+					OutItem::File { file: output_file } | OutItem::DepsFile { file: output_file } => output_file,
+				};
+				let file_cmpts = self
+					.expander
+					.expand_expr(output_file, &mut RuleOutputVisitor::new(&rules.aliases, &rule.aliases))?;
+
+				// Then try to match the output file to the file we need to create
+				if let Some(rule_pats) = self::match_expr(output_file, &file_cmpts, file)? {
+					let rule = self
+						.expander
+						.expand_rule(rule, &mut RuleVisitor::new(&rules.aliases, &rule.aliases, &rule_pats))
+						.map_err(AppError::expand_rule(&rule.name))?;
+					return Ok(Some(rule));
+				}
+			}
+		}
+
+		// If we got here, there was no matching rule
+		Ok(None)
+	}
 }
 
 /// Parses a dependencies file
@@ -579,34 +612,6 @@ fn file_modified_time(metadata: std::fs::Metadata) -> SystemTime {
 	);
 
 	SystemTime::UNIX_EPOCH + unix_offset
-}
-
-/// Finds a rule for `file`
-// TODO: Not make this `O(N)` for the number of rules.
-pub fn find_rule_for_file(file: &str, rules: &Rules) -> Result<Option<Rule<String>>, AppError> {
-	for rule in rules.rules.values() {
-		for output in &rule.output {
-			// Expand all expressions in the output file
-			// Note: This doesn't expand patterns, so we can match those later
-			let output_file = match output {
-				OutItem::File { file: output_file } | OutItem::DepsFile { file: output_file } => output_file,
-			};
-			let file_cmpts = self::expand_expr(
-				output_file,
-				&mut expand_expr::RuleOutputVisitor::new(&rules.aliases, &rule.aliases),
-			)?;
-
-			// Then try to match the output file to the file we need to create
-			if let Some(rule_pats) = self::match_expr(output_file, &file_cmpts, file)? {
-				let rule = self::expand_rule(rule, &rules.aliases, &rule.aliases, &rule_pats)
-					.map_err(AppError::expand_rule(&rule.name))?;
-				return Ok(Some(rule));
-			}
-		}
-	}
-
-	// If we got here, there was no matching rule
-	Ok(None)
 }
 
 /// Async `std::fs_try_exists`
