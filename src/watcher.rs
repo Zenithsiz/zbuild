@@ -69,18 +69,18 @@ impl Watcher {
 					.map(move |event| {
 						tracing::trace!(?event, "Watcher build event");
 						match event {
-							build::Event::TargetDepBuilt { target, dep, is_static } => {
+							build::Event::TargetDepBuilt { target, dep } => {
 								// Ignore static dependencies
 								// TODO: If the event is a removal event, we might care about a removal, or should
 								//       we enforce to the user that static items really should live for as long as
 								//       zbuild lives for?
-								if is_static {
+								if let Target::File { is_static, .. } = dep && is_static {
 									return;
 								}
 
 								// Ignore non-file targets and canonicalize file ones
 								let dep_path = match &dep {
-									Target::File { file } => match Path::new(file).canonicalize() {
+									Target::File { file, .. } => match Path::new(file).canonicalize() {
 										Ok(path) => path,
 										Err(err) => {
 											tracing::warn!("Unable to canonicalize {file:?}: {err:?}");
@@ -175,7 +175,7 @@ impl Watcher {
 					.iter()
 					.map(async move |target| {
 						tracing::info!("Rechecking: {target:?}");
-						let (res, _) = builder.build(target, rules, false).await;
+						let (res, _) = builder.build(target, rules).await;
 						res?;
 						Ok::<_, AppError>(())
 					})

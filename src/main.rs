@@ -15,7 +15,8 @@
 	decl_macro,
 	box_patterns,
 	try_blocks,
-	async_closure
+	async_closure,
+	let_chains
 )]
 
 // Modules
@@ -105,7 +106,8 @@ async fn main() -> Result<(), anyhow::Error> {
 
 				// Else just create a file
 				None => rules::Target::File {
-					file: rules::Expr::string(target),
+					file:      rules::Expr::string(target),
+					is_static: false,
 				},
 			})
 			.collect(),
@@ -129,7 +131,7 @@ async fn main() -> Result<(), anyhow::Error> {
 			let rules = &rules;
 			async move {
 				builder
-					.build_expr(target, rules, false)
+					.build_expr(target, rules)
 					.await
 					.map_err(AppError::build_target(target))
 			}

@@ -49,9 +49,8 @@ use {
 pub enum Event {
 	/// Target dependency built
 	TargetDepBuilt {
-		target:    Target<String>,
-		dep:       Target<String>,
-		is_static: bool,
+		target: Target<String>,
+		dep:    Target<String>,
 	},
 }
 
@@ -138,14 +137,13 @@ impl Builder {
 		&self,
 		target: &Target<Expr>,
 		rules: &Rules,
-		is_static: bool,
 	) -> Result<(Result<BuildResult, AppError>, BuildLockDepGuard), AppError> {
 		// Expand the target
 		let global_expr_visitor = expand_expr::GlobalVisitor::new(&rules.aliases);
 		let target = self::expand_target(target, global_expr_visitor).map_err(AppError::expand_target(target))?;
 
 		// Then build
-		Ok(self.build(&target, rules, is_static).await)
+		Ok(self.build(&target, rules).await)
 	}
 
 	/// Builds a target
@@ -153,7 +151,6 @@ impl Builder {
 		&self,
 		target: &Target<String>,
 		rules: &Rules,
-		is_static: bool,
 	) -> (Result<BuildResult, AppError>, BuildLockDepGuard) {
 		tracing::trace!(?target, "Building target");
 
@@ -182,7 +179,7 @@ impl Builder {
 
 					// Else build
 					None => {
-						let res = self.build_unchecked(target, rules, is_static).await;
+						let res = self.build_unchecked(target, rules).await;
 						let res = build_guard.finish(res);
 						(res, build_guard.into_dep())
 					},
@@ -194,16 +191,11 @@ impl Builder {
 	/// Builds a target without checking if the target is already being built.
 	// TODO: Split this function onto smaller ones
 	#[async_recursion::async_recursion]
-	async fn build_unchecked(
-		&self,
-		target: &Target<String>,
-		rules: &Rules,
-		is_static: bool,
-	) -> Result<BuildResult, AppError> {
+	async fn build_unchecked(&self, target: &Target<String>, rules: &Rules) -> Result<BuildResult, AppError> {
 		// Find and expand the rule to use for this target
-		let rule = match &target {
+		let rule = match *target {
 			// If we got a file, check which rule can make it
-			Target::File { file } => match self::find_rule_for_file(file, rules)? {
+			Target::File { ref file, .. } => match self::find_rule_for_file(file, rules)? {
 				Some(rule) => {
 					tracing::trace!(?target, ?rule.name, "Found target rule");
 					rule
@@ -218,14 +210,13 @@ impl Builder {
 					let res = BuildResult {
 						build_time,
 						built: false,
-						is_static,
 					};
 					return Ok(res);
 				},
 			},
 
 			// If we got a rule name with patterns, find it and replace all patterns
-			Target::Rule { rule, pats } => {
+			Target::Rule { ref rule, ref pats } => {
 				// Find the rule and expand it
 				let rule = rules.rules.get(rule).ok_or_else(|| AppError::UnknownRule {
 					rule_name: rule.clone(),
@@ -307,72 +298,41 @@ impl Builder {
 				async move {
 					tracing::trace!(?target, ?rule.name, ?dep, "Building target rule dependency");
 
-					enum DepTarget {
-						Build { target: Target<String>, is_static: bool },
-						None,
-					}
-
 					// Get the target to build
 					let dep_target = match dep {
 						// If output, don't do anything
-						Dep::File { is_output: true, .. } => DepTarget::None,
+						Dep::File { is_output: true, .. } => None,
 
-						// If static, but exists, only get it as a dependency
-						Dep::File {
-							file,
-							is_static: true,
-							exists: true,
-							..
-						} => DepTarget::Build {
-							target:    Target::File { file: file.to_owned() },
-							is_static: true,
-						},
+						// Else build it
+						Dep::File { file, is_static, .. } => Some(Target::File {
+							file: file.to_owned(),
+							is_static,
+						}),
 
-						// Else if non-static or static and doesn't exist, build it
-						Dep::File {
-							file, is_static: false, ..
-						} |
-						Dep::File {
-							file,
-							is_static: true,
-							exists: false,
-							..
-						} => DepTarget::Build {
-							target:    Target::File { file: file.to_owned() },
-							is_static: false,
-						},
-
-						// If a rule, execute it, regardless if it's out of date.
-						Dep::Rule { name, pats } => DepTarget::Build {
-							target:    Target::Rule {
-								rule: name.to_owned(),
-								pats: pats.clone(),
-							},
-							is_static: false,
-						},
+						// If a rule, always build
+						Dep::Rule { name, pats } => Some(Target::Rule {
+							rule: name.to_owned(),
+							pats: pats.clone(),
+						}),
 					};
 
 					// Then build it, if we should
-					let (dep_res, dep_guard) = match dep_target {
-						DepTarget::Build {
-							target: dep_target,
-							is_static,
-						} => {
-							let (res, dep_guard) = self.build(&dep_target, rules, is_static).await;
-							let res = res.map_err(AppError::build_target(&dep_target))?;
+					let (dep_res, dep_guard) = match &dep_target {
+						Some(dep_target) => {
+							let (res, dep_guard) = self.build(dep_target, rules).await;
+							let res = res.map_err(AppError::build_target(dep_target))?;
 							tracing::trace!(?target, ?rule.name, ?dep, ?res, "Built target rule dependency");
 
 							self.send_event(|| Event::TargetDepBuilt {
 								target: target.clone(),
-								dep: dep_target.clone(),
-								is_static,
+								dep:    dep_target.clone(),
 							})
 							.await;
 
 							(Some(res), Some(dep_guard))
 						},
 
-						DepTarget::None => (None, None),
+						None => (None, None),
 					};
 
 					// If the dependency if a dependency deps file or an output deps file (and exists), build it's dependencies too
@@ -396,7 +356,13 @@ impl Builder {
 						_ => vec![],
 					};
 
-					let deps = util::chain!(dep_res.zip(dep_guard), dep_deps.into_iter()).collect::<Vec<_>>();
+					let deps = util::chain!(
+						dep_target
+							.zip(dep_res.zip(dep_guard))
+							.map(|(dep_target, (dep_res, guard))| (dep_target, dep_res, guard)),
+						dep_deps.into_iter()
+					)
+					.collect::<Vec<_>>();
 					tracing::trace!(?target, ?rule.name, ?dep, ?deps, "Built target rule dependency dependencies");
 
 					Ok(deps)
@@ -411,8 +377,8 @@ impl Builder {
 
 		let deps_last_build_time = deps
 			.iter()
-			.filter(|(res, _)| !res.is_static)
-			.map(|(res, _)| res.build_time)
+			.filter(|(target, ..)| !target.is_static())
+			.map(|(_, res, _)| res.build_time)
 			.max();
 		tracing::trace!(?target, ?rule.name, ?deps_last_build_time, ?deps, "Built target rule dependencies");
 
@@ -445,8 +411,7 @@ impl Builder {
 		let cur_build_time = self::rule_last_build_time(&rule).await?.unwrap_or_else(SystemTime::now);
 		let res = BuildResult {
 			build_time: cur_build_time,
-			built: needs_rebuilt,
-			is_static,
+			built:      needs_rebuilt,
 		};
 
 		Ok(res)
@@ -461,7 +426,7 @@ impl Builder {
 		dep_file: &str,
 		rule: &Rule<String>,
 		rules: &Rules,
-	) -> Result<Vec<(BuildResult, BuildLockDepGuard)>, AppError> {
+	) -> Result<Vec<(Target<String>, BuildResult, BuildLockDepGuard)>, AppError> {
 		tracing::trace!(target=?parent_target, ?rule.name, ?dep_file, "Building dependencies of target rule dependency-file");
 		let (output, deps) = self::parse_deps_file(dep_file).await?;
 
@@ -497,20 +462,22 @@ impl Builder {
 		let deps_res = deps
 			.into_iter()
 			.map(|dep| {
-				let dep_target = Target::File { file: dep.clone() };
+				let dep_target = Target::File {
+					file:      dep.clone(),
+					is_static: false,
+				};
 				tracing::trace!(?rule.name, ?dep, "Found rule dependency");
 				async move {
-					let (res, dep_guard) = self.build(&dep_target, rules, false).await;
+					let (res, dep_guard) = self.build(&dep_target, rules).await;
 					let res = res.map_err(AppError::build_target(&dep_target))?;
 
 					self.send_event(|| Event::TargetDepBuilt {
-						target:    parent_target.clone(),
-						dep:       dep_target.clone(),
-						is_static: false,
+						target: parent_target.clone(),
+						dep:    dep_target.clone(),
 					})
 					.await;
 
-					Ok((res, dep_guard))
+					Ok((dep_target, res, dep_guard))
 				}
 			})
 			.collect::<FuturesUnordered<_>>()
@@ -655,9 +622,6 @@ impl BuildLockDepGuard {
 pub struct BuildResult {
 	/// Build time
 	pub build_time: SystemTime,
-
-	/// If static
-	pub is_static: bool,
 
 	/// If built from a rule
 	pub built: bool,
