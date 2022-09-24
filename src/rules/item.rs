@@ -33,8 +33,8 @@ impl OutItem<Expr> {
 impl<T: fmt::Display> fmt::Display for OutItem<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			OutItem::File { file } => write!(f, "{file}"),
-			OutItem::DepsFile { file } => write!(f, "dep_file: {file}"),
+			Self::File { file } => write!(f, "{file}"),
+			Self::DepsFile { file } => write!(f, "dep_file: {file}"),
 		}
 	}
 }
@@ -89,15 +89,15 @@ impl DepItem<Expr> {
 impl<T: fmt::Display> fmt::Display for DepItem<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			DepItem::File { file, is_static } => match is_static {
+			Self::File { file, is_static } => match is_static {
 				true => write!(f, "static: {file}"),
 				false => write!(f, "{file}"),
 			},
-			DepItem::DepsFile { file, is_static } => match is_static {
+			Self::DepsFile { file, is_static } => match is_static {
 				true => write!(f, "static: dep_file: {file}"),
 				false => write!(f, "dep_file: {file}"),
 			},
-			DepItem::Rule { name, pats } => {
+			Self::Rule { name, pats } => {
 				write!(f, "rule: {}", name)?;
 
 				if !pats.is_empty() {

@@ -161,17 +161,17 @@ pub struct GlobalVisitor<'global> {
 
 impl<'global> GlobalVisitor<'global> {
 	/// Creates a new global visitor
-	pub fn new(aliases: &'global HashMap<String, Expr>) -> Self {
+	pub const fn new(aliases: &'global HashMap<String, Expr>) -> Self {
 		Self { aliases }
 	}
 }
 
 impl<'global> Visitor for GlobalVisitor<'global> {
 	fn visit_alias(&mut self, alias_name: &str) -> FlowControl<Expr> {
-		match self.aliases.get(alias_name).cloned() {
-			Some(expr) => FlowControl::ExpandTo(expr),
-			None => FlowControl::Error,
-		}
+		self.aliases
+			.get(alias_name)
+			.cloned()
+			.map_or(FlowControl::Error, FlowControl::ExpandTo)
 	}
 
 	fn visit_pat(&mut self, _pat: &str) -> FlowControl<String> {
@@ -194,7 +194,10 @@ pub struct RuleOutputVisitor<'global, 'rule> {
 
 impl<'global, 'rule> RuleOutputVisitor<'global, 'rule> {
 	/// Creates a new rule output expression visitor
-	pub fn new(global_aliases: &'global HashMap<String, Expr>, rule_aliases: &'rule HashMap<String, Expr>) -> Self {
+	pub const fn new(
+		global_aliases: &'global HashMap<String, Expr>,
+		rule_aliases: &'rule HashMap<String, Expr>,
+	) -> Self {
 		Self {
 			global_aliases,
 			rule_aliases,
@@ -206,10 +209,11 @@ impl<'global, 'rule> Visitor for RuleOutputVisitor<'global, 'rule> {
 	fn visit_alias(&mut self, alias_name: &str) -> FlowControl<Expr> {
 		match self.rule_aliases.get(alias_name).cloned() {
 			Some(expr) => FlowControl::ExpandTo(expr),
-			None => match self.global_aliases.get(alias_name).cloned() {
-				Some(expr) => FlowControl::ExpandTo(expr),
-				None => FlowControl::Error,
-			},
+			None => self
+				.global_aliases
+				.get(alias_name)
+				.cloned()
+				.map_or(FlowControl::Error, FlowControl::ExpandTo),
 		}
 	}
 
@@ -236,7 +240,7 @@ pub struct RuleVisitor<'global, 'rule, 'pats> {
 
 impl<'global, 'rule, 'pats> RuleVisitor<'global, 'rule, 'pats> {
 	/// Creates a new rule visitor
-	pub fn new(
+	pub const fn new(
 		global_aliases: &'global HashMap<String, Expr>,
 		rule_aliases: &'rule HashMap<String, Expr>,
 		rule_pats: &'pats HashMap<String, String>,
@@ -253,17 +257,18 @@ impl<'global, 'rule, 'pats> Visitor for RuleVisitor<'global, 'rule, 'pats> {
 	fn visit_alias(&mut self, alias_name: &str) -> FlowControl<Expr> {
 		match self.rule_aliases.get(alias_name).cloned() {
 			Some(expr) => FlowControl::ExpandTo(expr),
-			None => match self.global_aliases.get(alias_name).cloned() {
-				Some(expr) => FlowControl::ExpandTo(expr),
-				None => FlowControl::Error,
-			},
+			None => self
+				.global_aliases
+				.get(alias_name)
+				.cloned()
+				.map_or(FlowControl::Error, FlowControl::ExpandTo),
 		}
 	}
 
 	fn visit_pat(&mut self, pat_name: &str) -> FlowControl<String> {
-		match self.rule_pats.get(pat_name).cloned() {
-			Some(value) => FlowControl::ExpandTo(value),
-			None => FlowControl::Error,
-		}
+		self.rule_pats
+			.get(pat_name)
+			.cloned()
+			.map_or(FlowControl::Error, FlowControl::ExpandTo)
 	}
 }

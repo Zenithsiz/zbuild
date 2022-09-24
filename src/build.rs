@@ -89,7 +89,7 @@ impl Builder {
 	}
 
 	/// Sends an event, if any are subscribers
-	async fn send_event(&self, make_event: impl FnOnce() -> Event) {
+	async fn send_event(&self, make_event: impl FnOnce() -> Event + Send) {
 		// Note: We only send them if there are any receivers (excluding ours, which is inactive),
 		//       to ensure we don't deadlock waiting for someone to read the events
 		if self.event_tx.receiver_count() > 0 {
@@ -719,7 +719,7 @@ pub fn find_rule_for_file(file: &str, rules: &Rules) -> Result<Option<Rule<Strin
 }
 
 /// Async `std::fs_try_exists`
-async fn fs_try_exists(path: impl AsRef<Path>) -> Result<bool, std::io::Error> {
+async fn fs_try_exists(path: impl AsRef<Path> + Send) -> Result<bool, std::io::Error> {
 	match fs::metadata(path).await {
 		Ok(_) => Ok(true),
 		Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),

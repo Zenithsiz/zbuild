@@ -83,9 +83,9 @@ impl fmt::Display for Expr {
 impl fmt::Display for ExprCmpt {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			ExprCmpt::String(s) => write!(f, "{s}"),
-			ExprCmpt::Pattern(pat) => write!(f, "{pat}"),
-			ExprCmpt::Alias(alias) => write!(f, "{alias}"),
+			Self::String(s) => write!(f, "{s}"),
+			Self::Pattern(pat) => write!(f, "{pat}"),
+			Self::Alias(alias) => write!(f, "{alias}"),
 		}
 	}
 }

@@ -36,7 +36,7 @@ pub enum Target<T> {
 
 impl<T> Target<T> {
 	/// Returns if this target is static
-	pub fn is_static(&self) -> bool {
+	pub const fn is_static(&self) -> bool {
 		match *self {
 			Self::File { is_static, .. } => is_static,
 			Self::Rule { .. } => false,
@@ -64,11 +64,11 @@ impl Hash for Target<String> {
 	fn hash<H: Hasher>(&self, state: &mut H) {
 		core::mem::discriminant(self).hash(state);
 		match self {
-			Target::File { file, is_static } => {
+			Self::File { file, is_static } => {
 				file.hash(state);
 				is_static.hash(state);
 			},
-			Target::Rule { rule, pats } => {
+			Self::Rule { rule, pats } => {
 				rule.hash(state);
 				// TODO: Not have to sort the patterns
 				for (pat, value) in pats.iter().sorted() {
@@ -84,11 +84,11 @@ impl Hash for Target<String> {
 impl<T: fmt::Display> fmt::Display for Target<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			Target::File { file, is_static } => match is_static {
+			Self::File { file, is_static } => match is_static {
 				true => write!(f, "static: file: {file}"),
 				false => write!(f, "file: {file}"),
 			},
-			Target::Rule { rule, pats } => {
+			Self::Rule { rule, pats } => {
 				write!(f, "rule: {rule}")?;
 
 				if !pats.is_empty() {

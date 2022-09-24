@@ -20,7 +20,7 @@
 	lint_reasons
 )]
 // Lints
-#![warn(clippy::pedantic)]
+#![warn(clippy::pedantic, clippy::nursery)]
 #![allow(clippy::match_bool, clippy::single_match_else)] // Matching boolean-likes looks better than if/else
 #![allow(clippy::items_after_statements)] // We'd prefer a lint that would trigger usages of it in previous statements
 #![allow(clippy::missing_errors_doc)] // TODO: Create errors on a per-function basic to avoid doing this
@@ -103,19 +103,20 @@ async fn main() -> Result<(), anyhow::Error> {
 		false => args
 			.targets
 			.into_iter()
-			.map(|target| match rules.rules.get(&target) {
-				// If there was a rule, use it without any patterns
-				// TODO: If it requires patterns maybe error out here?
-				Some(rule) => rules::Target::Rule {
-					rule: rules::Expr::string(rule.name.clone()),
-					pats: HashMap::new(),
-				},
-
-				// Else just create a file
-				None => rules::Target::File {
-					file:      rules::Expr::string(target),
-					is_static: false,
-				},
+			.map(|target| {
+				rules.rules.get(&target).map_or_else(
+					// By default, use a file
+					|| rules::Target::File {
+						file:      rules::Expr::string(target),
+						is_static: false,
+					},
+					// If there was a rule, use it without any patterns
+					// TODO: If it requires patterns maybe error out here?
+					|rule| rules::Target::Rule {
+						rule: rules::Expr::string(rule.name.clone()),
+						pats: HashMap::new(),
+					},
+				)
 			})
 			.collect(),
 	};

@@ -38,7 +38,7 @@ impl fmt::Display for Pattern {
 impl fmt::Display for PatternOp {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			PatternOp::NonEmpty => write!(f, "non_empty"),
+			Self::NonEmpty => write!(f, "non_empty"),
 		}
 	}
 }

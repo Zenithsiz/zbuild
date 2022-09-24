@@ -208,7 +208,7 @@ impl<'de> serde::Deserialize<'de> for Expr {
 			}
 		}
 
-		Ok(Expr { cmpts })
+		Ok(Self { cmpts })
 	}
 }
 

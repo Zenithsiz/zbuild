@@ -405,49 +405,49 @@ impl AppError {
 		move |err| Self::GetDefaultJobs { err }
 	}
 
-	pub fn alias_op(op: impl Into<AliasOp>) -> impl FnOnce(AppError) -> Self {
+	pub fn alias_op(op: impl Into<AliasOp>) -> impl FnOnce(Self) -> Self {
 		move |err| Self::AliasOp {
 			op:  op.into(),
 			err: Box::new(err),
 		}
 	}
 
-	pub fn build_target<T: fmt::Display>(target: &Target<T>) -> impl FnOnce(AppError) -> Self + '_ {
+	pub fn build_target<T: fmt::Display>(target: &Target<T>) -> impl FnOnce(Self) -> Self + '_ {
 		move |err| Self::BuildTarget {
 			target_fmt: target.to_string(),
 			err:        Box::new(err),
 		}
 	}
 
-	pub fn build_rule(rule_name: impl Into<String>) -> impl FnOnce(AppError) -> Self {
+	pub fn build_rule(rule_name: impl Into<String>) -> impl FnOnce(Self) -> Self {
 		move |err| Self::BuildRule {
 			rule_name: rule_name.into(),
 			err:       Box::new(err),
 		}
 	}
 
-	pub fn build_dep_file(dep_file: impl Into<PathBuf>) -> impl FnOnce(AppError) -> Self {
+	pub fn build_dep_file(dep_file: impl Into<PathBuf>) -> impl FnOnce(Self) -> Self {
 		move |err| Self::BuildDepFile {
 			dep_file: dep_file.into(),
 			err:      Box::new(err),
 		}
 	}
 
-	pub fn expand_rule(rule_name: impl Into<String>) -> impl FnOnce(AppError) -> Self {
+	pub fn expand_rule(rule_name: impl Into<String>) -> impl FnOnce(Self) -> Self {
 		move |err| Self::ExpandRule {
 			rule_name: rule_name.into(),
 			err:       Box::new(err),
 		}
 	}
 
-	pub fn expand_target<T: fmt::Display>(target: &Target<T>) -> impl FnOnce(AppError) -> Self + '_ {
+	pub fn expand_target<T: fmt::Display>(target: &Target<T>) -> impl FnOnce(Self) -> Self + '_ {
 		move |err| Self::ExpandTarget {
 			target_fmt: target.to_string(),
 			err:        Box::new(err),
 		}
 	}
 
-	pub fn expand_expr(expr: &Expr) -> impl FnOnce(AppError) -> Self + '_ {
+	pub fn expand_expr(expr: &Expr) -> impl FnOnce(Self) -> Self + '_ {
 		move |err| Self::ExpandExpr {
 			expr_fmt: expr.to_string(),
 			err:      Box::new(err),

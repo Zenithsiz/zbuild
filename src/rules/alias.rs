@@ -39,7 +39,7 @@ impl fmt::Display for Alias {
 impl fmt::Display for AliasOp {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			AliasOp::DirName => write!(f, "dir_name"),
+			Self::DirName => write!(f, "dir_name"),
 		}
 	}
 }
