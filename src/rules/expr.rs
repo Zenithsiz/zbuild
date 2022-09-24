@@ -39,8 +39,8 @@ impl Expr {
 			.map(|cmpt| match cmpt {
 				ast::ExprCmpt::String(s) => ExprCmpt::String(s.into_owned()),
 				ast::ExprCmpt::Pattern { name, ops } => ExprCmpt::Pattern(Pattern {
-					name,
-					ops: ops
+					name: name.into_owned(),
+					ops:  ops
 						.into_iter()
 						.map(|op| match op {
 							ast::PatternOp::NonEmpty => PatternOp::NonEmpty,
@@ -48,8 +48,8 @@ impl Expr {
 						.collect(),
 				}),
 				ast::ExprCmpt::Alias { name, ops } => ExprCmpt::Alias(Alias {
-					name,
-					ops: ops
+					name: name.into_owned(),
+					ops:  ops
 						.into_iter()
 						.map(|op| match op {
 							ast::AliasOp::DirName => AliasOp::DirName,

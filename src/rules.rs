@@ -47,13 +47,13 @@ impl Rules {
 		let aliases = ast
 			.aliases
 			.into_iter()
-			.map(|(alias, value)| (alias, Expr::new(value)))
+			.map(|(alias, value)| (alias.into_owned(), Expr::new(value)))
 			.collect();
 		let default = ast.default.into_iter().map(Target::new).collect();
 		let rules = ast
 			.rules
 			.into_iter()
-			.map(|(name, rule)| (name.clone(), Rule::new(name, rule)))
+			.map(|(name, rule)| (name.clone().into_owned(), Rule::new(name.into_owned(), rule)))
 			.collect();
 
 		Self {

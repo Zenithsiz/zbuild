@@ -14,7 +14,7 @@ pub struct Ast<'a> {
 	#[serde(rename = "alias")]
 	#[serde(default)]
 	#[serde(borrow)]
-	pub aliases: HashMap<String, Expr<'a>>,
+	pub aliases: HashMap<Cow<'a, str>, Expr<'a>>,
 
 	/// Default target
 	#[serde(default)]
@@ -23,7 +23,7 @@ pub struct Ast<'a> {
 
 	/// Rules
 	#[serde(borrow)]
-	pub rules: HashMap<String, Rule<'a>>,
+	pub rules: HashMap<Cow<'a, str>, Rule<'a>>,
 }
 
 /// Output Item
@@ -117,10 +117,10 @@ pub enum ExprCmpt<'a> {
 	String(Cow<'a, str>),
 
 	/// Pattern
-	Pattern { name: String, ops: Vec<PatternOp> },
+	Pattern { name: Cow<'a, str>, ops: Vec<PatternOp> },
 
 	/// Alias
-	Alias { name: String, ops: Vec<AliasOp> },
+	Alias { name: Cow<'a, str>, ops: Vec<AliasOp> },
 }
 
 /// Pattern operator
@@ -196,7 +196,7 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 					// Finally check what it was originally and parse all operations
 					let cmpt = match kind {
 						Kind::Alias => ExprCmpt::Alias {
-							name: name.to_owned(),
+							name: Cow::Borrowed(name),
 							ops:  ops
 								.into_iter()
 								.map(|op| match op.trim() {
@@ -206,7 +206,7 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 								.collect::<Result<_, _>>()?,
 						},
 						Kind::Pattern => ExprCmpt::Pattern {
-							name: name.to_owned(),
+							name: Cow::Borrowed(name),
 							ops:  ops
 								.into_iter()
 								.map(|op| match op.trim() {
@@ -241,7 +241,7 @@ pub struct Rule<'a> {
 	/// Aliases
 	#[serde(default)]
 	#[serde(borrow)]
-	pub alias: HashMap<String, Expr<'a>>,
+	pub alias: HashMap<Cow<'a, str>, Expr<'a>>,
 
 	/// Output items
 	#[serde(default)]
