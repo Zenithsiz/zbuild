@@ -6,6 +6,9 @@ use {
 	std::{borrow::Cow, collections::HashMap},
 };
 
+/// Alias for `Cow<'a, str>`
+type CowStr<'a> = Cow<'a, str>;
+
 /// Zbuild ast
 #[derive(Clone, Debug)]
 #[derive(serde::Deserialize)]
@@ -14,7 +17,7 @@ pub struct Ast<'a> {
 	#[serde(rename = "alias")]
 	#[serde(default)]
 	#[serde(borrow)]
-	pub aliases: HashMap<Cow<'a, str>, Expr<'a>>,
+	pub aliases: HashMap<CowStr<'a>, Expr<'a>>,
 
 	/// Default target
 	#[serde(default)]
@@ -23,7 +26,7 @@ pub struct Ast<'a> {
 
 	/// Rules
 	#[serde(borrow)]
-	pub rules: HashMap<Cow<'a, str>, Rule<'a>>,
+	pub rules: HashMap<CowStr<'a>, Rule<'a>>,
 }
 
 /// Output Item
@@ -114,13 +117,13 @@ pub struct Expr<'a> {
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub enum ExprCmpt<'a> {
 	/// String
-	String(Cow<'a, str>),
+	String(CowStr<'a>),
 
 	/// Pattern
-	Pattern { name: Cow<'a, str>, ops: Vec<PatternOp> },
+	Pattern { name: CowStr<'a>, ops: Vec<PatternOp> },
 
 	/// Alias
-	Alias { name: Cow<'a, str>, ops: Vec<AliasOp> },
+	Alias { name: CowStr<'a>, ops: Vec<AliasOp> },
 }
 
 /// Pattern operator
@@ -144,7 +147,7 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 		D: serde::Deserializer<'de>,
 	{
 		// Parse the string
-		// TODO: Use `Cow<'a, str>`? We need to clone in case we to get an owned
+		// TODO: Use `CowStr<'a>`? We need to clone in case we to get an owned
 		//       version, however, which complicates the code below
 		let expr_str = <&'a str>::deserialize(deserializer)?;
 
@@ -241,7 +244,7 @@ pub struct Rule<'a> {
 	/// Aliases
 	#[serde(default)]
 	#[serde(borrow)]
-	pub alias: HashMap<Cow<'a, str>, Expr<'a>>,
+	pub alias: HashMap<CowStr<'a>, Expr<'a>>,
 
 	/// Output items
 	#[serde(default)]
