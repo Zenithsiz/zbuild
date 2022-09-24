@@ -25,7 +25,6 @@ use {
 	std::{
 		collections::HashMap,
 		mem,
-		path::Path,
 		time::{Duration, SystemTime},
 	},
 	tokio::{fs, process::Command, sync::Semaphore},
@@ -263,14 +262,18 @@ impl Builder {
 					is_static,
 					is_dep_file: false,
 					is_output: false,
-					exists: fs_try_exists(file).await.map_err(AppError::check_file_exists(file))?,
+					exists: util::fs_try_exists(file)
+						.await
+						.map_err(AppError::check_file_exists(file))?,
 				}),
 				DepItem::DepsFile { ref file, is_static } => Ok(Dep::File {
 					file,
 					is_static,
 					is_dep_file: true,
 					is_output: false,
-					exists: fs_try_exists(file).await.map_err(AppError::check_file_exists(file))?,
+					exists: util::fs_try_exists(file)
+						.await
+						.map_err(AppError::check_file_exists(file))?,
 				}),
 				DepItem::Rule { ref name, ref pats } => Ok(Dep::Rule { name, pats }),
 			})
@@ -289,7 +292,9 @@ impl Builder {
 					is_static: false,
 					is_dep_file: true,
 					is_output: true,
-					exists: fs_try_exists(file).await.map_err(AppError::check_file_exists(file))?,
+					exists: util::fs_try_exists(file)
+						.await
+						.map_err(AppError::check_file_exists(file))?,
 				})),
 			})
 			.collect::<FuturesUnordered<_>>()
@@ -612,13 +617,4 @@ fn file_modified_time(metadata: std::fs::Metadata) -> SystemTime {
 	);
 
 	SystemTime::UNIX_EPOCH + unix_offset
-}
-
-/// Async `std::fs_try_exists`
-async fn fs_try_exists(path: impl AsRef<Path> + Send) -> Result<bool, std::io::Error> {
-	match fs::metadata(path).await {
-		Ok(_) => Ok(true),
-		Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
-		Err(err) => Err(err),
-	}
 }

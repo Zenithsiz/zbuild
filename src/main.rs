@@ -80,7 +80,8 @@ use {
 	args::Args,
 	clap::StructOpt,
 	futures::{stream::FuturesUnordered, TryStreamExt},
-	std::{collections::HashMap, env, fs, path::PathBuf},
+	std::{collections::HashMap, env, path::PathBuf},
+	tokio::fs,
 	watcher::Watcher,
 };
 
@@ -99,18 +100,18 @@ async fn main() -> Result<(), anyhow::Error> {
 	// Find the zbuild location and change the current directory to it
 	let zbuild_path = match args.zbuild_path {
 		Some(path) => path,
-		None => self::find_zbuild()?,
+		None => self::find_zbuild().await?,
 	};
 	let zbuild_dir = zbuild_path.parent().expect("Zbuild path had no parent");
 	tracing::trace!(?zbuild_path, "Found zbuild path");
 	std::env::set_current_dir(zbuild_dir).map_err(AppError::set_current_dir(zbuild_dir))?;
 
 	// Parse the ast
-	let ast = {
-		let zbuild_file = fs::File::open(&zbuild_path).map_err(AppError::open_file(&zbuild_path))?;
-		serde_yaml::from_reader::<_, Ast>(zbuild_file).map_err(AppError::parse_yaml(&zbuild_path))?
-	};
-	tracing::trace!(target: "zbuild_ast", ?ast, "Parsed ast");
+	let zbuild_file = fs::read_to_string(&zbuild_path)
+		.await
+		.map_err(AppError::read_file(&zbuild_path))?;
+	let ast = serde_yaml::from_str::<Ast>(&zbuild_file).map_err(AppError::parse_yaml(&zbuild_path))?;
+	tracing::trace!(target: "zbuild_ast", "Parsed ast: {ast:#?}");
 
 	// Build the rules
 	let rules = Rules::new(ast);
@@ -203,13 +204,16 @@ async fn main() -> Result<(), anyhow::Error> {
 }
 
 /// Finds the nearest zbuild file
-fn find_zbuild() -> Result<PathBuf, AppError> {
+async fn find_zbuild() -> Result<PathBuf, AppError> {
 	let cur_path = env::current_dir().map_err(AppError::get_current_dir())?;
 	let mut cur_path = cur_path.as_path();
 
 	loop {
 		let zbuild_path = cur_path.join("zbuild.yaml");
-		match fs::try_exists(&zbuild_path).map_err(AppError::check_file_exists(&zbuild_path))? {
+		match util::fs_try_exists(&zbuild_path)
+			.await
+			.map_err(AppError::check_file_exists(&zbuild_path))?
+		{
 			true => return Ok(zbuild_path),
 			false => match cur_path.parent() {
 				Some(parent) => cur_path = parent,

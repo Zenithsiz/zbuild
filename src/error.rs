@@ -43,17 +43,6 @@ pub enum AppError {
 		err: io::Error,
 	},
 
-	/// Open file
-	#[error("Unable to open file {file_path:?}")]
-	OpenFile {
-		/// File we failed to open
-		file_path: PathBuf,
-
-		/// Underlying error
-		#[source]
-		err: io::Error,
-	},
-
 	/// Read file
 	#[error("Unable to read file {file_path:?}")]
 	ReadFile {
@@ -335,13 +324,6 @@ impl AppError {
 	pub fn set_current_dir(dir_path: impl Into<PathBuf>) -> impl FnOnce(io::Error) -> Self {
 		move |err| Self::SetCurrentDir {
 			dir_path: dir_path.into(),
-			err,
-		}
-	}
-
-	pub fn open_file(file_path: impl Into<PathBuf>) -> impl FnOnce(io::Error) -> Self {
-		move |err| Self::OpenFile {
-			file_path: file_path.into(),
 			err,
 		}
 	}

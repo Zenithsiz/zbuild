@@ -9,54 +9,67 @@ use {
 /// Zbuild ast
 #[derive(Clone, Debug)]
 #[derive(serde::Deserialize)]
-pub struct Ast {
+pub struct Ast<'a> {
 	/// Aliases
 	#[serde(rename = "alias")]
 	#[serde(default)]
-	pub aliases: HashMap<String, Expr>,
+	#[serde(borrow)]
+	pub aliases: HashMap<String, Expr<'a>>,
 
 	/// Default target
 	#[serde(default)]
-	pub default: Vec<Target>,
+	#[serde(borrow)]
+	pub default: Vec<Target<'a>>,
 
 	/// Rules
-	pub rules: HashMap<String, Rule>,
+	#[serde(borrow)]
+	pub rules: HashMap<String, Rule<'a>>,
 }
 
 /// Output Item
 #[derive(Clone, Debug)]
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
-pub enum OutItem {
+pub enum OutItem<'a> {
 	/// File
-	File(Expr),
+	File(#[serde(borrow)] Expr<'a>),
 
 	/// Dependencies file
-	DepsFile { deps_file: Expr },
+	DepsFile {
+		#[serde(borrow)]
+		deps_file: Expr<'a>,
+	},
 }
 
 /// Dependency Item
 #[derive(Clone, Debug)]
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
-pub enum DepItem {
+pub enum DepItem<'a> {
 	/// File
-	File(Expr),
+	File(#[serde(borrow)] Expr<'a>),
 
 	/// Rule
 	Rule {
-		rule: Expr,
+		#[serde(borrow)]
+		rule: Expr<'a>,
+
 		#[serde(default)]
-		pats: HashMap<Expr, Expr>,
+		#[serde(borrow)]
+		pats: HashMap<Expr<'a>, Expr<'a>>,
 	},
 
 	/// Dependencies file
-	DepsFile { deps_file: Expr },
+	DepsFile {
+		#[serde(borrow)]
+		deps_file: Expr<'a>,
+	},
 
 	/// Static dependency
 	Static {
 		#[serde(rename = "static")]
-		item: StaticDepItem,
+		#[serde(borrow)]
+		item: StaticDepItem<'a>,
 	},
 }
 
@@ -64,38 +77,44 @@ pub enum DepItem {
 #[derive(Clone, Debug)]
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
-pub enum StaticDepItem {
+pub enum StaticDepItem<'a> {
 	/// File
-	File(Expr),
+	File(#[serde(borrow)] Expr<'a>),
 
 	/// Dependencies file
-	DepsFile { deps_file: Expr },
+	DepsFile {
+		#[serde(borrow)]
+		deps_file: Expr<'a>,
+	},
 }
 
 /// Target
 #[derive(Clone, Debug)]
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
-pub enum Target {
+pub enum Target<'a> {
 	/// File
-	File(Expr),
+	File(#[serde(borrow)] Expr<'a>),
 
 	/// Rule
-	Rule { rule: Expr },
+	Rule {
+		#[serde(borrow)]
+		rule: Expr<'a>,
+	},
 }
 
 /// Expression
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
-pub struct Expr {
+pub struct Expr<'a> {
 	/// Components
-	pub cmpts: Vec<ExprCmpt>,
+	pub cmpts: Vec<ExprCmpt<'a>>,
 }
 
 /// Expression component
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
-pub enum ExprCmpt {
+pub enum ExprCmpt<'a> {
 	/// String
-	String(String),
+	String(Cow<'a, str>),
 
 	/// Pattern
 	Pattern { name: String, ops: Vec<PatternOp> },
@@ -118,18 +137,20 @@ pub enum AliasOp {
 	DirName,
 }
 
-impl<'de> serde::Deserialize<'de> for Expr {
+impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 	#[allow(clippy::indexing_slicing, clippy::string_slice)] // We verify the indexes are correct
 	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
 	where
 		D: serde::Deserializer<'de>,
 	{
 		// Parse the string
-		let expr_str = Cow::<str>::deserialize(deserializer)?;
+		// TODO: Use `Cow<'a, str>`? We need to clone in case we to get an owned
+		//       version, however, which complicates the code below
+		let expr_str = <&'a str>::deserialize(deserializer)?;
 
 		// Then parse all components
 		let mut cmpts = vec![];
-		let mut rest = &*expr_str;
+		let mut rest = expr_str;
 		loop {
 			// Try to find the next pattern / alias
 			match rest.find(['$', '^']) {
@@ -137,7 +158,7 @@ impl<'de> serde::Deserialize<'de> for Expr {
 				Some(idx) => {
 					// Add the string until the pattern / alias, if it isn't empty
 					if !rest[..idx].is_empty() {
-						cmpts.push(ExprCmpt::String(rest[..idx].to_owned()));
+						cmpts.push(ExprCmpt::String(Cow::Borrowed(&rest[..idx])));
 					}
 
 					// Then check if it was an alias or pattern
@@ -202,7 +223,7 @@ impl<'de> serde::Deserialize<'de> for Expr {
 				None => {
 					// Add the rest only if it isn't empty
 					if !rest.is_empty() {
-						cmpts.push(ExprCmpt::String(rest.to_owned()));
+						cmpts.push(ExprCmpt::String(Cow::Borrowed(rest)));
 					}
 					break;
 				},
@@ -216,44 +237,49 @@ impl<'de> serde::Deserialize<'de> for Expr {
 /// Rule
 #[derive(Clone, Debug)]
 #[derive(serde::Deserialize)]
-pub struct Rule {
+pub struct Rule<'a> {
 	/// Aliases
 	#[serde(default)]
-	pub alias: HashMap<String, Expr>,
+	#[serde(borrow)]
+	pub alias: HashMap<String, Expr<'a>>,
 
 	/// Output items
 	#[serde(default)]
-	pub out: Vec<OutItem>,
+	#[serde(borrow)]
+	pub out: Vec<OutItem<'a>>,
 
 	/// Dependencies
 	#[serde(default)]
-	pub deps: Vec<DepItem>,
+	#[serde(borrow)]
+	pub deps: Vec<DepItem<'a>>,
 
 	/// Execution
 	#[serde(default)]
-	pub exec: Exec,
+	#[serde(borrow)]
+	pub exec: Exec<'a>,
 }
 
 /// Execution
 #[derive(Clone, Debug)]
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
-pub enum Exec {
+pub enum Exec<'a> {
 	/// Only commands
-	OnlyCmds(Vec<Command>),
+	OnlyCmds(Vec<Command<'a>>),
 
 	/// Full
 	Full {
 		/// working directory
 		#[serde(default)]
-		cwd: Option<Expr>,
+		#[serde(borrow)]
+		cwd: Option<Expr<'a>>,
 
 		/// Commands
-		cmds: Vec<Command>,
+		cmds: Vec<Command<'a>>,
 	},
 }
 
-impl Default for Exec {
+impl<'a> Default for Exec<'a> {
 	fn default() -> Self {
 		Self::OnlyCmds(vec![])
 	}
@@ -264,7 +290,8 @@ impl Default for Exec {
 #[derive(Clone, Debug)]
 #[derive(serde::Deserialize)]
 #[serde(transparent)]
-pub struct Command {
+pub struct Command<'a> {
 	/// All arguments
-	pub args: Vec<Expr>,
+	#[serde(borrow)]
+	pub args: Vec<Expr<'a>>,
 }

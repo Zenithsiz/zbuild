@@ -37,7 +37,7 @@ impl Expr {
 			.cmpts
 			.into_iter()
 			.map(|cmpt| match cmpt {
-				ast::ExprCmpt::String(s) => ExprCmpt::String(s),
+				ast::ExprCmpt::String(s) => ExprCmpt::String(s.into_owned()),
 				ast::ExprCmpt::Pattern { name, ops } => ExprCmpt::Pattern(Pattern {
 					name,
 					ops: ops
