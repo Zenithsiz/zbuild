@@ -369,9 +369,12 @@ impl Builder {
 					};
 
 					let deps = util::chain!(
-						dep_target
-							.zip(dep_res.zip(dep_guard))
-							.map(|(dep_target, (dep_res, guard))| (dep_target, dep_res, guard)),
+						match (dep_target, dep_res, dep_guard) {
+							(Some(dep_target), Some(dep_res), Some(dep_guard)) =>
+								Some((dep_target, dep_res, dep_guard)),
+							(None, None, None) => None,
+							_ => unreachable!(),
+						},
 						dep_deps.into_iter()
 					)
 					.collect::<Vec<_>>();
