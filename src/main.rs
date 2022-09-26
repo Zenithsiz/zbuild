@@ -112,7 +112,7 @@ async fn main() -> Result<(), anyhow::Error> {
 		.await
 		.map_err(AppError::read_file(&zbuild_path))?;
 	let ast = serde_yaml::from_str::<Ast>(&zbuild_file).map_err(AppError::parse_yaml(&zbuild_path))?;
-	tracing::trace!(target: "zbuild_ast", "Parsed ast: {ast:#?}");
+	tracing::trace!(target: "zbuild_ast", ?ast, "Parsed ast");
 
 	// Build the rules
 	let rules = Rules::new(ast);

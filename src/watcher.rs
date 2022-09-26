@@ -2,6 +2,8 @@
 
 // TODO: Should we react when rule outputs are changed, or only on leaf-dependencies
 
+// TODO: Output dependencies aren't considered here, if they didn't exist when the file was first built.
+
 // Imports
 use {
 	crate::{build, rules::Target, AppError, Builder, Rules},
