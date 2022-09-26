@@ -24,14 +24,15 @@ serde = {version = "1.0.143", features = ["derive"]}
 serde_yaml = "0.9.9"
 
 # Util
+async-broadcast = "0.4.1"
 async-recursion = "1.0.0"
 byteorder = "1.4.3"
 dashmap = "5.3.4"
 filetime = "0.2.17"
 futures = "0.3.23"
 itertools = "0.10.3"
-petgraph = "0.6.2"
 notify = "5.0.0"
-async-broadcast = "0.4.1"
-tokio-stream = "0.1.10"
 notify-debouncer-mini = "0.2.1"
+npath = {git = "https://github.com/gdzx/npath", rev = "00acdd2974bb1682b6d1dcc6f0ea7cd54da42381"}
+petgraph = "0.6.2"
+tokio-stream = "0.1.10"

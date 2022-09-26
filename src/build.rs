@@ -214,11 +214,20 @@ impl Builder {
 	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
 		tracing::trace!(?target, "Building target");
 
+		// Normalize file paths
+		let target = match *target {
+			Target::File { ref file, is_static } => Target::File {
+				file: util::normalize_path(file),
+				is_static,
+			},
+			ref target @ Target::Rule { .. } => target.clone(),
+		};
+
 		// Get the rule for the target
-		let (rule, target_rule) = match self.target_rule(target, rules)? {
+		let (rule, target_rule) = match self.target_rule(&target, rules)? {
 			Some((rule, target_rule)) => (rule, target_rule),
 			None => match target {
-				Target::File { file, .. } => {
+				Target::File { ref file, .. } => {
 					let metadata = fs::metadata(file).await.map_err(AppError::missing_file(file))?;
 					let build_time = self::file_modified_time(metadata);
 					tracing::trace!(?target, ?build_time, "Found target file");
@@ -242,7 +251,7 @@ impl Builder {
 
 		// Then check if built
 		let build_guard = build_lock.lock_dep().await;
-		match build_guard.res(target) {
+		match build_guard.res(&target) {
 			// If we got it, we were built, so just return the guard
 			Some(res) => res.map(|res| (res, Some(build_guard))),
 
@@ -254,14 +263,14 @@ impl Builder {
 				#[allow(clippy::shadow_unrelated)] // They are the same even if redeclared
 				let mut build_guard = build_lock.lock_build().await;
 
-				match build_guard.res(target) {
+				match build_guard.res(&target) {
 					// If we got it in the meantime, return it
 					Some(res) => res.map(|res| (res, Some(build_guard.into_dep()))),
 
 					// Else build
 					None => {
-						let res = self.build_unchecked(target, &rule, rules).await;
-						let res = build_guard.finish(target, res);
+						let res = self.build_unchecked(&target, &rule, rules).await;
+						let res = build_guard.finish(&target, res);
 						res.map(|res| (res, Some(build_guard.into_dep())))
 					},
 				}
@@ -523,11 +532,12 @@ impl Builder {
 		let deps_res = deps
 			.into_iter()
 			.map(|dep| {
+				let dep = util::normalize_path(&dep);
+				tracing::trace!(?rule.name, ?dep, "Found rule dependency");
 				let dep_target = Target::File {
-					file:      dep.clone(),
+					file:      dep,
 					is_static: false,
 				};
-				tracing::trace!(?rule.name, ?dep, "Found rule dependency");
 				async move {
 					let (res, dep_guard) = self
 						.build(&dep_target, rules)

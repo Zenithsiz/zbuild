@@ -17,7 +17,8 @@
 	try_blocks,
 	async_closure,
 	let_chains,
-	lint_reasons
+	lint_reasons,
+	main_separator_str
 )]
 // Lints
 #![forbid(unsafe_code)]

@@ -452,6 +452,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "npath"
+version = "0.1.0"
+source = "git+https://github.com/gdzx/npath?rev=00acdd2974bb1682b6d1dcc6f0ea7cd54da42381#00acdd2974bb1682b6d1dcc6f0ea7cd54da42381"
+
+[[package]]
 name = "num_cpus"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -986,6 +991,7 @@ dependencies = [
  "itertools",
  "notify",
  "notify-debouncer-mini",
+ "npath",
  "petgraph",
  "serde",
  "serde_yaml",

@@ -1,15 +1,16 @@
 {
-	"cSpell.words": [
-		"Cmds",
-		"Cmpt",
-		"cmpts",
-		"dashmap",
-		"debouncer",
-		"filetime",
-		"itertools",
-		"mapref",
-		"petgraph",
-		"thiserror",
-		"Zbuild"
-	]
+  "cSpell.words": [
+    "Cmds",
+    "Cmpt",
+    "cmpts",
+    "dashmap",
+    "debouncer",
+    "filetime",
+    "itertools",
+    "mapref",
+    "npath",
+    "petgraph",
+    "thiserror",
+    "Zbuild"
+  ]
 }
