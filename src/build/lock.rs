@@ -2,8 +2,8 @@
 
 // Imports
 use {
-	crate::AppError,
-	std::{sync::Arc, time::SystemTime},
+	crate::{rules::Target, AppError},
+	std::{collections::HashMap, sync::Arc, time::SystemTime},
 	tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock},
 };
 
@@ -20,8 +20,8 @@ pub struct BuildResult {
 /// Build state
 #[derive(Clone, Debug)]
 pub struct BuildState {
-	/// Result, if built
-	res: Option<Result<BuildResult, Arc<AppError>>>,
+	/// Targets' result
+	targets_res: HashMap<Target<String>, Result<BuildResult, Arc<AppError>>>,
 }
 
 /// Build lock
@@ -35,7 +35,9 @@ impl BuildLock {
 	/// Creates a new build lock
 	pub fn new() -> Self {
 		Self {
-			state: Arc::new(RwLock::new(BuildState { res: None })),
+			state: Arc::new(RwLock::new(BuildState {
+				targets_res: HashMap::new(),
+			})),
 		}
 	}
 
@@ -53,16 +55,17 @@ impl BuildLock {
 		}
 	}
 
-	/// Retrieves the result of this state.
+	/// Retrieves all targets' result
 	///
 	/// Waits for any builders to finish
-	pub async fn res(&self) -> Option<Result<BuildResult, AppError>> {
+	pub async fn all_res(&self) -> Vec<(Target<String>, Result<BuildResult, AppError>)> {
 		self.state
 			.read()
 			.await
-			.res
-			.clone()
-			.map(|res| res.map_err(AppError::Shared))
+			.targets_res
+			.iter()
+			.map(|(target, res)| (target.clone(), res.clone().map_err(AppError::Shared)))
+			.collect()
 	}
 }
 
@@ -74,9 +77,15 @@ pub struct BuildLockBuildGuard {
 }
 
 impl BuildLockBuildGuard {
-	/// Returns the result of the build
-	pub fn res(&self) -> Option<Result<BuildResult, AppError>> {
-		self.state.res.clone().map(|res| res.map_err(AppError::Shared))
+	/// Retrieves a target's result
+	///
+	/// Waits for any builders to finish
+	pub fn res(&self, target: &Target<String>) -> Option<Result<BuildResult, AppError>> {
+		self.state
+			.targets_res
+			.get(target)
+			.cloned()
+			.map(|res| res.map_err(AppError::Shared))
 	}
 
 	/// Downgrades this build lock into a dependency lock
@@ -87,14 +96,18 @@ impl BuildLockBuildGuard {
 	}
 
 	/// Resets this build.
-	pub fn reset(&mut self) {
-		self.state.res = None;
+	pub fn reset(&mut self, target: &Target<String>) {
+		self.state.targets_res.remove(target);
 	}
 
 	/// Finishes a build
-	pub fn finish(&mut self, res: Result<BuildResult, AppError>) -> Result<BuildResult, AppError> {
+	pub fn finish(
+		&mut self,
+		target: &Target<String>,
+		res: Result<BuildResult, AppError>,
+	) -> Result<BuildResult, AppError> {
 		let res = res.map_err(Arc::new);
-		self.state.res = Some(res.clone());
+		self.state.targets_res.insert(target.clone(), res.clone());
 		res.map_err(AppError::Shared)
 	}
 }
@@ -107,8 +120,14 @@ pub struct BuildLockDepGuard {
 }
 
 impl BuildLockDepGuard {
-	/// Returns the result of the build
-	pub fn res(&self) -> Option<Result<BuildResult, AppError>> {
-		self.state.res.clone().map(|res| res.map_err(AppError::Shared))
+	/// Retrieves a target's result
+	///
+	/// Waits for any builders to finish
+	pub fn res(&self, target: &Target<String>) -> Option<Result<BuildResult, AppError>> {
+		self.state
+			.targets_res
+			.get(target)
+			.cloned()
+			.map(|res| res.map_err(AppError::Shared))
 	}
 }

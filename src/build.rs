@@ -22,6 +22,7 @@ use {
 	dashmap::DashMap,
 	filetime::FileTime,
 	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
+	itertools::Itertools,
 	std::{
 		collections::HashMap,
 		mem,
@@ -33,10 +34,6 @@ use {
 // TODO: If the user zbuild file is not generated properly, it can
 //       make us deadlock, check for cycles somehow
 
-// TODO: By implementing locks at the target-level, we might get races
-//       when a single rule has multiple targets that each want to be
-//       built simultaneously
-
 /// Event
 #[derive(Clone, Debug)]
 pub enum Event {
@@ -45,6 +42,16 @@ pub enum Event {
 		target: Target<String>,
 		dep:    Target<String>,
 	},
+}
+
+/// Target rule
+#[derive(PartialEq, Eq, Clone, Hash, Debug)]
+pub struct TargetRule {
+	/// Name
+	name: String,
+
+	/// Patterns (sorted)
+	pats: Vec<(String, String)>,
 }
 
 /// Builder
@@ -62,8 +69,8 @@ pub struct Builder {
 	/// Expander
 	expander: Expander,
 
-	/// All targets' build status
-	targets: DashMap<Target<String>, BuildLock>,
+	/// All rules' build lock
+	rules_lock: DashMap<TargetRule, BuildLock>,
 
 	/// Command execution semaphore
 	exec_semaphore: Semaphore,
@@ -80,7 +87,7 @@ impl Builder {
 			event_tx,
 			_event_rx: event_rx,
 			expander: Expander::new(),
-			targets: DashMap::<Target<String>, BuildLock>::new(),
+			rules_lock: DashMap::new(),
 			exec_semaphore: Semaphore::new(jobs),
 		}
 	}
@@ -106,29 +113,79 @@ impl Builder {
 	///
 	/// Waits for targets being built
 	pub async fn targets(&self) -> HashMap<Target<String>, Result<BuildResult, AppError>> {
-		self.targets
+		self.rules_lock
 			.iter()
-			.map(async move |entry| {
-				let res = entry.value().res().await?;
-				Some((entry.key().clone(), res))
-			})
+			.map(async move |entry| entry.value().all_res().await)
 			.collect::<FuturesUnordered<_>>()
-			.filter_map(async move |opt| opt)
-			.collect()
+			.collect::<Vec<_>>()
 			.await
+			.into_iter()
+			.flatten()
+			.collect()
+	}
+
+	/// Finds a target's rule
+	fn target_rule(
+		&self,
+		target: &Target<String>,
+		rules: &Rules,
+	) -> Result<Option<(Rule<String>, TargetRule)>, AppError> {
+		let target_rule = match *target {
+			// If we got a file, check which rule can make it
+			Target::File { ref file, .. } => match self.find_rule_for_file(file, rules)? {
+				Some((rule, pats)) => {
+					tracing::trace!(?target, ?rule.name, "Found target rule");
+					let target_rule = TargetRule {
+						name: rule.name.clone(),
+						pats: pats.into_iter().sorted().collect(),
+					};
+					(rule, target_rule)
+				},
+
+				None => return Ok(None),
+			},
+
+			// If we got a rule name with patterns, find it and replace all patterns
+			Target::Rule { ref rule, ref pats } => {
+				// Find the rule and expand it
+				let rule = rules.rules.get(rule).ok_or_else(|| AppError::UnknownRule {
+					rule_name: rule.clone(),
+				})?;
+				let rule = self
+					.expander
+					.expand_rule(rule, &mut RuleVisitor::new(&rules.aliases, &rule.aliases, pats))
+					.map_err(AppError::expand_rule(&rule.name))?;
+				let target_rule = TargetRule {
+					name: rule.name.clone(),
+					pats: pats
+						.iter()
+						.map(|(pat, value)| (pat.clone(), value.clone()))
+						.sorted()
+						.collect(),
+				};
+				(rule, target_rule)
+			},
+		};
+		Ok(Some(target_rule))
 	}
 
 	/// Resets a build
-	pub async fn reset_build(&self, target: &Target<String>) -> Result<(), AppError> {
+	pub async fn reset_build(&self, target: &Target<String>, rules: &Rules) -> Result<(), AppError> {
+		// Get the rule for the target
+		let target_rule = match self.target_rule(target, rules)? {
+			Some((_, target_rule)) => target_rule,
+			None => return Ok(()),
+		};
+
 		// Get the built lock, or create it
 		let build_lock = self
-			.targets
-			.entry(target.clone())
+			.rules_lock
+			.entry(target_rule)
 			.or_insert_with(BuildLock::new)
 			.clone();
 
 		// Then remove it's state
-		build_lock.lock_build().await.reset();
+		build_lock.lock_build().await.reset(target);
 
 		Ok(())
 	}
@@ -138,7 +195,7 @@ impl Builder {
 		&self,
 		target: &Target<Expr>,
 		rules: &Rules,
-	) -> Result<(BuildResult, BuildLockDepGuard), AppError> {
+	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
 		// Expand the target
 		let target = self
 			.expander
@@ -154,21 +211,40 @@ impl Builder {
 		&self,
 		target: &Target<String>,
 		rules: &Rules,
-	) -> Result<(BuildResult, BuildLockDepGuard), AppError> {
+	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
 		tracing::trace!(?target, "Building target");
+
+		// Get the rule for the target
+		let (rule, target_rule) = match self.target_rule(target, rules)? {
+			Some((rule, target_rule)) => (rule, target_rule),
+			None => match target {
+				Target::File { file, .. } => {
+					let metadata = fs::metadata(file).await.map_err(AppError::missing_file(file))?;
+					let build_time = self::file_modified_time(metadata);
+					tracing::trace!(?target, ?build_time, "Found target file");
+					let res = BuildResult {
+						build_time,
+						built: false,
+					};
+					return Ok((res, None));
+				},
+				// Note: If `target_rule` returns `Err` if this was a rule, so we can never reach here
+				Target::Rule { .. } => unreachable!(),
+			},
+		};
 
 		// Get the built lock, or create it
 		let build_lock = self
-			.targets
-			.entry(target.clone())
+			.rules_lock
+			.entry(target_rule)
 			.or_insert_with(BuildLock::new)
 			.clone();
 
 		// Then check if built
 		let build_guard = build_lock.lock_dep().await;
-		match build_guard.res() {
+		match build_guard.res(target) {
 			// If we got it, we were built, so just return the guard
-			Some(res) => res.map(|res| (res, build_guard)),
+			Some(res) => res.map(|res| (res, Some(build_guard))),
 
 			// Else build first
 			// Note: Tokio read lock don't support upgrading, so we do a double-checked
@@ -178,15 +254,15 @@ impl Builder {
 				#[allow(clippy::shadow_unrelated)] // They are the same even if redeclared
 				let mut build_guard = build_lock.lock_build().await;
 
-				match build_guard.res() {
+				match build_guard.res(target) {
 					// If we got it in the meantime, return it
-					Some(res) => res.map(|res| (res, build_guard.into_dep())),
+					Some(res) => res.map(|res| (res, Some(build_guard.into_dep()))),
 
 					// Else build
 					None => {
-						let res = self.build_unchecked(target, rules).await;
-						let res = build_guard.finish(res);
-						res.map(|res| (res, build_guard.into_dep()))
+						let res = self.build_unchecked(target, &rule, rules).await;
+						let res = build_guard.finish(target, res);
+						res.map(|res| (res, Some(build_guard.into_dep())))
 					},
 				}
 			},
@@ -196,43 +272,12 @@ impl Builder {
 	/// Builds a target without checking if the target is already being built.
 	#[expect(clippy::too_many_lines)] // TODO: Split this function onto smaller ones
 	#[async_recursion::async_recursion]
-	async fn build_unchecked(&self, target: &Target<String>, rules: &Rules) -> Result<BuildResult, AppError> {
-		// Find and expand the rule to use for this target
-		let rule = match *target {
-			// If we got a file, check which rule can make it
-			Target::File { ref file, .. } => match self.find_rule_for_file(file, rules)? {
-				Some(rule) => {
-					tracing::trace!(?target, ?rule.name, "Found target rule");
-					rule
-				},
-
-				// Else, if no rule can make it, we'll assume it's an existing file
-				// and return it's modification date as the build time.
-				None => {
-					let metadata = fs::metadata(file).await.map_err(AppError::missing_file(file))?;
-					let build_time = self::file_modified_time(metadata);
-					tracing::trace!(?target, ?build_time, "Found target file");
-					let res = BuildResult {
-						build_time,
-						built: false,
-					};
-					return Ok(res);
-				},
-			},
-
-			// If we got a rule name with patterns, find it and replace all patterns
-			Target::Rule { ref rule, ref pats } => {
-				// Find the rule and expand it
-				let rule = rules.rules.get(rule).ok_or_else(|| AppError::UnknownRule {
-					rule_name: rule.clone(),
-				})?;
-				self.expander
-					.expand_rule(rule, &mut RuleVisitor::new(&rules.aliases, &rule.aliases, pats))
-					.map_err(AppError::expand_rule(&rule.name))?
-			},
-		};
-
-
+	async fn build_unchecked(
+		&self,
+		target: &Target<String>,
+		rule: &Rule<String>,
+		rules: &Rules,
+	) -> Result<BuildResult, AppError> {
 		/// Dependency
 		#[derive(Clone, Copy, Debug)]
 		enum Dep<'a> {
@@ -401,7 +446,7 @@ impl Builder {
 
 		// Afterwards check the last time we've built the rule and compare it with
 		// the dependency build times.
-		let rule_last_build_time = self::rule_last_build_time(&rule).await;
+		let rule_last_build_time = self::rule_last_build_time(rule).await;
 		let needs_rebuilt = match (deps_last_build_time, &rule_last_build_time) {
 			// If any files were missing, or we had no outputs, build
 			(_, Err(_) | Ok(None)) => true,
@@ -418,14 +463,14 @@ impl Builder {
 		// Then rebuild, if needed
 		if needs_rebuilt {
 			tracing::trace!(?target, ?rule.name, "Rebuilding target rule");
-			self.rebuild_rule(&rule)
+			self.rebuild_rule(rule)
 				.await
 				.map_err(AppError::build_rule(&rule.name))?;
 		}
 
 		// Then get the build time
 		// Note: If we don't have any outputs, just use the current time as the build time
-		let cur_build_time = self::rule_last_build_time(&rule).await?.unwrap_or_else(SystemTime::now);
+		let cur_build_time = self::rule_last_build_time(rule).await?.unwrap_or_else(SystemTime::now);
 		let res = BuildResult {
 			build_time: cur_build_time,
 			built:      needs_rebuilt,
@@ -443,7 +488,7 @@ impl Builder {
 		dep_file: &str,
 		rule: &Rule<String>,
 		rules: &Rules,
-	) -> Result<Vec<(Target<String>, BuildResult, BuildLockDepGuard)>, AppError> {
+	) -> Result<Vec<(Target<String>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {
 		tracing::trace!(target=?parent_target, ?rule.name, ?dep_file, "Building dependencies of target rule dependency-file");
 		let (output, deps) = self::parse_deps_file(dep_file).await?;
 
@@ -540,7 +585,12 @@ impl Builder {
 
 	/// Finds a rule for `file`
 	// TODO: Not make this `O(N)` for the number of rules.
-	pub fn find_rule_for_file(&self, file: &str, rules: &Rules) -> Result<Option<Rule<String>>, AppError> {
+	#[allow(clippy::type_complexity)] // TODO: Add some type aliases / struct
+	pub fn find_rule_for_file(
+		&self,
+		file: &str,
+		rules: &Rules,
+	) -> Result<Option<(Rule<String>, HashMap<String, String>)>, AppError> {
 		for rule in rules.rules.values() {
 			for output in &rule.output {
 				// Expand all expressions in the output file
@@ -558,7 +608,7 @@ impl Builder {
 						.expander
 						.expand_rule(rule, &mut RuleVisitor::new(&rules.aliases, &rule.aliases, &rule_pats))
 						.map_err(AppError::expand_rule(&rule.name))?;
-					return Ok(Some(rule));
+					return Ok(Some((rule, rule_pats)));
 				}
 			}
 		}

@@ -157,10 +157,10 @@ impl Watcher {
 
 				// Reset the dependency and all parents' builds
 				futures::try_join!(
-					builder.reset_build(&rev_dep.target),
+					builder.reset_build(&rev_dep.target, rules),
 					dep_parents
 						.iter()
-						.map(async move |target| builder.reset_build(target).await)
+						.map(async move |target| builder.reset_build(target, rules).await)
 						.collect::<FuturesUnordered<_>>()
 						.try_collect::<()>()
 				)?;
