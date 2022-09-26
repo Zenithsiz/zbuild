@@ -35,10 +35,6 @@ use {
 // TODO: If the user zbuild file is not generated properly, it can
 //       make us deadlock, check for cycles somehow
 
-// TODO: By implementing locks at the target-level, we might get races
-//       when a single rule has multiple targets that each want to be
-//       built simultaneously
-
 /// Event
 #[derive(Clone, Debug)]
 pub enum Event {
