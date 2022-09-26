@@ -176,8 +176,11 @@ impl Watcher {
 					.iter()
 					.map(async move |target| {
 						tracing::info!("Rechecking: {target:?}");
-						let (res, _) = builder.build(target, rules).await;
-						res?;
+						builder
+							.build(target, rules)
+							.await
+							.map_err(AppError::build_target(target))?;
+
 						Ok::<_, AppError>(())
 					})
 					.collect::<FuturesUnordered<_>>()

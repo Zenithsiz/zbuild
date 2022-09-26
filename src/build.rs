@@ -138,7 +138,7 @@ impl Builder {
 		&self,
 		target: &Target<Expr>,
 		rules: &Rules,
-	) -> Result<(Result<BuildResult, AppError>, BuildLockDepGuard), AppError> {
+	) -> Result<(BuildResult, BuildLockDepGuard), AppError> {
 		// Expand the target
 		let target = self
 			.expander
@@ -146,7 +146,7 @@ impl Builder {
 			.map_err(AppError::expand_target(target))?;
 
 		// Then build
-		Ok(self.build(&target, rules).await)
+		self.build(&target, rules).await
 	}
 
 	/// Builds a target
@@ -154,7 +154,7 @@ impl Builder {
 		&self,
 		target: &Target<String>,
 		rules: &Rules,
-	) -> (Result<BuildResult, AppError>, BuildLockDepGuard) {
+	) -> Result<(BuildResult, BuildLockDepGuard), AppError> {
 		tracing::trace!(?target, "Building target");
 
 		// Get the built lock, or create it
@@ -168,7 +168,7 @@ impl Builder {
 		let build_guard = build_lock.lock_dep().await;
 		match build_guard.res() {
 			// If we got it, we were built, so just return the guard
-			Some(res) => (res, build_guard),
+			Some(res) => res.map(|res| (res, build_guard)),
 
 			// Else build first
 			// Note: Tokio read lock don't support upgrading, so we do a double-checked
@@ -180,13 +180,13 @@ impl Builder {
 
 				match build_guard.res() {
 					// If we got it in the meantime, return it
-					Some(res) => (res, build_guard.into_dep()),
+					Some(res) => res.map(|res| (res, build_guard.into_dep())),
 
 					// Else build
 					None => {
 						let res = self.build_unchecked(target, rules).await;
 						let res = build_guard.finish(res);
-						(res, build_guard.into_dep())
+						res.map(|res| (res, build_guard.into_dep()))
 					},
 				}
 			},
@@ -331,8 +331,10 @@ impl Builder {
 					// Then build it, if we should
 					let (dep_res, dep_guard) = match &dep_target {
 						Some(dep_target) => {
-							let (res, dep_guard) = self.build(dep_target, rules).await;
-							let res = res.map_err(AppError::build_target(dep_target))?;
+							let (res, dep_guard) = self
+								.build(dep_target, rules)
+								.await
+								.map_err(AppError::build_target(dep_target))?;
 							tracing::trace!(?target, ?rule.name, ?dep, ?res, "Built target rule dependency");
 
 							self.send_event(|| Event::TargetDepBuilt {
@@ -482,8 +484,10 @@ impl Builder {
 				};
 				tracing::trace!(?rule.name, ?dep, "Found rule dependency");
 				async move {
-					let (res, dep_guard) = self.build(&dep_target, rules).await;
-					let res = res.map_err(AppError::build_target(&dep_target))?;
+					let (res, dep_guard) = self
+						.build(&dep_target, rules)
+						.await
+						.map_err(AppError::build_target(&dep_target))?;
 
 					self.send_event(|| Event::TargetDepBuilt {
 						target: parent_target.clone(),
