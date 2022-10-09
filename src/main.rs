@@ -177,7 +177,7 @@ async fn main() -> Result<(), anyhow::Error> {
 			let rules = &rules;
 			async move {
 				builder
-					.build_expr(target, rules)
+					.build_expr(target, rules, args.ignore_missing)
 					.await
 					.map_err(AppError::build_target(target))
 			}
@@ -189,7 +189,7 @@ async fn main() -> Result<(), anyhow::Error> {
 	// Then, if we have a watcher, watch all the dependencies
 	if let Some(watcher) = watcher {
 		tracing::info!("Starting to watch for all targets");
-		watcher.watch_rebuild(&builder, &rules).await?;
+		watcher.watch_rebuild(&builder, &rules, args.ignore_missing).await?;
 	}
 
 	let targets = builder.targets().await;

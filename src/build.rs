@@ -195,6 +195,7 @@ impl Builder {
 		&self,
 		target: &Target<Expr>,
 		rules: &Rules,
+		ignore_missing: bool,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
 		// Expand the target
 		let target = self
@@ -203,7 +204,7 @@ impl Builder {
 			.map_err(AppError::expand_target(target))?;
 
 		// Then build
-		self.build(&target, rules).await
+		self.build(&target, rules, ignore_missing).await
 	}
 
 	/// Builds a target
@@ -211,6 +212,7 @@ impl Builder {
 		&self,
 		target: &Target<String>,
 		rules: &Rules,
+		ignore_missing: bool,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
 		tracing::trace!(?target, "Building target");
 
@@ -227,16 +229,33 @@ impl Builder {
 		let (rule, target_rule) = match self.target_rule(&target, rules)? {
 			Some((rule, target_rule)) => (rule, target_rule),
 			None => match target {
-				Target::File { ref file, .. } => {
-					let metadata = fs::metadata(file).await.map_err(AppError::missing_file(file))?;
-					let build_time = self::file_modified_time(metadata);
-					tracing::trace!(?target, ?build_time, "Found target file");
-					let res = BuildResult {
-						build_time,
-						built: false,
-					};
-					return Ok((res, None));
-				},
+				Target::File { ref file, .. } =>
+					return match fs::metadata(file).await {
+						Ok(metadata) => {
+							let build_time = self::file_modified_time(metadata);
+							tracing::trace!(?target, ?build_time, "Found target file");
+							Ok((
+								BuildResult {
+									build_time,
+									built: false,
+								},
+								None,
+							))
+						},
+						Err(_) if ignore_missing => {
+							tracing::info!("Ignoring missing target file: {file:?}");
+							Ok((
+								BuildResult {
+									// Note: We simply pretend the file was built right now
+									// TODO: Check if we should instead use a really old time?
+									build_time: SystemTime::now(),
+									built:      false,
+								},
+								None,
+							))
+						},
+						Err(err) => Err(AppError::missing_file(file)(err)),
+					},
 				// Note: If `target_rule` returns `Err` if this was a rule, so we can never reach here
 				Target::Rule { .. } => unreachable!(),
 			},
@@ -269,7 +288,7 @@ impl Builder {
 
 					// Else build
 					None => {
-						let res = self.build_unchecked(&target, &rule, rules).await;
+						let res = self.build_unchecked(&target, &rule, rules, ignore_missing).await;
 						let res = build_guard.finish(&target, res);
 						res.map(|res| (res, Some(build_guard.into_dep())))
 					},
@@ -286,6 +305,7 @@ impl Builder {
 		target: &Target<String>,
 		rule: &Rule<String>,
 		rules: &Rules,
+		ignore_missing: bool,
 	) -> Result<BuildResult, AppError> {
 		/// Dependency
 		#[derive(Clone, Copy, Debug)]
@@ -386,7 +406,7 @@ impl Builder {
 					let (dep_res, dep_guard) = match &dep_target {
 						Some(dep_target) => {
 							let (res, dep_guard) = self
-								.build(dep_target, rules)
+								.build(dep_target, rules, ignore_missing)
 								.await
 								.map_err(AppError::build_target(dep_target))?;
 							tracing::trace!(?target, ?rule.name, ?dep, ?res, "Built target rule dependency");
@@ -418,7 +438,7 @@ impl Builder {
 							exists: true,
 							..
 						} => self
-							.build_deps_file(target, file, rule, rules)
+							.build_deps_file(target, file, rule, rules, ignore_missing)
 							.await
 							.map_err(AppError::build_dep_file(file))?,
 						_ => vec![],
@@ -497,6 +517,7 @@ impl Builder {
 		dep_file: &str,
 		rule: &Rule<String>,
 		rules: &Rules,
+		ignore_missing: bool,
 	) -> Result<Vec<(Target<String>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {
 		tracing::trace!(target=?parent_target, ?rule.name, ?dep_file, "Building dependencies of target rule dependency-file");
 		let (output, deps) = self::parse_deps_file(dep_file).await?;
@@ -540,7 +561,7 @@ impl Builder {
 				};
 				async move {
 					let (res, dep_guard) = self
-						.build(&dep_target, rules)
+						.build(&dep_target, rules, ignore_missing)
 						.await
 						.map_err(AppError::build_target(&dep_target))?;
 

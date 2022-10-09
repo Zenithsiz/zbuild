@@ -33,6 +33,16 @@ pub struct Args {
 	#[clap(long = "jobs", short = 'j')]
 	pub jobs: Option<usize>,
 
+	/// Ignores missing files.
+	///
+	/// This is useful when you have a `.d` dependency file
+	/// that mentions a file, but you changed the code so that
+	/// file is no longer requires. The `.d` file only changes
+	/// after building the code, but zbuild assumes the file is
+	/// needed to build the code.
+	#[clap(long = "ignore-missing", short = 'i')]
+	pub ignore_missing: bool,
+
 	/// Watch for file changes and rebuild any necessary targets
 	#[clap(long = "watch", short = 'w')]
 	pub watch: bool,

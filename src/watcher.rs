@@ -118,7 +118,12 @@ impl Watcher {
 	}
 
 	/// Watches over all files and rebuilds any changed files
-	pub async fn watch_rebuild(mut self, builder: &Builder, rules: &Rules) -> Result<(), AppError> {
+	pub async fn watch_rebuild(
+		mut self,
+		builder: &Builder,
+		rules: &Rules,
+		ignore_missing: bool,
+	) -> Result<(), AppError> {
 		// Watch each target we have the reverse dependencies of
 		for entry in self.rev_deps.iter() {
 			let path = entry.key();
@@ -179,7 +184,7 @@ impl Watcher {
 					.map(async move |target| {
 						tracing::info!("Rechecking: {target:?}");
 						builder
-							.build(target, rules)
+							.build(target, rules, ignore_missing)
 							.await
 							.map_err(AppError::build_target(target))?;
 
