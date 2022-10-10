@@ -36,3 +36,4 @@ notify-debouncer-mini = "0.2.1"
 npath = {git = "https://github.com/gdzx/npath", rev = "00acdd2974bb1682b6d1dcc6f0ea7cd54da42381"}
 petgraph = "0.6.2"
 tokio-stream = "0.1.10"
+pin-project = "1.0.12"

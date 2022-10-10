@@ -1,7 +1,18 @@
 //! Utilities
 
 // Imports
-use {npath::NormPathExt, std::path::Path, tokio::fs};
+use {
+	futures::Future,
+	npath::NormPathExt,
+	pin_project::pin_project,
+	std::{
+		path::Path,
+		pin::Pin,
+		task,
+		time::{Duration, Instant},
+	},
+	tokio::fs,
+};
 
 /// Chains together any number of `IntoIterator`s
 pub macro chain {
@@ -21,6 +32,37 @@ pub async fn fs_try_exists(path: impl AsRef<Path> + Send) -> Result<bool, std::i
 		Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
 		Err(err) => Err(err),
 	}
+}
+
+/// Measures the duration of a fallible future
+#[allow(clippy::future_not_send)] // It is send if `F: Send`
+pub async fn try_measure_async<F: Future<Output = Result<T, E>>, T, E>(fut: F) -> Result<(Duration, T), E> {
+	#[pin_project]
+	struct Wrapper<F> {
+		/// Future
+		#[pin]
+		fut: F,
+
+		/// Start time
+		start: Option<Instant>,
+	}
+
+	impl<F: Future<Output = Result<T, E>>, T, E> Future for Wrapper<F> {
+		type Output = Result<(Duration, T), E>;
+
+		fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<Self::Output> {
+			let mut this = self.project();
+			let start = this.start.get_or_insert_with(Instant::now);
+
+			this.fut
+				.as_mut()
+				.poll(cx)
+				.map(|res| res.map(|value| (start.elapsed(), value)))
+		}
+	}
+
+
+	Wrapper { fut, start: None }.await
 }
 
 /// Normalizes a string path
