@@ -243,7 +243,7 @@ impl Builder {
 							))
 						},
 						Err(_) if ignore_missing => {
-							tracing::info!("Ignoring missing target file: {file:?}");
+							tracing::debug!("Ignoring missing target file: {file:?}");
 							Ok((
 								BuildResult {
 									// Note: We simply pretend the file was built right now
@@ -316,6 +316,7 @@ impl Builder {
 				is_static:   bool,
 				is_dep_file: bool,
 				is_output:   bool,
+				is_optional: bool,
 				exists:      bool,
 			},
 
@@ -331,20 +332,30 @@ impl Builder {
 			.deps
 			.iter()
 			.map(async move |dep| match *dep {
-				DepItem::File { ref file, is_static } => Ok(Dep::File {
+				DepItem::File {
+					ref file,
+					is_optional,
+					is_static,
+				} => Ok(Dep::File {
 					file,
 					is_static,
 					is_dep_file: false,
 					is_output: false,
+					is_optional,
 					exists: util::fs_try_exists(file)
 						.await
 						.map_err(AppError::check_file_exists(file))?,
 				}),
-				DepItem::DepsFile { ref file, is_static } => Ok(Dep::File {
+				DepItem::DepsFile {
+					ref file,
+					is_optional,
+					is_static,
+				} => Ok(Dep::File {
 					file,
 					is_static,
 					is_dep_file: true,
 					is_output: false,
+					is_optional,
 					exists: util::fs_try_exists(file)
 						.await
 						.map_err(AppError::check_file_exists(file))?,
@@ -366,6 +377,7 @@ impl Builder {
 					is_static: false,
 					is_dep_file: true,
 					is_output: true,
+					is_optional: false,
 					exists: util::fs_try_exists(file)
 						.await
 						.map_err(AppError::check_file_exists(file))?,
@@ -406,7 +418,11 @@ impl Builder {
 					let (dep_res, dep_guard) = match &dep_target {
 						Some(dep_target) => {
 							let (res, dep_guard) = self
-								.build(dep_target, rules, ignore_missing)
+								.build(
+									dep_target,
+									rules,
+									ignore_missing | matches!(dep, Dep::File { is_optional: true, .. }),
+								)
 								.await
 								.map_err(AppError::build_target(dep_target))?;
 							tracing::trace!(?target, ?rule.name, ?dep, ?res, "Built target rule dependency");

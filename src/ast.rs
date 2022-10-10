@@ -68,11 +68,20 @@ pub enum DepItem<'a> {
 		deps_file: Expr<'a>,
 	},
 
+	// TODO: Implement these some other way? We get a quadratic
+	//       blowup if we do them separately like this
 	/// Static dependency
 	Static {
 		#[serde(rename = "static")]
 		#[serde(borrow)]
 		item: StaticDepItem<'a>,
+	},
+
+	/// Optional dependency
+	Opt {
+		#[serde(rename = "opt")]
+		#[serde(borrow)]
+		item: OptDepItem<'a>,
 	},
 }
 
@@ -81,6 +90,21 @@ pub enum DepItem<'a> {
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
 pub enum StaticDepItem<'a> {
+	/// File
+	File(#[serde(borrow)] Expr<'a>),
+
+	/// Dependencies file
+	DepsFile {
+		#[serde(borrow)]
+		deps_file: Expr<'a>,
+	},
+}
+
+/// Optional Dependency Item
+#[derive(Clone, Debug)]
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+pub enum OptDepItem<'a> {
 	/// File
 	File(#[serde(borrow)] Expr<'a>),
 

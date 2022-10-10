@@ -44,10 +44,18 @@ impl<T: fmt::Display> fmt::Display for OutItem<T> {
 #[derive(Clone, Debug)]
 pub enum DepItem<T> {
 	/// File
-	File { file: T, is_static: bool },
+	File {
+		file:        T,
+		is_optional: bool,
+		is_static:   bool,
+	},
 
 	/// Dependencies file
-	DepsFile { file: T, is_static: bool },
+	DepsFile {
+		file:        T,
+		is_optional: bool,
+		is_static:   bool,
+	},
 
 	/// Rule
 	Rule { name: T, pats: HashMap<T, T> },
@@ -58,8 +66,9 @@ impl DepItem<Expr> {
 	pub fn new(item: ast::DepItem) -> Self {
 		match item {
 			ast::DepItem::File(file) => Self::File {
-				file:      Expr::new(file),
-				is_static: false,
+				file:        Expr::new(file),
+				is_optional: false,
+				is_static:   false,
 			},
 			ast::DepItem::Rule { rule, pats } => Self::Rule {
 				name: Expr::new(rule),
@@ -69,17 +78,32 @@ impl DepItem<Expr> {
 					.collect(),
 			},
 			ast::DepItem::DepsFile { deps_file } => Self::DepsFile {
-				file:      Expr::new(deps_file),
-				is_static: false,
+				file:        Expr::new(deps_file),
+				is_optional: false,
+				is_static:   false,
 			},
 			ast::DepItem::Static { item: static_item } => match static_item {
 				ast::StaticDepItem::File(file) => Self::File {
-					file:      Expr::new(file),
-					is_static: true,
+					file:        Expr::new(file),
+					is_optional: false,
+					is_static:   true,
 				},
 				ast::StaticDepItem::DepsFile { deps_file } => Self::DepsFile {
-					file:      Expr::new(deps_file),
-					is_static: true,
+					file:        Expr::new(deps_file),
+					is_optional: false,
+					is_static:   true,
+				},
+			},
+			ast::DepItem::Opt { item: opt_item } => match opt_item {
+				ast::OptDepItem::File(file) => Self::File {
+					file:        Expr::new(file),
+					is_optional: true,
+					is_static:   true,
+				},
+				ast::OptDepItem::DepsFile { deps_file } => Self::DepsFile {
+					file:        Expr::new(deps_file),
+					is_optional: true,
+					is_static:   true,
 				},
 			},
 		}
@@ -89,13 +113,25 @@ impl DepItem<Expr> {
 impl<T: fmt::Display> fmt::Display for DepItem<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			Self::File { file, is_static } => match is_static {
-				true => write!(f, "static: {file}"),
-				false => write!(f, "{file}"),
+			Self::File {
+				file,
+				is_optional,
+				is_static,
+			} => match (is_optional, is_static) {
+				(true, true) => write!(f, "opt: static: {file}"),
+				(true, false) => write!(f, "opt: {file}"),
+				(false, true) => write!(f, "static: {file}"),
+				(false, false) => write!(f, "{file}"),
 			},
-			Self::DepsFile { file, is_static } => match is_static {
-				true => write!(f, "static: dep_file: {file}"),
-				false => write!(f, "dep_file: {file}"),
+			Self::DepsFile {
+				file,
+				is_optional,
+				is_static,
+			} => match (is_optional, is_static) {
+				(true, true) => write!(f, "opt: static: dep_file: {file}"),
+				(true, false) => write!(f, "opt: dep_file: {file}"),
+				(false, true) => write!(f, "static: dep_file: {file}"),
+				(false, false) => write!(f, "dep_file: {file}"),
 			},
 			Self::Rule { name, pats } => {
 				write!(f, "rule: {}", name)?;

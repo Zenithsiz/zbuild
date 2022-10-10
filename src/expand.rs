@@ -164,12 +164,22 @@ impl Expander {
 			.deps
 			.iter()
 			.map(|item: &DepItem<Expr>| match *item {
-				DepItem::File { ref file, is_static } => Ok::<_, AppError>(DepItem::File {
+				DepItem::File {
+					ref file,
+					is_optional,
+					is_static,
+				} => Ok::<_, AppError>(DepItem::File {
 					file: self.expand_expr_string(file, visitor)?,
+					is_optional,
 					is_static,
 				}),
-				DepItem::DepsFile { ref file, is_static } => Ok::<_, AppError>(DepItem::DepsFile {
+				DepItem::DepsFile {
+					ref file,
+					is_optional,
+					is_static,
+				} => Ok::<_, AppError>(DepItem::DepsFile {
 					file: self.expand_expr_string(file, visitor)?,
+					is_optional,
 					is_static,
 				}),
 				DepItem::Rule { ref name, ref pats } => Ok::<_, AppError>(DepItem::Rule {
