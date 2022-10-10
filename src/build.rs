@@ -13,12 +13,13 @@ use {
 		match_expr::match_expr,
 	},
 	crate::{
-		rules::{DepItem, Expr, OutItem, Rule, Target},
+		rules::{DepItem, Exec, Expr, OutItem, Rule, Target},
 		util,
 		AppError,
 		Expander,
 		Rules,
 	},
+	anyhow::Context,
 	dashmap::DashMap,
 	filetime::FileTime,
 	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
@@ -26,9 +27,15 @@ use {
 	std::{
 		collections::HashMap,
 		mem,
+		thread::JoinHandle,
 		time::{Duration, SystemTime},
 	},
-	tokio::{fs, process::Command, sync::Semaphore},
+	tokio::{
+		fs,
+		process::Command,
+		sync::{mpsc, oneshot},
+	},
+	tokio_stream::wrappers::UnboundedReceiverStream,
 };
 
 // TODO: If the user zbuild file is not generated properly, it can
@@ -54,6 +61,19 @@ pub struct TargetRule {
 	pats: Vec<(String, String)>,
 }
 
+/// Rule exec
+#[derive(Debug)]
+pub struct RuleExec {
+	/// Rule name
+	rule_name: String,
+
+	/// Exec
+	exec: Exec<String>,
+
+	/// Result sender
+	res_tx: oneshot::Sender<Result<(), AppError>>,
+}
+
 /// Builder
 #[derive(Debug)]
 pub struct Builder {
@@ -66,30 +86,54 @@ pub struct Builder {
 	//       it closes the channel, so we need to keep it around.
 	_event_rx: async_broadcast::InactiveReceiver<Event>,
 
+	/// Command sender
+	cmd_tx: mpsc::UnboundedSender<RuleExec>,
+
 	/// Expander
 	expander: Expander,
 
 	/// All rules' build lock
 	rules_lock: DashMap<TargetRule, BuildLock>,
 
-	/// Command execution semaphore
-	exec_semaphore: Semaphore,
+	/// Command runner thread
+	cmd_runner: JoinHandle<()>,
 }
 
 impl Builder {
 	/// Creates a new builder
-	#[must_use]
-	pub fn new(jobs: usize) -> Self {
+	pub fn new(jobs: usize) -> Result<Self, AppError> {
 		let (event_tx, event_rx) = async_broadcast::broadcast(jobs);
 		let event_rx = event_rx.deactivate();
 
-		Self {
+		// Create the thread to run commands
+		// TODO: Is this the best way?
+		let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+		let cmd_runner = std::thread::Builder::new()
+			.name("Command runner".to_owned())
+			.spawn(move || Self::cmds_runner(cmd_rx, jobs))
+			.context("Unable to spawn command runner thread")
+			.map_err(AppError::Other)?;
+
+		Ok(Self {
 			event_tx,
 			_event_rx: event_rx,
+			cmd_tx,
 			expander: Expander::new(),
 			rules_lock: DashMap::new(),
-			exec_semaphore: Semaphore::new(jobs),
-		}
+			cmd_runner,
+		})
+	}
+
+	/// Awaits the command runner thread finishing
+	pub fn await_runner_thread(self) -> Result<(), AppError> {
+		// Drop the sender
+		// Note: We do this so the runner thread exits
+		mem::drop(self.cmd_tx);
+
+		// Then join the thread
+		self.cmd_runner
+			.join()
+			.map_err(|err| AppError::Other(anyhow::anyhow!("Unable to join command runner thread: {err:?}")))
 	}
 
 	/// Sends an event, if any are subscribers
@@ -599,40 +643,75 @@ impl Builder {
 
 	/// Rebuilds a rule
 	pub async fn rebuild_rule(&self, rule: &Rule<String>) -> Result<(), AppError> {
-		let _exec_guard = self.exec_semaphore.acquire().await.expect("Exec semaphore was closed");
+		// Build the execution
+		let (res_tx, res_rx) = oneshot::channel();
+		let rule_exec = RuleExec {
+			rule_name: rule.name.clone(),
+			exec: rule.exec.clone(),
+			res_tx,
+		};
 
-		for cmd in &rule.exec.cmds {
-			let (program, args) = cmd.args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
-				rule_name: rule.name.clone(),
-			})?;
+		// Then send it
+		self.cmd_tx
+			.send(rule_exec)
+			.context("Command runner thread quit")
+			.map_err(AppError::Other)?;
 
-			// Create the command
-			let mut os_cmd = Command::new(program);
-			os_cmd.args(args);
+		// And wait for the response
+		res_rx
+			.await
+			.context("Command runner thread quit")
+			.map_err(AppError::Other)?
+	}
 
-			// Set the working directory, if we have any
-			if let Some(cwd) = &rule.exec.cwd {
-				os_cmd.current_dir(cwd);
-			}
+	/// Command runner
+	#[tokio::main(flavor = "current_thread")]
+	async fn cmds_runner(cmd_rx: mpsc::UnboundedReceiver<RuleExec>, max_jobs: usize) {
+		UnboundedReceiverStream::new(cmd_rx)
+			.map(async move |exec| {
+				let res = async move {
+					for cmd in exec.exec.cmds {
+						let (program, args) = cmd.args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
+							rule_name: exec.rule_name.clone(),
+						})?;
 
-			// Then spawn it and measure
-			tracing::info!(target: "zbuild_exec", "{} {}", program, args.join(" "));
-			let (duration, ()) = util::try_measure_async(async move {
-				os_cmd
-					.spawn()
-					.map_err(AppError::spawn_command(cmd))?
-					.wait()
-					.await
-					.map_err(AppError::wait_command(cmd))?
-					.exit_ok()
-					.map_err(AppError::command_failed(cmd))
+						// Create the command
+						let mut os_cmd = Command::new(program);
+						os_cmd.args(args);
+
+						// Set the working directory, if we have any
+						if let Some(cwd) = &exec.exec.cwd {
+							os_cmd.current_dir(cwd);
+						}
+
+						// Then spawn it and measure
+						tracing::info!(target: "zbuild_exec", "{} {}", program, args.join(" "));
+						let (duration, ()) = util::try_measure_async(async {
+							os_cmd
+								.spawn()
+								.map_err(AppError::spawn_command(&cmd))?
+								.wait()
+								.await
+								.map_err(AppError::wait_command(&cmd))?
+								.exit_ok()
+								.map_err(AppError::command_failed(&cmd))
+						})
+						.await?;
+						tracing::debug!(target: "zbuild_exec", rule_name=?exec.rule_name, ?program, ?args, ?duration, "Execution duration");
+					}
+
+					Ok(())
+				}
+				.await;
+
+				// Note: We want to continue running until we're out of tasks, even
+				//       if the main thread has quit
+				#[allow(clippy::let_underscore_drop)]
+				let _ = exec.res_tx.send(res);
 			})
-			.await?;
-			tracing::debug!(target: "zbuild_exec", rule_name=?rule.name, ?program, ?args, ?duration, "Execution duration");
-		}
-
-
-		Ok(())
+			.buffer_unordered(max_jobs)
+			.collect::<()>()
+			.await;
 	}
 
 	/// Finds a rule for `file`

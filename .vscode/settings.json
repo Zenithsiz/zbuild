@@ -9,6 +9,7 @@
     "itertools",
     "mapref",
     "npath",
+    "oneshot",
     "petgraph",
     "thiserror",
     "Zbuild"

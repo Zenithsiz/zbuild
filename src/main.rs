@@ -161,7 +161,7 @@ async fn main() -> Result<(), anyhow::Error> {
 	tracing::trace!(target: "zbuild_targets", ?targets_to_build, "Found targets");
 
 	// Create the builder
-	let builder = Builder::new(jobs);
+	let builder = Builder::new(jobs)?;
 
 	// Then create the watcher, if we're watching
 	let watcher = args
@@ -200,6 +200,9 @@ async fn main() -> Result<(), anyhow::Error> {
 		.count();
 	tracing::info!("Built {built_targets} targets");
 	tracing::info!("Checked {total_targets} targets");
+
+	// Finally wait for the runner thread to finish
+	builder.await_runner_thread()?;
 
 	Ok(())
 }
