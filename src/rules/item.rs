@@ -134,7 +134,7 @@ impl<T: fmt::Display> fmt::Display for DepItem<T> {
 				(false, false) => write!(f, "dep_file: {file}"),
 			},
 			Self::Rule { name, pats } => {
-				write!(f, "rule: {}", name)?;
+				write!(f, "rule: {name}")?;
 
 				if !pats.is_empty() {
 					write!(f, " (")?;
