@@ -4,6 +4,8 @@
 
 // TODO: Output dependencies aren't considered here, if they didn't exist when the file was first built.
 
+use std::time::SystemTime;
+
 // Imports
 use {
 	crate::{build, rules::Target, AppError, Builder, Rules},
@@ -179,20 +181,30 @@ impl Watcher {
 				//       We don't first rebuild B fully, then C gets rebuilt, and B gets rebuilt *again*,
 				//       unnecessarily. By resetting B and C, building B first will build C, then C won't
 				//       get rebuilt.
+				// TODO: Not duplicate this from `main`
+				let build_start_time = SystemTime::now();
 				dep_parents
 					.iter()
 					.map(async move |target| {
 						tracing::info!("Rechecking: {target:?}");
-						builder
+						let res = builder
 							.build(target, rules, ignore_missing)
 							.await
-							.map_err(AppError::build_target(target))?;
-
-						Ok::<_, AppError>(())
+							.map_err(AppError::build_target(target));
+						(target, res)
 					})
 					.collect::<FuturesUnordered<_>>()
-					.try_collect::<()>()
-					.await?;
+					.for_each(async move |(target, res)| match res {
+						Ok((build_res, _)) => {
+							let build_duration = build_res
+								.build_time
+								.duration_since(build_start_time)
+								.expect("Build time was negative");
+							tracing::info!("Built {target} in {build_duration:.2?}");
+						},
+						Err(err) => tracing::error!("Unable to build {target}: {err}"),
+					})
+					.await;
 
 				tracing::trace!("Rebuilt all: {path:?}");
 
