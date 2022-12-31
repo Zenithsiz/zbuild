@@ -124,8 +124,8 @@ impl Builder {
 		})
 	}
 
-	/// Awaits the command runner thread finishing
-	pub fn await_runner_thread(self) -> Result<(), AppError> {
+	/// Finishes all builds and returns the targets build
+	pub fn await_runner_thread(self) -> Result<HashMap<Target<String>, Result<BuildResult, AppError>>, AppError> {
 		// Drop the sender
 		// Note: We do this so the runner thread exits
 		mem::drop(self.cmd_tx);
@@ -133,7 +133,15 @@ impl Builder {
 		// Then join the thread
 		self.cmd_runner
 			.join()
-			.map_err(|err| AppError::Other(anyhow::anyhow!("Unable to join command runner thread: {err:?}")))
+			.map_err(|err| AppError::Other(anyhow::anyhow!("Unable to join command runner thread: {err:?}")))?;
+
+		let targets = self
+			.rules_lock
+			.into_iter()
+			.flat_map(|(_, lock)| lock.into_res())
+			.collect();
+
+		Ok(targets)
 	}
 
 	/// Sends an event, if any are subscribers
@@ -151,21 +159,6 @@ impl Builder {
 	/// Subscribes to builder events
 	pub fn subscribe_events(&self) -> async_broadcast::Receiver<Event> {
 		self.event_tx.new_receiver()
-	}
-
-	/// Returns all targets built.
-	///
-	/// Waits for targets being built
-	pub async fn targets(&self) -> HashMap<Target<String>, Result<BuildResult, AppError>> {
-		self.rules_lock
-			.iter()
-			.map(async move |entry| entry.value().all_res().await)
-			.collect::<FuturesUnordered<_>>()
-			.collect::<Vec<_>>()
-			.await
-			.into_iter()
-			.flatten()
-			.collect()
 	}
 
 	/// Finds a target's rule

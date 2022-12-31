@@ -81,8 +81,8 @@ use {
 	self::{ast::Ast, build::Builder, error::AppError, expand::Expander, rules::Rules},
 	args::Args,
 	clap::StructOpt,
-	futures::{stream::FuturesUnordered, TryStreamExt},
-	std::{collections::HashMap, env, path::PathBuf},
+	futures::{stream::FuturesUnordered, StreamExt},
+	std::{collections::HashMap, env, path::PathBuf, time::SystemTime},
 	tokio::fs,
 	watcher::Watcher,
 };
@@ -171,21 +171,32 @@ async fn main() -> Result<(), anyhow::Error> {
 		.transpose()?;
 
 	// Finally build all targets
+	let build_start_time = SystemTime::now();
 	targets_to_build
 		.iter()
 		.map(|target| {
 			let builder = &builder;
 			let rules = &rules;
 			async move {
-				builder
+				let res = builder
 					.build_expr(target, rules, args.ignore_missing)
 					.await
-					.map_err(AppError::build_target(target))
+					.map_err(AppError::build_target(target));
+				(target, res)
 			}
 		})
 		.collect::<FuturesUnordered<_>>()
-		.try_collect::<Vec<_>>()
-		.await?;
+		.for_each(async move |(target, res)| match res {
+			Ok((build_res, _)) => {
+				let build_duration = build_res
+					.build_time
+					.duration_since(build_start_time)
+					.expect("Build time was negative");
+				tracing::info!("Built {target} in {build_duration:.2?}");
+			},
+			Err(err) => tracing::error!("Unable to build {target}: {err}"),
+		})
+		.await;
 
 	// Then, if we have a watcher, watch all the dependencies
 	if let Some(watcher) = watcher {
@@ -193,7 +204,8 @@ async fn main() -> Result<(), anyhow::Error> {
 		watcher.watch_rebuild(&builder, &rules, args.ignore_missing).await?;
 	}
 
-	let targets = builder.targets().await;
+	// Finally wait for the runner thread to finish
+	let targets = builder.await_runner_thread()?;
 	let total_targets = targets.len();
 	let built_targets = targets
 		.iter()
@@ -201,9 +213,6 @@ async fn main() -> Result<(), anyhow::Error> {
 		.count();
 	tracing::info!("Built {built_targets} targets");
 	tracing::info!("Checked {total_targets} targets");
-
-	// Finally wait for the runner thread to finish
-	builder.await_runner_thread()?;
 
 	Ok(())
 }

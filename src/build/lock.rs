@@ -55,16 +55,15 @@ impl BuildLock {
 		}
 	}
 
-	/// Retrieves all targets' result
-	///
-	/// Waits for any builders to finish
-	pub async fn all_res(&self) -> Vec<(Target<String>, Result<BuildResult, AppError>)> {
-		self.state
-			.read()
-			.await
+	/// Retrieves all targets' result by consuming the lock
+	pub fn into_res(self) -> Vec<(Target<String>, Result<BuildResult, AppError>)> {
+		// TODO: Not panic here
+		Arc::try_unwrap(self.state)
+			.expect("Leftover references when unwrapping build lock")
+			.into_inner()
 			.targets_res
-			.iter()
-			.map(|(target, res)| (target.clone(), res.clone().map_err(AppError::Shared)))
+			.into_iter()
+			.map(|(target, build)| (target, build.map_err(AppError::Shared)))
 			.collect()
 	}
 }
