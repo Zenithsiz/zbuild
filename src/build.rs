@@ -216,10 +216,7 @@ impl Builder {
 	/// Resets a build
 	pub async fn reset_build(&self, target: &Target<String>, rules: &Rules) -> Result<(), AppError> {
 		// Get the rule for the target
-		let target_rule = match self.target_rule(target, rules)? {
-			Some((_, target_rule)) => target_rule,
-			None => return Ok(()),
-		};
+		let Some((_, target_rule)) = self.target_rule(target, rules)? else { return Ok(()) };
 
 		// Get the built lock, or create it
 		let build_lock = self
@@ -706,7 +703,7 @@ impl Builder {
 
 				// Note: We want to continue running until we're out of tasks, even
 				//       if the main thread has quit
-				#[allow(clippy::let_underscore_drop)]
+				#[allow(let_underscore_drop)]
 				let _ = exec.res_tx.send(res);
 			})
 			.buffer_unordered(max_jobs)

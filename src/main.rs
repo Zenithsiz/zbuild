@@ -63,6 +63,7 @@
 #![allow(clippy::items_after_statements)] // We'd prefer a lint that would trigger usages of it in previous statements
 #![allow(clippy::missing_errors_doc)] // TODO: Create errors on a per-function basic to avoid doing this
 #![allow(clippy::module_name_repetitions)] // This is how we organize some modules
+#![allow(clippy::manual_let_else)] // Rustfmt has no support for let-else statements yet.
 
 // Modules
 mod args;
