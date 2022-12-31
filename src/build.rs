@@ -5,11 +5,14 @@ mod expand_visitor;
 mod lock;
 mod match_expr;
 
+// Exports
+pub use lock::BuildResult;
+
 // Imports
 use {
 	self::{
 		expand_visitor::{GlobalVisitor, RuleOutputVisitor, RuleVisitor},
-		lock::{BuildLock, BuildLockDepGuard, BuildResult},
+		lock::{BuildLock, BuildLockDepGuard},
 		match_expr::match_expr,
 	},
 	crate::{

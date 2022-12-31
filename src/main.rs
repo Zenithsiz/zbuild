@@ -18,8 +18,10 @@
 	async_closure,
 	let_chains,
 	lint_reasons,
-	main_separator_str
+	main_separator_str,
+	async_fn_in_trait
 )]
+#![allow(incomplete_features)] // The ones we use are mature enough
 // Lints
 #![forbid(unsafe_code)]
 #![warn(
@@ -171,31 +173,11 @@ async fn main() -> Result<(), anyhow::Error> {
 		.transpose()?;
 
 	// Finally build all targets
-	let build_start_time = SystemTime::now();
 	targets_to_build
 		.iter()
-		.map(|target| {
-			let builder = &builder;
-			let rules = &rules;
-			async move {
-				let res = builder
-					.build_expr(target, rules, args.ignore_missing)
-					.await
-					.map_err(AppError::build_target(target));
-				(target, res)
-			}
-		})
+		.map(|target| self::build_target(&builder, target, &rules, args.ignore_missing))
 		.collect::<FuturesUnordered<_>>()
-		.for_each(async move |(target, res)| match res {
-			Ok((build_res, _)) => {
-				let build_duration = build_res
-					.build_time
-					.duration_since(build_start_time)
-					.expect("Build time was negative");
-				tracing::info!("Built {target} in {build_duration:.2?}");
-			},
-			Err(err) => tracing::error!("Unable to build {target}: {err}"),
-		})
+		.collect::<()>()
 		.await;
 
 	// Then, if we have a watcher, watch all the dependencies
@@ -234,5 +216,71 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 				None => return Err(AppError::ZBuildNotFound),
 			},
 		}
+	}
+}
+
+/// Builds a target.
+#[allow(clippy::future_not_send)] // Auto-traits are propagated
+async fn build_target<T: BuildableTargetInner + std::fmt::Display>(
+	builder: &Builder,
+	target: &rules::Target<T>,
+	rules: &Rules,
+	ignore_missing: bool,
+) {
+	// Try to build the target
+	let build_start_time = SystemTime::now();
+	let res = T::build(target, builder, rules, ignore_missing)
+		.await
+		.map_err(AppError::build_target(target));
+
+	// Then check if we did it
+	match res {
+		Ok(build_res) => {
+			let build_duration = build_res
+				.build_time
+				.duration_since(build_start_time)
+				.expect("Build time was negative");
+			tracing::info!("Built {target} in {build_duration:.2?}");
+		},
+		Err(err) => tracing::error!("Unable to build {target}: {err}"),
+	}
+}
+
+/// A buildable target inner type
+trait BuildableTargetInner: Sized {
+	/// Builds this target
+	async fn build(
+		target: &rules::Target<Self>,
+		builder: &Builder,
+		rules: &Rules,
+		ignore_missing: bool,
+	) -> Result<build::BuildResult, AppError>;
+}
+
+impl BuildableTargetInner for rules::Expr {
+	async fn build(
+		target: &rules::Target<Self>,
+		builder: &Builder,
+		rules: &Rules,
+		ignore_missing: bool,
+	) -> Result<build::BuildResult, AppError> {
+		builder
+			.build_expr(target, rules, ignore_missing)
+			.await
+			.map(|(build_res, _)| build_res)
+	}
+}
+
+impl BuildableTargetInner for String {
+	async fn build(
+		target: &rules::Target<Self>,
+		builder: &Builder,
+		rules: &Rules,
+		ignore_missing: bool,
+	) -> Result<build::BuildResult, AppError> {
+		builder
+			.build(target, rules, ignore_missing)
+			.await
+			.map(|(build_res, _)| build_res)
 	}
 }
