@@ -229,9 +229,7 @@ async fn build_target<T: BuildableTargetInner + std::fmt::Display>(
 ) {
 	// Try to build the target
 	let build_start_time = SystemTime::now();
-	let res = T::build(target, builder, rules, ignore_missing)
-		.await
-		.map_err(AppError::build_target(target));
+	let res = T::build(target, builder, rules, ignore_missing).await;
 
 	// Then check if we did it
 	match res {
@@ -240,9 +238,9 @@ async fn build_target<T: BuildableTargetInner + std::fmt::Display>(
 				.build_time
 				.duration_since(build_start_time)
 				.expect("Build time was negative");
-			tracing::info!("Built {target} in {build_duration:.2?}");
+			tracing::info!("Built target {target} in {build_duration:.2?}");
 		},
-		Err(err) => tracing::error!("Unable to build {target}: {err}"),
+		Err(err) => tracing::error!("Unable to build target {target}: {:?}", anyhow::Error::new(err)),
 	}
 }
 
