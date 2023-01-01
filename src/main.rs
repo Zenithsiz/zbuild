@@ -88,7 +88,7 @@ use {
 		collections::HashMap,
 		env,
 		path::{Path, PathBuf},
-		time::SystemTime,
+		time::{Duration, SystemTime},
 	},
 	tokio::fs,
 	watcher::Watcher,
@@ -245,7 +245,7 @@ async fn build_target<T: BuildableTargetInner + std::fmt::Display>(
 			let build_duration = build_res
 				.build_time
 				.duration_since(build_start_time)
-				.expect("Build time was negative");
+				.unwrap_or(Duration::ZERO);
 			tracing::info!("Built target {target} in {build_duration:.2?}");
 		},
 		Err(err) => tracing::error!("Unable to build target {target}: {:?}", anyhow::Error::new(err)),
