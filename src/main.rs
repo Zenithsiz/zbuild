@@ -2,19 +2,9 @@
 
 // Features
 #![feature(
-	seek_stream_len,
-	map_try_insert,
-	never_type,
-	closure_lifetime_binder,
-	anonymous_lifetime_in_impl_trait,
-	fs_try_exists,
-	iterator_try_reduce,
 	exit_status_error,
-	poll_ready,
-	hash_raw_entry,
 	decl_macro,
 	box_patterns,
-	try_blocks,
 	async_closure,
 	let_chains,
 	lint_reasons,
