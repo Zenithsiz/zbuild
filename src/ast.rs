@@ -165,7 +165,7 @@ pub enum AliasOp {
 }
 
 impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
-	#[allow(clippy::indexing_slicing, clippy::string_slice)] // We verify the indexes are correct
+	#[expect(clippy::indexing_slicing, clippy::string_slice)] // We verify the indexes are correct
 	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
 	where
 		D: serde::Deserializer<'de>,

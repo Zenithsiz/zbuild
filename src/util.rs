@@ -35,7 +35,7 @@ pub async fn fs_try_exists(path: impl AsRef<Path> + Send) -> Result<bool, std::i
 }
 
 /// Measures the duration of a fallible future
-#[allow(clippy::future_not_send)] // It is send if `F: Send`
+#[expect(clippy::future_not_send)] // It is send if `F: Send` (TODO: Check if this is true)
 pub async fn try_measure_async<F: Future<Output = Result<T, E>>, T, E>(fut: F) -> Result<(Duration, T), E> {
 	#[pin_project]
 	struct Wrapper<F> {

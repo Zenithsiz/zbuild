@@ -316,7 +316,7 @@ impl Builder {
 			//       lock here.
 			None => {
 				mem::drop(build_guard);
-				#[allow(clippy::shadow_unrelated)] // They are the same even if redeclared
+				#[expect(clippy::shadow_unrelated)] // They are the same even if redeclared
 				let mut build_guard = build_lock.lock_build().await;
 
 				match build_guard.res(&target) {
@@ -699,7 +699,7 @@ impl Builder {
 
 				// Note: We want to continue running until we're out of tasks, even
 				//       if the main thread has quit
-				#[allow(let_underscore_drop)]
+				#[expect(let_underscore_drop)]
 				let _ = exec.res_tx.send(res);
 			})
 			.buffer_unordered(max_jobs)
@@ -709,7 +709,7 @@ impl Builder {
 
 	/// Finds a rule for `file`
 	// TODO: Not make this `O(N)` for the number of rules.
-	#[allow(clippy::type_complexity)] // TODO: Add some type aliases / struct
+	#[expect(clippy::type_complexity)] // TODO: Add some type aliases / struct
 	pub fn find_rule_for_file(
 		&self,
 		file: &str,
@@ -786,7 +786,7 @@ async fn rule_last_build_time(rule: &Rule<String>) -> Result<Option<SystemTime>,
 }
 
 /// Returns the file modified time
-#[allow(clippy::needless_pass_by_value)] // We use it in `.map`, which makes it convenient to receive by value
+#[expect(clippy::needless_pass_by_value)] // We use it in `.map`, which makes it convenient to receive by value
 fn file_modified_time(metadata: std::fs::Metadata) -> SystemTime {
 	let file_time = FileTime::from_last_modification_time(&metadata);
 	let unix_offset = Duration::new(

@@ -11,7 +11,7 @@
 	main_separator_str,
 	async_fn_in_trait
 )]
-#![allow(incomplete_features)] // The ones we use are mature enough
+#![expect(incomplete_features)] // The ones we use are mature enough
 // Lints
 #![forbid(unsafe_code)]
 #![warn(
@@ -218,7 +218,7 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 }
 
 /// Builds a target.
-#[allow(clippy::future_not_send)] // Auto-traits are propagated
+#[expect(clippy::future_not_send)] // Auto-traits are propagated (TODO: Maybe? Check if this is true)
 async fn build_target<T: BuildableTargetInner + std::fmt::Display>(
 	builder: &Builder,
 	target: &rules::Target<T>,

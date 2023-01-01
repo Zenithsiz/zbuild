@@ -14,7 +14,7 @@ use {
 #[derive(Debug)]
 pub struct Expander;
 
-#[allow(clippy::unused_self)] // Currently expander doesn't do anything
+#[expect(clippy::unused_self)] // Currently expander doesn't do anything
 impl Expander {
 	/// Creates a new expander
 	pub const fn new() -> Self {
@@ -62,7 +62,7 @@ impl Expander {
 								let value = self.expand_expr_string(&alias_expr, visitor)?;
 
 								// Then apply all
-								#[allow(clippy::shadow_unrelated)] // They are the same value
+								#[expect(clippy::shadow_unrelated)] // They are the same value
 								let value = alias.ops.iter().try_fold(value, |value, &op| {
 									self.expand_alias_op(op, value).map_err(AppError::alias_op(op))
 								})?;
