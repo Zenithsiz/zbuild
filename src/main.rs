@@ -84,7 +84,12 @@ use {
 	args::Args,
 	clap::StructOpt,
 	futures::{stream::FuturesUnordered, StreamExt},
-	std::{collections::HashMap, env, path::PathBuf, time::SystemTime},
+	std::{
+		collections::HashMap,
+		env,
+		path::{Path, PathBuf},
+		time::SystemTime,
+	},
 	tokio::fs,
 	watcher::Watcher,
 };
@@ -102,12 +107,15 @@ async fn main() -> Result<(), anyhow::Error> {
 	tracing::trace!(?args, "Arguments");
 
 	// Find the zbuild location and change the current directory to it
+	// TODO: Not adjust the zbuild path and read it before?
 	let zbuild_path = match args.zbuild_path {
 		Some(path) => path,
 		None => self::find_zbuild().await?,
 	};
-	let zbuild_dir = zbuild_path.parent().expect("Zbuild path had no parent");
 	tracing::trace!(?zbuild_path, "Found zbuild path");
+	let zbuild_dir = zbuild_path.parent().expect("Zbuild path had no parent");
+	let zbuild_path = zbuild_path.file_name().expect("Zbuild path had no file name");
+	let zbuild_path = Path::new(zbuild_path);
 	std::env::set_current_dir(zbuild_dir).map_err(AppError::set_current_dir(zbuild_dir))?;
 
 	// Parse the ast
