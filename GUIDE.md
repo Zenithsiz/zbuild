@@ -1,6 +1,6 @@
 # Usage guide
 
-> Important:
+> **Important**:
 >
 > See the [Unimplemented features](#Unimplemented-features) section for possible missing features described here
 >
@@ -13,17 +13,19 @@ The 2 main core concepts used in zbuild are:
 - Rules
 - Items
 
-Rules are object which describe an action that can be taken to generate items.
+Rules are objects which describe an action that can be taken to generate files.
 
-Items can be files, rules, or even just some condition. Generally they are split into output items and dependency items.
+Items can be files, rules, or even just some condition[^1]. Generally they are split into output items and dependency items.
 
 Output items are those that a rule creates. These _cannot_ be other rules, as you cannot "create" a rule. Generally they are files created by the execution of the rule.
 
-Dependency items are more general, in that they can be any kind of dependency: A file, a rule execution, conditions.
+Dependency items are more general, in that they can be any kind of dependency: A file, a rule execution or conditions.
 
 See [Rule Outputs](#rule-outputs) and [Rule Dependencies](#rule-dependencies) for more details on items.
 
 See the [Rule](#rule) section about details on rules.
+
+[^1]: Currently unimplemented
 
 ## Rules
 
@@ -88,15 +90,17 @@ Dependency items are those that you require to exist before the rule can be exec
 
 These may be either:
 
-- (Static) Regular files
-- (Static) Dependency files
+- (Static or Optional) Regular files
+- (Static or Optional) Dependency files
 - Rules
 
 Static items are those that only need to exist in order to be considered up to date. They are useful for depending on, e.g. directories.
 
-Regular files are just that, regular files, if they exist and are older than the output modification time, they are considered up to date.
+Regular files are just that, regular files, their modification date will be used to test if the output needs to be rebuilt.
 
 Dependency files are regular files which are also checked for make dependencies after being considered up to date.
+
+Optional file are regular files that do not result in an error if they do not exist.
 
 Rule dependencies simply state that a rule must be run before them.
 Even if two rules required the same rule in their dependencies, it will only be run once (per pattern). Rules are always considered out of date and will always be executed.
@@ -107,15 +111,19 @@ You may specify them as an array of the following:
 
    Static items are specified with `static: <item>` where `<item>` is either a regular file or a dependency item
 
-2. Regular file
+2. Optional file
+
+   Optional files are specified with `opt: <item>` where `<item>` is either a regular file or a dependency item
+
+3. Regular file
 
    Regular file are specified simply by a string with their path
 
-3. Dependency files
+4. Dependency files
 
    Dependency files are specified with `deps_file: <file>` where `<file>` is the path of the file
 
-4. Rules
+5. Rules
 
    Rules are specified with `{ rule: <rule-name>, pats: { <pat1>: <value1>, <pat2>: <value2 >} }`.
 
@@ -136,7 +144,7 @@ You may also define a working directory for a command to be executed in. You may
 
 A rule is executed whenever it becomes a target. This happens, for e.g. when you specify a rule name on the command line, or when zbuild determines the output files are out of date relative to the dependencies.
 
-When specifying a rule as a dependency, it's output files will be used for checking if out of date.
+When specifying a rule as a dependency, it's output files will be used for checking if out of date. If the rule has no output files, the instant it finished executing will be used.
 
 You may specify the execution as either:
 
