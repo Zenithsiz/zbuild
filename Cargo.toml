@@ -7,6 +7,13 @@ version = "0.1.1"
 
 # Futures
 tokio = { version = "1.23.0", features = ["full"] }
+tokio-stream = "0.1.11"
+async-broadcast = "0.5.0"
+async-recursion = "1.0.0"
+futures = "0.3.25"
+
+# Concurrency
+dashmap = "5.4.0"
 
 # Cmd
 clap = { version = "4.0.32", features = ["derive"] }
@@ -23,17 +30,13 @@ thiserror = "1.0.38"
 serde = { version = "1.0.152", features = ["derive"] }
 serde_yaml = "0.9.16"
 
-# Util
-async-broadcast = "0.5.0"
-async-recursion = "1.0.0"
-byteorder = "1.4.3"
-dashmap = "5.4.0"
-filetime = "0.2.19"
-futures = "0.3.25"
-itertools = "0.10.5"
+# File system
 notify = "5.0.0"
 notify-debouncer-mini = "0.2.1"
+filetime = "0.2.19"
+
+
+# Util
+itertools = "0.10.5"
 npath = { git = "https://github.com/gdzx/npath", rev = "00acdd2974bb1682b6d1dcc6f0ea7cd54da42381" }
-petgraph = "0.6.2"
-tokio-stream = "0.1.11"
 pin-project = "1.0.12"
