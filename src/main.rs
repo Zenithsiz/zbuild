@@ -82,7 +82,7 @@ mod watcher;
 use {
 	self::{ast::Ast, build::Builder, error::AppError, expand::Expander, rules::Rules},
 	args::Args,
-	clap::StructOpt,
+	clap::Parser,
 	futures::{stream::FuturesUnordered, StreamExt},
 	std::{
 		collections::HashMap,

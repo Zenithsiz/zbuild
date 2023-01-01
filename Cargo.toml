@@ -6,34 +6,34 @@ version = "0.1.1"
 [dependencies]
 
 # Futures
-tokio = { version = "1.20.1", features = ["full"] }
+tokio = { version = "1.23.0", features = ["full"] }
 
 # Cmd
-clap = { version = "3.2.17", features = ["derive"] }
+clap = { version = "4.0.32", features = ["derive"] }
 
 # Logging
-tracing = "0.1.36"
-tracing-subscriber = { version = "0.3.15", features = ["env-filter"] }
+tracing = "0.1.37"
+tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
 
 # Error handling
-anyhow = "1.0.61"
-thiserror = "1.0.35"
+anyhow = "1.0.68"
+thiserror = "1.0.38"
 
 # Serde
-serde = { version = "1.0.143", features = ["derive"] }
-serde_yaml = "0.9.9"
+serde = { version = "1.0.152", features = ["derive"] }
+serde_yaml = "0.9.16"
 
 # Util
-async-broadcast = "0.4.1"
+async-broadcast = "0.5.0"
 async-recursion = "1.0.0"
 byteorder = "1.4.3"
-dashmap = "5.3.4"
-filetime = "0.2.17"
-futures = "0.3.23"
-itertools = "0.10.3"
+dashmap = "5.4.0"
+filetime = "0.2.19"
+futures = "0.3.25"
+itertools = "0.10.5"
 notify = "5.0.0"
 notify-debouncer-mini = "0.2.1"
 npath = { git = "https://github.com/gdzx/npath", rev = "00acdd2974bb1682b6d1dcc6f0ea7cd54da42381" }
 petgraph = "0.6.2"
-tokio-stream = "0.1.10"
+tokio-stream = "0.1.11"
 pin-project = "1.0.12"
