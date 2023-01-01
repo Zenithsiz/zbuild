@@ -14,6 +14,11 @@ See the `examples/` directory for examples.
 
 In particular the `examples/simple_c/zbuild.yaml` is a fully documented example that helps you understand how zbuild works.
 
+# Watching
+
+Zbuild can "watch" your build, re-running rules whenever files are updated. This can be activated with the `--watch` flag.
+See `zbuild --help` for more details.
+
 # Installation
 
 You may download the latest release from the [releases page](https://github.com/Zenithsiz/zbuild/releases).
