@@ -1,0 +1,54 @@
+# Global aliases
+# These are aliases that may be used in the whole manifest.
+# You can reference them by using `$(<name>)` at any point.
+alias:
+  build_dir: build
+  src_dir: src
+
+# Default targets
+# These are the targets (i.e. files / rules) that will be built
+# when no command line arguments are given.
+default:
+  - $(build_dir)/my_proj.out
+
+# Rules
+# zbuild will examine these to figure out how to build any target
+rules:
+  # Each rule has a unique name, used only for it's identification
+  compile_o:
+    # Rule aliases
+    # Rules may contain scoped aliases, specific to the rule.
+    alias:
+      my_alias: ...
+
+    # Output items
+    #
+    # `^(...)` can be used on the output items to create a "pattern".
+    # When finding how to build a target, each rule's output will be tested against
+    # the target. For example, if `build/a.o` is being checked, `^(name)` will become
+    # `a`. This can then be used on the rest of the rule, such as the dependencies.
+    out: [$(build_dir)/^(name).o]
+
+    # Dependencies
+    # These are the items that your rule requires.
+    # There are several types of dependencies, see the guide for more detail
+    deps: [$(src_dir)/^(name).c]
+
+    # Execution
+    #
+    # Specifies an array of commands to execute to build this rule. Each command is an array of arguments. It will not be passed to a shell, but instead be executed as-is
+    exec:
+      - [mkdir, -p, $(build_dir)]
+      - [gcc, $(src_dir)/^(name).c, -c, -o, $(build_dir)/^(name).o]
+
+  compile_out:
+    out: [$(build_dir)/my_proj.out]
+    deps: [$(build_dir)/a.o, $(build_dir)/b.o]
+
+    exec:
+      - [gcc, $(build_dir)/a.o, $(build_dir)/b.o, -o, $(build_dir)/my_proj.out]
+
+  # Rules don't need outputs & dependencies, they can simply be executables
+  clean:
+    exec:
+      - [rm, -rf, $(build_dir)]
