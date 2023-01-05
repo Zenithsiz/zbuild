@@ -50,6 +50,6 @@ pub struct Args {
 	/// Logs output to a file.
 	///
 	/// You can use `RUST_LOG_FILE` to set filtering options
-	#[clap(long = "file-log")]
-	pub file_log: Option<PathBuf>,
+	#[clap(long = "log-file")]
+	pub log_file: Option<PathBuf>,
 }

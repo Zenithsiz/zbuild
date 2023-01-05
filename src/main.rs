@@ -93,7 +93,7 @@ async fn main() -> Result<(), anyhow::Error> {
 	let args = Args::parse();
 
 	// Initialize the logger
-	logger::init(args.file_log.as_deref());
+	logger::init(args.log_file.as_deref());
 	tracing::trace!(?args, "Arguments");
 
 	// Find the zbuild location and change the current directory to it
@@ -102,22 +102,24 @@ async fn main() -> Result<(), anyhow::Error> {
 		Some(path) => path,
 		None => self::find_zbuild().await?,
 	};
-	tracing::trace!(?zbuild_path, "Found zbuild path");
+	tracing::debug!(?zbuild_path, "Found zbuild path");
 	let zbuild_dir = zbuild_path.parent().expect("Zbuild path had no parent");
 	let zbuild_path = zbuild_path.file_name().expect("Zbuild path had no file name");
 	let zbuild_path = Path::new(zbuild_path);
+	tracing::debug!(?zbuild_dir, "Moving to zbuild directory");
 	std::env::set_current_dir(zbuild_dir).map_err(AppError::set_current_dir(zbuild_dir))?;
 
 	// Parse the ast
 	let zbuild_file = fs::read_to_string(&zbuild_path)
 		.await
 		.map_err(AppError::read_file(&zbuild_path))?;
+	tracing::trace!(?zbuild_file, "Read zbuild.yaml");
 	let ast = serde_yaml::from_str::<Ast>(&zbuild_file).map_err(AppError::parse_yaml(&zbuild_path))?;
-	tracing::trace!(target: "zbuild_ast", ?ast, "Parsed ast");
+	tracing::trace!(?ast, "Parsed ast");
 
 	// Build the rules
 	let rules = Rules::new(ast);
-	tracing::trace!(target: "zbuild_rules", ?rules, "Rules");
+	tracing::trace!(?rules, "Built rules");
 
 	// Get the max number of jobs we can execute at once
 	let jobs = match args.jobs {
@@ -126,7 +128,7 @@ async fn main() -> Result<(), anyhow::Error> {
 			.map_err(AppError::get_default_jobs())?
 			.into(),
 	};
-	tracing::debug!(?jobs, "Found number of jobs to run concurrently");
+	tracing::debug!(?jobs, "Concurrent jobs");
 
 	// Then get all targets to build
 	let targets_to_build = match args.targets.is_empty() {
@@ -159,7 +161,7 @@ async fn main() -> Result<(), anyhow::Error> {
 			})
 			.collect(),
 	};
-	tracing::trace!(target: "zbuild_targets", ?targets_to_build, "Found targets");
+	tracing::trace!(?targets_to_build, "Found targets to build");
 
 	// Create the builder
 	let builder = Builder::new(jobs)?;
@@ -219,12 +221,14 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 
 /// Builds a target.
 #[expect(clippy::future_not_send)] // Auto-traits are propagated (TODO: Maybe? Check if this is true)
-async fn build_target<T: BuildableTargetInner + std::fmt::Display>(
+async fn build_target<T: BuildableTargetInner + std::fmt::Display + std::fmt::Debug>(
 	builder: &Builder,
 	target: &rules::Target<T>,
 	rules: &Rules,
 	ignore_missing: bool,
 ) {
+	tracing::debug!(%target, "Building target");
+
 	// Try to build the target
 	let build_start_time = SystemTime::now();
 	let res = T::build(target, builder, rules, ignore_missing).await;
