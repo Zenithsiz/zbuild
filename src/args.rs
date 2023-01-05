@@ -46,4 +46,10 @@ pub struct Args {
 	/// Watch for file changes and rebuild any necessary targets
 	#[clap(long = "watch", short = 'w')]
 	pub watch: bool,
+
+	/// Logs output to a file.
+	///
+	/// You can use `RUST_LOG_FILE` to set filtering options
+	#[clap(long = "file-log")]
+	pub file_log: Option<PathBuf>,
 }

@@ -89,11 +89,11 @@ use {
 // TODO: Return our own error once we improve formatting?
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-	// Initialize the logger
-	logger::init();
-
 	// Get all args
 	let args = Args::parse();
+
+	// Initialize the logger
+	logger::init(args.file_log.as_deref());
 	tracing::trace!(?args, "Arguments");
 
 	// Find the zbuild location and change the current directory to it
