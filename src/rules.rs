@@ -19,10 +19,7 @@ pub use {
 };
 
 // Imports
-use {
-	crate::{util::CowArcStr, Ast},
-	std::collections::HashMap,
-};
+use {crate::Ast, std::collections::HashMap};
 
 /// Rules.
 ///
@@ -34,13 +31,13 @@ pub struct Rules<'s> {
 	///
 	/// These are available for the whole program to
 	/// use.
-	pub aliases: HashMap<CowArcStr<'s>, Expr>,
+	pub aliases: HashMap<&'s str, Expr<'s>>,
 
 	/// Default targets to build
-	pub default: Vec<Target<Expr>>,
+	pub default: Vec<Target<'s, Expr<'s>>>,
 
 	/// Rules
-	pub rules: HashMap<CowArcStr<'s>, Rule<'s, Expr>>,
+	pub rules: HashMap<&'s str, Rule<'s, Expr<'s>>>,
 }
 
 impl<'s> Rules<'s> {
@@ -50,16 +47,13 @@ impl<'s> Rules<'s> {
 		let aliases = ast
 			.aliases
 			.into_iter()
-			.map(|(alias, value)| (CowArcStr::from_cow(alias), Expr::new(value)))
+			.map(|(alias, value)| (alias, Expr::new(value)))
 			.collect();
 		let default = ast.default.into_iter().map(Target::new).collect();
 		let rules = ast
 			.rules
 			.into_iter()
-			.map(|(name, rule)| {
-				let name = CowArcStr::from_cow(name);
-				(name.clone(), Rule::new(name, rule))
-			})
+			.map(|(name, rule)| (name, Rule::new(name, rule)))
 			.collect();
 
 		Self {

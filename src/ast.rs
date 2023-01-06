@@ -1,11 +1,7 @@
 //! Ast
 
 // Imports
-use {
-	crate::util::CowStr,
-	serde::de::Error,
-	std::{borrow::Cow, collections::HashMap},
-};
+use {serde::de::Error, std::collections::HashMap};
 
 /// Zbuild ast
 #[derive(Clone, Debug)]
@@ -15,7 +11,7 @@ pub struct Ast<'a> {
 	#[serde(rename = "alias")]
 	#[serde(default)]
 	#[serde(borrow)]
-	pub aliases: HashMap<CowStr<'a>, Expr<'a>>,
+	pub aliases: HashMap<&'a str, Expr<'a>>,
 
 	/// Default target
 	#[serde(default)]
@@ -24,7 +20,7 @@ pub struct Ast<'a> {
 
 	/// Rules
 	#[serde(borrow)]
-	pub rules: HashMap<CowStr<'a>, Rule<'a>>,
+	pub rules: HashMap<&'a str, Rule<'a>>,
 }
 
 /// Output Item
@@ -139,13 +135,13 @@ pub struct Expr<'a> {
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub enum ExprCmpt<'a> {
 	/// String
-	String(CowStr<'a>),
+	String(&'a str),
 
 	/// Pattern
-	Pattern { name: CowStr<'a>, ops: Vec<PatternOp> },
+	Pattern { name: &'a str, ops: Vec<PatternOp> },
 
 	/// Alias
-	Alias { name: CowStr<'a>, ops: Vec<AliasOp> },
+	Alias { name: &'a str, ops: Vec<AliasOp> },
 }
 
 /// Pattern operator
@@ -169,8 +165,6 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 		D: serde::Deserializer<'de>,
 	{
 		// Parse the string
-		// TODO: Use `CowStr<'a>`? We need to clone in case we to get an owned
-		//       version, however, which complicates the code below
 		let expr_str = <&'a str>::deserialize(deserializer)?;
 
 		// Then parse all components
@@ -183,7 +177,7 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 				Some(idx) => {
 					// Add the string until the pattern / alias, if it isn't empty
 					if !rest[..idx].is_empty() {
-						cmpts.push(ExprCmpt::String(Cow::Borrowed(&rest[..idx])));
+						cmpts.push(ExprCmpt::String(&rest[..idx]));
 					}
 
 					// Then check if it was an alias or pattern
@@ -221,8 +215,8 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 					// Finally check what it was originally and parse all operations
 					let cmpt = match kind {
 						Kind::Alias => ExprCmpt::Alias {
-							name: Cow::Borrowed(name),
-							ops:  ops
+							name,
+							ops: ops
 								.into_iter()
 								.map(|op| match op.trim() {
 									"dir_name" => Ok(AliasOp::DirName),
@@ -231,8 +225,8 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 								.collect::<Result<_, _>>()?,
 						},
 						Kind::Pattern => ExprCmpt::Pattern {
-							name: Cow::Borrowed(name),
-							ops:  ops
+							name,
+							ops: ops
 								.into_iter()
 								.map(|op| match op.trim() {
 									"non_empty" => Ok(PatternOp::NonEmpty),
@@ -248,7 +242,7 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 				None => {
 					// Add the rest only if it isn't empty
 					if !rest.is_empty() {
-						cmpts.push(ExprCmpt::String(Cow::Borrowed(rest)));
+						cmpts.push(ExprCmpt::String(rest));
 					}
 					break;
 				},
@@ -266,7 +260,7 @@ pub struct Rule<'a> {
 	/// Aliases
 	#[serde(default)]
 	#[serde(borrow)]
-	pub alias: HashMap<CowStr<'a>, Expr<'a>>,
+	pub alias: HashMap<&'a str, Expr<'a>>,
 
 	/// Output items
 	#[serde(default)]

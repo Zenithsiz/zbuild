@@ -81,6 +81,7 @@ use {
 		time::{Duration, SystemTime},
 	},
 	tokio::fs,
+	util::CowStr,
 	watcher::Watcher,
 };
 
@@ -172,19 +173,20 @@ async fn main() -> Result<(), anyhow::Error> {
 		.then(|| Watcher::new(builder.subscribe_events()))
 		.transpose()?;
 
-	// Finally build all targets
-	targets_to_build
-		.iter()
-		.map(|target| self::build_target(&builder, target, &rules, args.ignore_missing))
-		.collect::<FuturesUnordered<_>>()
-		.collect::<()>()
-		.await;
-
-	// Then, if we have a watcher, watch all the dependencies
-	if let Some(watcher) = watcher {
-		tracing::info!("Starting to watch for all targets");
-		watcher.watch_rebuild(&builder, &rules, args.ignore_missing).await?;
-	}
+	// Finally build all targets and start watching
+	futures::join!(
+		targets_to_build
+			.iter()
+			.map(|target| self::build_target(&builder, target, &rules, args.ignore_missing))
+			.collect::<FuturesUnordered<_>>()
+			.collect::<()>(),
+		async {
+			if let Some(watcher) = watcher {
+				tracing::info!("Starting to watch for all targets");
+				watcher.watch_rebuild(&builder, &rules, args.ignore_missing).await;
+			}
+		}
+	);
 
 	// Finally print some statistics
 	let targets = builder.into_build_results();
@@ -221,9 +223,9 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 
 /// Builds a target.
 #[expect(clippy::future_not_send)] // Auto-traits are propagated (TODO: Maybe? Check if this is true)
-async fn build_target<'s, T: BuildableTargetInner + std::fmt::Display + std::fmt::Debug>(
+async fn build_target<'s, T: BuildableTargetInner<'s> + std::fmt::Display + std::fmt::Debug>(
 	builder: &Builder<'s>,
-	target: &rules::Target<T>,
+	target: &rules::Target<'s, T>,
 	rules: &Rules<'s>,
 	ignore_missing: bool,
 ) {
@@ -247,19 +249,19 @@ async fn build_target<'s, T: BuildableTargetInner + std::fmt::Display + std::fmt
 }
 
 /// A buildable target inner type
-trait BuildableTargetInner: Sized {
+trait BuildableTargetInner<'s>: Sized {
 	/// Builds this target
-	async fn build<'s>(
-		target: &rules::Target<Self>,
+	async fn build(
+		target: &rules::Target<'s, Self>,
 		builder: &Builder<'s>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,
 	) -> Result<build::BuildResult, AppError>;
 }
 
-impl BuildableTargetInner for rules::Expr {
-	async fn build<'s>(
-		target: &rules::Target<Self>,
+impl<'s> BuildableTargetInner<'s> for rules::Expr<'s> {
+	async fn build(
+		target: &rules::Target<'s, Self>,
 		builder: &Builder<'s>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,
@@ -271,9 +273,9 @@ impl BuildableTargetInner for rules::Expr {
 	}
 }
 
-impl BuildableTargetInner for String {
-	async fn build<'s>(
-		target: &rules::Target<Self>,
+impl<'s> BuildableTargetInner<'s> for CowStr<'s> {
+	async fn build(
+		target: &rules::Target<'s, Self>,
 		builder: &Builder<'s>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,

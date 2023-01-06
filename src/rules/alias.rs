@@ -5,9 +5,9 @@ use std::fmt;
 
 /// Alias
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
-pub struct Alias {
+pub struct Alias<'s> {
 	/// Alias name
-	pub name: String,
+	pub name: &'s str,
 
 	/// Operators
 	pub ops: Vec<AliasOp>,
@@ -21,7 +21,7 @@ pub enum AliasOp {
 }
 
 
-impl fmt::Display for Alias {
+impl<'s> fmt::Display for Alias<'s> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "$({}", self.name)?;
 

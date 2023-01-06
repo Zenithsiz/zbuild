@@ -5,9 +5,9 @@ use std::fmt;
 
 /// Pattern
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
-pub struct Pattern {
+pub struct Pattern<'s> {
 	/// Pattern name
-	pub name: String,
+	pub name: &'s str,
 
 	/// Operators
 	pub ops: Vec<PatternOp>,
@@ -20,7 +20,7 @@ pub enum PatternOp {
 	NonEmpty,
 }
 
-impl fmt::Display for Pattern {
+impl<'s> fmt::Display for Pattern<'s> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "^({}", self.name)?;
 

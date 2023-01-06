@@ -18,9 +18,9 @@ pub enum OutItem<T> {
 	DepsFile { file: T },
 }
 
-impl OutItem<Expr> {
+impl<'s> OutItem<Expr<'s>> {
 	/// Creates a new item from it's `ast`.
-	pub fn new(item: ast::OutItem) -> Self {
+	pub fn new(item: ast::OutItem<'s>) -> Self {
 		match item {
 			ast::OutItem::File(file) => Self::File { file: Expr::new(file) },
 			ast::OutItem::DepsFile { deps_file } => Self::DepsFile {
@@ -61,9 +61,9 @@ pub enum DepItem<T> {
 	Rule { name: T, pats: HashMap<T, T> },
 }
 
-impl DepItem<Expr> {
+impl<'s> DepItem<Expr<'s>> {
 	/// Creates a new item from it's `ast`.
-	pub fn new(item: ast::DepItem) -> Self {
+	pub fn new(item: ast::DepItem<'s>) -> Self {
 		match item {
 			ast::DepItem::File(file) => Self::File {
 				file:        Expr::new(file),

@@ -395,7 +395,7 @@ impl AppError {
 		}
 	}
 
-	pub fn build_target<T: fmt::Display>(target: &Target<T>) -> impl FnOnce(Self) -> Self + '_ {
+	pub fn build_target<'target, T: fmt::Display>(target: &'target Target<T>) -> impl FnOnce(Self) -> Self + 'target {
 		move |err| Self::BuildTarget {
 			target_fmt: target.to_string(),
 			err:        Box::new(err),
@@ -423,14 +423,14 @@ impl AppError {
 		}
 	}
 
-	pub fn expand_target<T: fmt::Display>(target: &Target<T>) -> impl FnOnce(Self) -> Self + '_ {
+	pub fn expand_target<'target, T: fmt::Display>(target: &'target Target<T>) -> impl FnOnce(Self) -> Self + 'target {
 		move |err| Self::ExpandTarget {
 			target_fmt: target.to_string(),
 			err:        Box::new(err),
 		}
 	}
 
-	pub fn expand_expr(expr: &Expr) -> impl FnOnce(Self) -> Self + '_ {
+	pub fn expand_expr<'expr>(expr: &'expr Expr<'_>) -> impl FnOnce(Self) -> Self + 'expr {
 		move |err| Self::ExpandExpr {
 			expr_fmt: expr.to_string(),
 			err:      Box::new(err),

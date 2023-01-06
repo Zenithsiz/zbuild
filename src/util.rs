@@ -1,11 +1,5 @@
 //! Utilities
 
-// Modules
-pub mod cow_arc_str;
-
-// Exports
-pub use self::cow_arc_str::CowArcStr;
-
 // Imports
 use {
 	futures::Future,

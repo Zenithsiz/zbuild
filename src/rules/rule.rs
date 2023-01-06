@@ -3,7 +3,7 @@
 // Imports
 use {
 	super::{DepItem, Expr, OutItem},
-	crate::{ast, util::CowArcStr},
+	crate::ast,
 	std::collections::HashMap,
 };
 
@@ -11,10 +11,10 @@ use {
 #[derive(Clone, Debug)]
 pub struct Rule<'s, T> {
 	/// Name
-	pub name: CowArcStr<'s>,
+	pub name: &'s str,
 
 	/// Aliases
-	pub aliases: HashMap<String, T>,
+	pub aliases: HashMap<&'s str, T>,
 
 	/// Output items
 	pub output: Vec<OutItem<T>>,
@@ -26,13 +26,13 @@ pub struct Rule<'s, T> {
 	pub exec: Exec<T>,
 }
 
-impl<'s> Rule<'s, Expr> {
+impl<'s> Rule<'s, Expr<'s>> {
 	/// Creates a new rule from it's ast
-	pub fn new(name: CowArcStr<'s>, rule: ast::Rule) -> Self {
+	pub fn new(name: &'s str, rule: ast::Rule<'s>) -> Self {
 		let aliases = rule
 			.alias
 			.into_iter()
-			.map(|(alias, expr)| (alias.into_owned(), Expr::new(expr)))
+			.map(|(alias, expr)| (alias, Expr::new(expr)))
 			.collect();
 		let output = rule.out.into_iter().map(OutItem::new).collect();
 		let deps = rule.deps.into_iter().map(DepItem::new).collect();

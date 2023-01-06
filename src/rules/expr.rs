@@ -6,41 +6,41 @@ use {
 		alias::{Alias, AliasOp},
 		pattern::{Pattern, PatternOp},
 	},
-	crate::ast,
+	crate::{ast, util::CowStr},
 	std::fmt,
 };
 
 /// Expression
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
-pub struct Expr {
+pub struct Expr<'s> {
 	/// Components
-	pub cmpts: Vec<ExprCmpt>,
+	pub cmpts: Vec<ExprCmpt<'s>>,
 }
 
 /// Expression component
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
-pub enum ExprCmpt {
+pub enum ExprCmpt<'s> {
 	/// String
-	String(String),
+	String(CowStr<'s>),
 
 	/// Pattern
-	Pattern(Pattern),
+	Pattern(Pattern<'s>),
 
 	/// Alias
-	Alias(Alias),
+	Alias(Alias<'s>),
 }
 
-impl Expr {
+impl<'s> Expr<'s> {
 	/// Creates a new expression from it's ast
-	pub fn new(expr: ast::Expr) -> Self {
+	pub fn new(expr: ast::Expr<'s>) -> Self {
 		let cmpts = expr
 			.cmpts
 			.into_iter()
 			.map(|cmpt| match cmpt {
-				ast::ExprCmpt::String(s) => ExprCmpt::String(s.into_owned()),
+				ast::ExprCmpt::String(s) => ExprCmpt::String(CowStr::Borrowed(s)),
 				ast::ExprCmpt::Pattern { name, ops } => ExprCmpt::Pattern(Pattern {
-					name: name.into_owned(),
-					ops:  ops
+					name,
+					ops: ops
 						.into_iter()
 						.map(|op| match op {
 							ast::PatternOp::NonEmpty => PatternOp::NonEmpty,
@@ -48,8 +48,8 @@ impl Expr {
 						.collect(),
 				}),
 				ast::ExprCmpt::Alias { name, ops } => ExprCmpt::Alias(Alias {
-					name: name.into_owned(),
-					ops:  ops
+					name,
+					ops: ops
 						.into_iter()
 						.map(|op| match op {
 							ast::AliasOp::DirName => AliasOp::DirName,
@@ -63,14 +63,14 @@ impl Expr {
 	}
 
 	/// Returns an expression that's just a string
-	pub fn string(value: String) -> Self {
+	pub fn string(value: impl Into<CowStr<'s>>) -> Self {
 		Self {
-			cmpts: vec![ExprCmpt::String(value)],
+			cmpts: vec![ExprCmpt::String(value.into())],
 		}
 	}
 }
 
-impl fmt::Display for Expr {
+impl<'s> fmt::Display for Expr<'s> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		for cmpt in &self.cmpts {
 			write!(f, "{cmpt}")?;
@@ -80,7 +80,7 @@ impl fmt::Display for Expr {
 	}
 }
 
-impl fmt::Display for ExprCmpt {
+impl<'s> fmt::Display for ExprCmpt<'s> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::String(s) => write!(f, "{s}"),
