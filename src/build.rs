@@ -210,7 +210,7 @@ impl Builder {
 	}
 
 	/// Resets a build
-	pub async fn reset_build(&self, target: &Target<String>, rules: &Rules) -> Result<(), AppError> {
+	pub async fn reset_build<'s>(&self, target: &Target<String>, rules: &Rules<'s>) -> Result<(), AppError> {
 		// Get the rule for the target
 		let Some((_, target_rule)) = self.target_rule(target, rules)? else { return Ok(()) };
 
@@ -228,10 +228,10 @@ impl Builder {
 	}
 
 	/// Builds an expression-encoded target
-	pub async fn build_expr(
+	pub async fn build_expr<'s>(
 		&self,
 		target: &Target<Expr>,
-		rules: &Rules,
+		rules: &Rules<'s>,
 		ignore_missing: bool,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
 		// Expand the target
@@ -245,10 +245,10 @@ impl Builder {
 	}
 
 	/// Builds a target
-	pub async fn build(
+	pub async fn build<'s>(
 		&self,
 		target: &Target<String>,
-		rules: &Rules,
+		rules: &Rules<'s>,
 		ignore_missing: bool,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
 		tracing::trace!(?target, "Building target");
@@ -564,12 +564,12 @@ impl Builder {
 	/// Builds all dependencies of a `deps` file.
 	///
 	/// Returns the latest modification date of the dependencies
-	async fn build_deps_file(
+	async fn build_deps_file<'s>(
 		&self,
 		parent_target: &Target<String>,
 		dep_file: &str,
 		rule: &Rule<String>,
-		rules: &Rules,
+		rules: &Rules<'s>,
 		ignore_missing: bool,
 	) -> Result<Vec<(Target<String>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {
 		tracing::trace!(target=?parent_target, ?rule.name, ?dep_file, "Building dependencies of target rule dependency-file");

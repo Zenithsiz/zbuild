@@ -118,10 +118,10 @@ impl Watcher {
 	}
 
 	/// Watches over all files and rebuilds any changed files
-	pub async fn watch_rebuild(
+	pub async fn watch_rebuild<'s>(
 		mut self,
 		builder: &Builder,
-		rules: &Rules,
+		rules: &Rules<'s>,
 		ignore_missing: bool,
 	) -> Result<(), AppError> {
 		// Watch each target we have the reverse dependencies of

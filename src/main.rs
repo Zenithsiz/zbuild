@@ -221,10 +221,10 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 
 /// Builds a target.
 #[expect(clippy::future_not_send)] // Auto-traits are propagated (TODO: Maybe? Check if this is true)
-async fn build_target<T: BuildableTargetInner + std::fmt::Display + std::fmt::Debug>(
+async fn build_target<'s, T: BuildableTargetInner + std::fmt::Display + std::fmt::Debug>(
 	builder: &Builder,
 	target: &rules::Target<T>,
-	rules: &Rules,
+	rules: &Rules<'s>,
 	ignore_missing: bool,
 ) {
 	tracing::debug!(%target, "Building target");
@@ -249,19 +249,19 @@ async fn build_target<T: BuildableTargetInner + std::fmt::Display + std::fmt::De
 /// A buildable target inner type
 trait BuildableTargetInner: Sized {
 	/// Builds this target
-	async fn build(
+	async fn build<'s>(
 		target: &rules::Target<Self>,
 		builder: &Builder,
-		rules: &Rules,
+		rules: &Rules<'s>,
 		ignore_missing: bool,
 	) -> Result<build::BuildResult, AppError>;
 }
 
 impl BuildableTargetInner for rules::Expr {
-	async fn build(
+	async fn build<'s>(
 		target: &rules::Target<Self>,
 		builder: &Builder,
-		rules: &Rules,
+		rules: &Rules<'s>,
 		ignore_missing: bool,
 	) -> Result<build::BuildResult, AppError> {
 		builder
@@ -272,10 +272,10 @@ impl BuildableTargetInner for rules::Expr {
 }
 
 impl BuildableTargetInner for String {
-	async fn build(
+	async fn build<'s>(
 		target: &rules::Target<Self>,
 		builder: &Builder,
-		rules: &Rules,
+		rules: &Rules<'s>,
 		ignore_missing: bool,
 	) -> Result<build::BuildResult, AppError> {
 		builder

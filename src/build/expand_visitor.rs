@@ -5,6 +5,7 @@ use {
 	crate::{
 		expand::{FlowControl, Visitor},
 		rules::Expr,
+		util::CowStr,
 	},
 	std::collections::HashMap,
 };
@@ -15,19 +16,19 @@ use {
 /// Expands any defined aliases, errors on undefined ones
 /// Errors any patterns.
 #[derive(Clone, Copy, Debug)]
-pub struct GlobalVisitor<'global> {
+pub struct GlobalVisitor<'s, 'global> {
 	/// Aliases
-	aliases: &'global HashMap<String, Expr>,
+	aliases: &'global HashMap<CowStr<'s>, Expr>,
 }
 
-impl<'global> GlobalVisitor<'global> {
+impl<'s, 'global> GlobalVisitor<'s, 'global> {
 	/// Creates a new global visitor
-	pub const fn new(aliases: &'global HashMap<String, Expr>) -> Self {
+	pub const fn new(aliases: &'global HashMap<CowStr<'s>, Expr>) -> Self {
 		Self { aliases }
 	}
 }
 
-impl<'global> Visitor for GlobalVisitor<'global> {
+impl<'s, 'global> Visitor for GlobalVisitor<'s, 'global> {
 	fn visit_alias(&mut self, alias_name: &str) -> FlowControl<Expr> {
 		self.aliases
 			.get(alias_name)
@@ -45,18 +46,18 @@ impl<'global> Visitor for GlobalVisitor<'global> {
 /// Expands any defined aliases (first with the rule aliases, then global), errors on undefined ones
 /// Keeps any patterns.
 #[derive(Clone, Copy, Debug)]
-pub struct RuleOutputVisitor<'global, 'rule> {
+pub struct RuleOutputVisitor<'s, 'global, 'rule> {
 	/// Global aliases
-	global_aliases: &'global HashMap<String, Expr>,
+	global_aliases: &'global HashMap<CowStr<'s>, Expr>,
 
 	/// Rule aliases
 	rule_aliases: &'rule HashMap<String, Expr>,
 }
 
-impl<'global, 'rule> RuleOutputVisitor<'global, 'rule> {
+impl<'s, 'global, 'rule> RuleOutputVisitor<'s, 'global, 'rule> {
 	/// Creates a new rule output expression visitor
 	pub const fn new(
-		global_aliases: &'global HashMap<String, Expr>,
+		global_aliases: &'global HashMap<CowStr<'s>, Expr>,
 		rule_aliases: &'rule HashMap<String, Expr>,
 	) -> Self {
 		Self {
@@ -66,7 +67,7 @@ impl<'global, 'rule> RuleOutputVisitor<'global, 'rule> {
 	}
 }
 
-impl<'global, 'rule> Visitor for RuleOutputVisitor<'global, 'rule> {
+impl<'s, 'global, 'rule> Visitor for RuleOutputVisitor<'s, 'global, 'rule> {
 	fn visit_alias(&mut self, alias_name: &str) -> FlowControl<Expr> {
 		match self.rule_aliases.get(alias_name).cloned() {
 			Some(expr) => FlowControl::ExpandTo(expr),
@@ -88,9 +89,9 @@ impl<'global, 'rule> Visitor for RuleOutputVisitor<'global, 'rule> {
 /// Expands any defined aliases (first with the rule aliases, then global), errors on undefined ones
 /// Expands any defined patterns, errors on undefined
 #[derive(Clone, Copy, Debug)]
-pub struct RuleVisitor<'global, 'rule, 'pats> {
+pub struct RuleVisitor<'s, 'global, 'rule, 'pats> {
 	/// Global aliases
-	global_aliases: &'global HashMap<String, Expr>,
+	global_aliases: &'global HashMap<CowStr<'s>, Expr>,
 
 	/// Rule aliases
 	rule_aliases: &'rule HashMap<String, Expr>,
@@ -99,10 +100,10 @@ pub struct RuleVisitor<'global, 'rule, 'pats> {
 	rule_pats: &'pats HashMap<String, String>,
 }
 
-impl<'global, 'rule, 'pats> RuleVisitor<'global, 'rule, 'pats> {
+impl<'s, 'global, 'rule, 'pats> RuleVisitor<'s, 'global, 'rule, 'pats> {
 	/// Creates a new rule visitor
 	pub const fn new(
-		global_aliases: &'global HashMap<String, Expr>,
+		global_aliases: &'global HashMap<CowStr<'s>, Expr>,
 		rule_aliases: &'rule HashMap<String, Expr>,
 		rule_pats: &'pats HashMap<String, String>,
 	) -> Self {
@@ -114,7 +115,7 @@ impl<'global, 'rule, 'pats> RuleVisitor<'global, 'rule, 'pats> {
 	}
 }
 
-impl<'global, 'rule, 'pats> Visitor for RuleVisitor<'global, 'rule, 'pats> {
+impl<'s, 'global, 'rule, 'pats> Visitor for RuleVisitor<'s, 'global, 'rule, 'pats> {
 	fn visit_alias(&mut self, alias_name: &str) -> FlowControl<Expr> {
 		match self.rule_aliases.get(alias_name).cloned() {
 			Some(expr) => FlowControl::ExpandTo(expr),

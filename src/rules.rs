@@ -10,6 +10,7 @@ mod target;
 
 // Exports
 pub use {
+	crate::util::CowStr,
 	alias::{Alias, AliasOp},
 	expr::{Expr, ExprCmpt},
 	item::{DepItem, OutItem},
@@ -26,12 +27,12 @@ use {crate::Ast, std::collections::HashMap};
 /// Stores all rules, along with associated information, such as
 /// global aliases and the default target.
 #[derive(Clone, Debug)]
-pub struct Rules {
+pub struct Rules<'s> {
 	/// Global aliases.
 	///
 	/// These are available for the whole program to
 	/// use.
-	pub aliases: HashMap<String, Expr>,
+	pub aliases: HashMap<CowStr<'s>, Expr>,
 
 	/// Default targets to build
 	pub default: Vec<Target<Expr>>,
@@ -40,14 +41,14 @@ pub struct Rules {
 	pub rules: HashMap<String, Rule<Expr>>,
 }
 
-impl Rules {
+impl<'s> Rules<'s> {
 	/// Creates all rules from the ast
 	#[must_use]
-	pub fn new(ast: Ast) -> Self {
+	pub fn new(ast: Ast<'s>) -> Self {
 		let aliases = ast
 			.aliases
 			.into_iter()
-			.map(|(alias, value)| (alias.into_owned(), Expr::new(value)))
+			.map(|(alias, value)| (alias, Expr::new(value)))
 			.collect();
 		let default = ast.default.into_iter().map(Target::new).collect();
 		let rules = ast
