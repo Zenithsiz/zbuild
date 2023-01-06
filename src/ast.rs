@@ -1,11 +1,11 @@
 //! Ast
 
 // Imports
-use {serde::de::Error, std::collections::HashMap};
+use {itertools::Itertools, serde::de::Error, std::collections::HashMap};
 
 /// Zbuild ast
 #[derive(Clone, Debug)]
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Ast<'a> {
 	/// Aliases
 	#[serde(rename = "alias")]
@@ -25,7 +25,7 @@ pub struct Ast<'a> {
 
 /// Output Item
 #[derive(Clone, Debug)]
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum OutItem<'a> {
 	/// File
@@ -40,7 +40,7 @@ pub enum OutItem<'a> {
 
 /// Dependency Item
 #[derive(Clone, Debug)]
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum DepItem<'a> {
 	/// File
@@ -81,7 +81,7 @@ pub enum DepItem<'a> {
 
 /// Static Dependency Item
 #[derive(Clone, Debug)]
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum StaticDepItem<'a> {
 	/// File
@@ -96,7 +96,7 @@ pub enum StaticDepItem<'a> {
 
 /// Optional Dependency Item
 #[derive(Clone, Debug)]
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum OptDepItem<'a> {
 	/// File
@@ -111,7 +111,7 @@ pub enum OptDepItem<'a> {
 
 /// Target
 #[derive(Clone, Debug)]
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum Target<'a> {
 	/// File
@@ -156,6 +156,38 @@ pub enum PatternOp {
 pub enum AliasOp {
 	/// Directory name
 	DirName,
+}
+
+impl<'a> serde::Serialize for Expr<'a> {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		// TODO: Less allocations
+		self.cmpts
+			.iter()
+			.map(|cmpt| match *cmpt {
+				ExprCmpt::String(s) => s.to_owned(),
+				ExprCmpt::Pattern { name, ref ops } => format!(
+					"^({name}{})",
+					ops.iter()
+						.map(|op| format!("::{}", match op {
+							PatternOp::NonEmpty => "non_empty",
+						}))
+						.join("")
+				),
+				ExprCmpt::Alias { name, ref ops } => format!(
+					"$({name}{})",
+					ops.iter()
+						.map(|op| format!("::{}", match op {
+							AliasOp::DirName => "dir_name",
+						}))
+						.join("")
+				),
+			})
+			.join("")
+			.serialize(serializer)
+	}
 }
 
 impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
@@ -255,7 +287,7 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 
 /// Rule
 #[derive(Clone, Debug)]
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Rule<'a> {
 	/// Aliases
 	#[serde(default)]
@@ -280,7 +312,7 @@ pub struct Rule<'a> {
 
 /// Execution
 #[derive(Clone, Debug)]
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum Exec<'a> {
 	/// Only commands
@@ -307,7 +339,7 @@ impl<'a> Default for Exec<'a> {
 
 /// Command
 #[derive(Clone, Debug)]
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct Command<'a> {
 	/// All arguments
