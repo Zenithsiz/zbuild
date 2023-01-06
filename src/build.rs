@@ -171,6 +171,7 @@ impl<'s> Builder<'s> {
 		let Some((_, target_rule)) = self.target_rule(target, rules)? else { return Ok(()) };
 
 		// Get the built lock, or create it
+		// Note: Important to clone since we'll be `await`ing with it.
 		let build_lock = self
 			.rules_lock
 			.entry(target_rule)
