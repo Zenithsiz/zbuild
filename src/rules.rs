@@ -10,7 +10,6 @@ mod target;
 
 // Exports
 pub use {
-	crate::util::CowStr,
 	alias::{Alias, AliasOp},
 	expr::{Expr, ExprCmpt},
 	item::{DepItem, OutItem},
@@ -20,7 +19,10 @@ pub use {
 };
 
 // Imports
-use {crate::Ast, std::collections::HashMap};
+use {
+	crate::{util::CowArcStr, Ast},
+	std::collections::HashMap,
+};
 
 /// Rules.
 ///
@@ -32,7 +34,7 @@ pub struct Rules<'s> {
 	///
 	/// These are available for the whole program to
 	/// use.
-	pub aliases: HashMap<CowStr<'s>, Expr>,
+	pub aliases: HashMap<CowArcStr<'s>, Expr>,
 
 	/// Default targets to build
 	pub default: Vec<Target<Expr>>,
@@ -48,7 +50,7 @@ impl<'s> Rules<'s> {
 		let aliases = ast
 			.aliases
 			.into_iter()
-			.map(|(alias, value)| (alias, Expr::new(value)))
+			.map(|(alias, value)| (CowArcStr::from_cow(alias), Expr::new(value)))
 			.collect();
 		let default = ast.default.into_iter().map(Target::new).collect();
 		let rules = ast

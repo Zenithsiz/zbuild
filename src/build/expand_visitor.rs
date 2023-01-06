@@ -5,7 +5,7 @@ use {
 	crate::{
 		expand::{FlowControl, Visitor},
 		rules::Expr,
-		util::CowStr,
+		util::CowArcStr,
 	},
 	std::collections::HashMap,
 };
@@ -18,12 +18,12 @@ use {
 #[derive(Clone, Copy, Debug)]
 pub struct GlobalVisitor<'s, 'global> {
 	/// Aliases
-	aliases: &'global HashMap<CowStr<'s>, Expr>,
+	aliases: &'global HashMap<CowArcStr<'s>, Expr>,
 }
 
 impl<'s, 'global> GlobalVisitor<'s, 'global> {
 	/// Creates a new global visitor
-	pub const fn new(aliases: &'global HashMap<CowStr<'s>, Expr>) -> Self {
+	pub const fn new(aliases: &'global HashMap<CowArcStr<'s>, Expr>) -> Self {
 		Self { aliases }
 	}
 }
@@ -48,7 +48,7 @@ impl<'s, 'global> Visitor for GlobalVisitor<'s, 'global> {
 #[derive(Clone, Copy, Debug)]
 pub struct RuleOutputVisitor<'s, 'global, 'rule> {
 	/// Global aliases
-	global_aliases: &'global HashMap<CowStr<'s>, Expr>,
+	global_aliases: &'global HashMap<CowArcStr<'s>, Expr>,
 
 	/// Rule aliases
 	rule_aliases: &'rule HashMap<String, Expr>,
@@ -57,7 +57,7 @@ pub struct RuleOutputVisitor<'s, 'global, 'rule> {
 impl<'s, 'global, 'rule> RuleOutputVisitor<'s, 'global, 'rule> {
 	/// Creates a new rule output expression visitor
 	pub const fn new(
-		global_aliases: &'global HashMap<CowStr<'s>, Expr>,
+		global_aliases: &'global HashMap<CowArcStr<'s>, Expr>,
 		rule_aliases: &'rule HashMap<String, Expr>,
 	) -> Self {
 		Self {
@@ -91,7 +91,7 @@ impl<'s, 'global, 'rule> Visitor for RuleOutputVisitor<'s, 'global, 'rule> {
 #[derive(Clone, Copy, Debug)]
 pub struct RuleVisitor<'s, 'global, 'rule, 'pats> {
 	/// Global aliases
-	global_aliases: &'global HashMap<CowStr<'s>, Expr>,
+	global_aliases: &'global HashMap<CowArcStr<'s>, Expr>,
 
 	/// Rule aliases
 	rule_aliases: &'rule HashMap<String, Expr>,
@@ -103,7 +103,7 @@ pub struct RuleVisitor<'s, 'global, 'rule, 'pats> {
 impl<'s, 'global, 'rule, 'pats> RuleVisitor<'s, 'global, 'rule, 'pats> {
 	/// Creates a new rule visitor
 	pub const fn new(
-		global_aliases: &'global HashMap<CowStr<'s>, Expr>,
+		global_aliases: &'global HashMap<CowArcStr<'s>, Expr>,
 		rule_aliases: &'rule HashMap<String, Expr>,
 		rule_pats: &'pats HashMap<String, String>,
 	) -> Self {
