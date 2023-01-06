@@ -190,7 +190,7 @@ impl<'s> Watcher<'s> {
 						.collect::<()>()
 						.await;
 
-					tracing::trace!("Rebuilt all: {path:?}");
+					tracing::trace!(?path, "Rebuilt all reverse dependencies");
 				})
 				.collect::<()>()
 		);
