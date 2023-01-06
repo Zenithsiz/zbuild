@@ -2,12 +2,10 @@
 
 // Imports
 use {
+	crate::util::CowStr,
 	serde::de::Error,
 	std::{borrow::Cow, collections::HashMap},
 };
-
-/// Alias for `Cow<'a, str>`
-type CowStr<'a> = Cow<'a, str>;
 
 /// Zbuild ast
 #[derive(Clone, Debug)]

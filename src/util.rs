@@ -6,6 +6,7 @@ use {
 	npath::NormPathExt,
 	pin_project::pin_project,
 	std::{
+		borrow::Cow,
 		path::Path,
 		pin::Pin,
 		task,
@@ -13,6 +14,9 @@ use {
 	},
 	tokio::fs,
 };
+
+/// Alias for `Cow<'a, str>`
+pub type CowStr<'a> = Cow<'a, str>;
 
 /// Chains together any number of `IntoIterator`s
 pub macro chain {
