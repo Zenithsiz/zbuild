@@ -9,7 +9,7 @@ use {
 	crate::{build, rules::Target, AppError, Builder, Rules},
 	anyhow::Context,
 	dashmap::{DashMap, DashSet},
-	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
+	futures::{stream::FuturesUnordered, StreamExt},
 	notify_debouncer_mini::Debouncer,
 	std::{
 		path::{Path, PathBuf},
@@ -120,7 +120,7 @@ impl Watcher {
 	/// Watches over all files and rebuilds any changed files
 	pub async fn watch_rebuild<'s>(
 		mut self,
-		builder: &Builder,
+		builder: &Builder<'s>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,
 	) -> Result<(), AppError> {
@@ -142,14 +142,14 @@ impl Watcher {
 					Ok(path) => path,
 					Err(err) => {
 						tracing::warn!("Unable to canonicalize {:?}: {err:?}", event.path);
-						return Ok(());
+						return;
 					},
 				};
 
 				// Then get the reverse dependencies
 				let rev_dep = match rev_deps.get(&path) {
 					Some(rev_dep) => rev_dep.clone(),
-					None => return Ok(()),
+					None => return,
 				};
 				tracing::info!("Changed: {:?}", rev_dep.target);
 				tracing::trace!(?rev_dep, "Reverse dependencies");
@@ -163,14 +163,22 @@ impl Watcher {
 
 
 				// Reset the dependency and all parents' builds
-				futures::try_join!(
-					builder.reset_build(&rev_dep.target, rules),
+				futures::join!(
+					async move {
+						builder
+							.reset_build(&rev_dep.target, rules)
+							.await
+							.expect("Unable to reset existing build")
+					},
 					dep_parents
 						.iter()
-						.map(async move |target| builder.reset_build(target, rules).await)
+						.map(async move |target| builder
+							.reset_build(target, rules)
+							.await
+							.expect("Unable to reset existing build"))
 						.collect::<FuturesUnordered<_>>()
-						.try_collect::<()>()
-				)?;
+						.collect::<()>()
+				);
 
 				// Then rebuild them
 				// Note: We do this separately to ensure that when we have the following scenario:
@@ -190,11 +198,9 @@ impl Watcher {
 					.await;
 
 				tracing::trace!("Rebuilt all: {path:?}");
-
-				Ok::<_, AppError>(())
 			})
-			.try_collect::<()>()
-			.await?;
+			.collect::<()>()
+			.await;
 
 		Ok(())
 	}

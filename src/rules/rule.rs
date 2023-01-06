@@ -3,15 +3,15 @@
 // Imports
 use {
 	super::{DepItem, Expr, OutItem},
-	crate::ast,
+	crate::{ast, util::CowArcStr},
 	std::collections::HashMap,
 };
 
 /// Rule
 #[derive(Clone, Debug)]
-pub struct Rule<T> {
+pub struct Rule<'s, T> {
 	/// Name
-	pub name: String,
+	pub name: CowArcStr<'s>,
 
 	/// Aliases
 	pub aliases: HashMap<String, T>,
@@ -26,9 +26,9 @@ pub struct Rule<T> {
 	pub exec: Exec<T>,
 }
 
-impl Rule<Expr> {
+impl<'s> Rule<'s, Expr> {
 	/// Creates a new rule from it's ast
-	pub fn new(name: String, rule: ast::Rule) -> Self {
+	pub fn new(name: CowArcStr<'s>, rule: ast::Rule) -> Self {
 		let aliases = rule
 			.alias
 			.into_iter()

@@ -145,7 +145,7 @@ async fn main() -> Result<(), anyhow::Error> {
 			.targets
 			.into_iter()
 			.map(|target| {
-				rules.rules.get(&target).map_or_else(
+				rules.rules.get(target.as_str()).map_or_else(
 					// By default, use a file
 					|| rules::Target::File {
 						file:      rules::Expr::string(target),
@@ -154,7 +154,7 @@ async fn main() -> Result<(), anyhow::Error> {
 					// If there was a rule, use it without any patterns
 					// TODO: If it requires patterns maybe error out here?
 					|rule| rules::Target::Rule {
-						rule: rules::Expr::string(rule.name.clone()),
+						rule: rules::Expr::string(rule.name.to_string()),
 						pats: HashMap::new(),
 					},
 				)
@@ -164,7 +164,7 @@ async fn main() -> Result<(), anyhow::Error> {
 	tracing::trace!(?targets_to_build, "Found targets to build");
 
 	// Create the builder
-	let builder = Builder::new(jobs)?;
+	let builder = Builder::new(jobs);
 
 	// Then create the watcher, if we're watching
 	let watcher = args
@@ -186,8 +186,8 @@ async fn main() -> Result<(), anyhow::Error> {
 		watcher.watch_rebuild(&builder, &rules, args.ignore_missing).await?;
 	}
 
-	// Finally wait for the runner thread to finish
-	let targets = builder.await_runner_thread()?;
+	// Finally print some statistics
+	let targets = builder.into_build_results();
 	let total_targets = targets.len();
 	let built_targets = targets
 		.iter()
@@ -222,7 +222,7 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 /// Builds a target.
 #[expect(clippy::future_not_send)] // Auto-traits are propagated (TODO: Maybe? Check if this is true)
 async fn build_target<'s, T: BuildableTargetInner + std::fmt::Display + std::fmt::Debug>(
-	builder: &Builder,
+	builder: &Builder<'s>,
 	target: &rules::Target<T>,
 	rules: &Rules<'s>,
 	ignore_missing: bool,
@@ -251,7 +251,7 @@ trait BuildableTargetInner: Sized {
 	/// Builds this target
 	async fn build<'s>(
 		target: &rules::Target<Self>,
-		builder: &Builder,
+		builder: &Builder<'s>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,
 	) -> Result<build::BuildResult, AppError>;
@@ -260,7 +260,7 @@ trait BuildableTargetInner: Sized {
 impl BuildableTargetInner for rules::Expr {
 	async fn build<'s>(
 		target: &rules::Target<Self>,
-		builder: &Builder,
+		builder: &Builder<'s>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,
 	) -> Result<build::BuildResult, AppError> {
@@ -274,7 +274,7 @@ impl BuildableTargetInner for rules::Expr {
 impl BuildableTargetInner for String {
 	async fn build<'s>(
 		target: &rules::Target<Self>,
-		builder: &Builder,
+		builder: &Builder<'s>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,
 	) -> Result<build::BuildResult, AppError> {

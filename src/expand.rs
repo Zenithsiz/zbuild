@@ -140,7 +140,11 @@ impl Expander {
 	}
 
 	/// Expands a rule of all it's aliases and patterns
-	pub fn expand_rule(&self, rule: &Rule<Expr>, visitor: &mut impl Visitor) -> Result<Rule<String>, AppError> {
+	pub fn expand_rule<'s>(
+		&self,
+		rule: &Rule<'s, Expr>,
+		visitor: &mut impl Visitor,
+	) -> Result<Rule<'s, String>, AppError> {
 		let aliases = rule
 			.aliases
 			.iter()

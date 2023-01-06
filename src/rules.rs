@@ -40,7 +40,7 @@ pub struct Rules<'s> {
 	pub default: Vec<Target<Expr>>,
 
 	/// Rules
-	pub rules: HashMap<String, Rule<Expr>>,
+	pub rules: HashMap<CowArcStr<'s>, Rule<'s, Expr>>,
 }
 
 impl<'s> Rules<'s> {
@@ -56,7 +56,10 @@ impl<'s> Rules<'s> {
 		let rules = ast
 			.rules
 			.into_iter()
-			.map(|(name, rule)| (name.clone().into_owned(), Rule::new(name.into_owned(), rule)))
+			.map(|(name, rule)| {
+				let name = CowArcStr::from_cow(name);
+				(name.clone(), Rule::new(name, rule))
+			})
 			.collect();
 
 		Self {

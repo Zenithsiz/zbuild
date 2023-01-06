@@ -16,13 +16,12 @@ use {
 		match_expr::match_expr,
 	},
 	crate::{
-		rules::{DepItem, Exec, Expr, OutItem, Rule, Target},
-		util,
+		rules::{DepItem, Expr, OutItem, Rule, Target},
+		util::{self, CowArcStr},
 		AppError,
 		Expander,
 		Rules,
 	},
-	anyhow::Context,
 	dashmap::DashMap,
 	filetime::FileTime,
 	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
@@ -30,15 +29,9 @@ use {
 	std::{
 		collections::HashMap,
 		mem,
-		thread::JoinHandle,
 		time::{Duration, SystemTime},
 	},
-	tokio::{
-		fs,
-		process::Command,
-		sync::{mpsc, oneshot},
-	},
-	tokio_stream::wrappers::UnboundedReceiverStream,
+	tokio::{fs, process::Command, sync::Semaphore},
 };
 
 // TODO: If the user zbuild file is not generated properly, it can
@@ -56,30 +49,17 @@ pub enum Event {
 
 /// Target rule
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
-pub struct TargetRule {
+pub struct TargetRule<'s> {
 	/// Name
-	name: String,
+	name: CowArcStr<'s>,
 
 	/// Patterns (sorted)
 	pats: Vec<(String, String)>,
 }
 
-/// Rule exec
-#[derive(Debug)]
-pub struct RuleExec {
-	/// Rule name
-	rule_name: String,
-
-	/// Exec
-	exec: Exec<String>,
-
-	/// Result sender
-	res_tx: oneshot::Sender<Result<(), AppError>>,
-}
-
 /// Builder
 #[derive(Debug)]
-pub struct Builder {
+pub struct Builder<'s> {
 	/// Event sender
 	event_tx: async_broadcast::Sender<Event>,
 
@@ -89,62 +69,37 @@ pub struct Builder {
 	//       it closes the channel, so we need to keep it around.
 	_event_rx: async_broadcast::InactiveReceiver<Event>,
 
-	/// Command sender
-	cmd_tx: mpsc::UnboundedSender<RuleExec>,
-
 	/// Expander
 	expander: Expander,
 
 	/// All rules' build lock
-	rules_lock: DashMap<TargetRule, BuildLock>,
+	rules_lock: DashMap<TargetRule<'s>, BuildLock>,
 
-	/// Command runner thread
-	cmd_runner: JoinHandle<()>,
+	/// Execution semaphore
+	exec_semaphore: Semaphore,
 }
 
-impl Builder {
+impl<'s> Builder<'s> {
 	/// Creates a new builder
-	pub fn new(jobs: usize) -> Result<Self, AppError> {
+	pub fn new(jobs: usize) -> Self {
 		let (event_tx, event_rx) = async_broadcast::broadcast(jobs);
 		let event_rx = event_rx.deactivate();
 
-		// Create the thread to run commands
-		// TODO: Is this the best way?
-		let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
-		let cmd_runner = std::thread::Builder::new()
-			.name("Command runner".to_owned())
-			.spawn(move || Self::cmds_runner(cmd_rx, jobs))
-			.context("Unable to spawn command runner thread")
-			.map_err(AppError::Other)?;
-
-		Ok(Self {
+		Self {
 			event_tx,
 			_event_rx: event_rx,
-			cmd_tx,
 			expander: Expander::new(),
 			rules_lock: DashMap::new(),
-			cmd_runner,
-		})
+			exec_semaphore: Semaphore::new(jobs),
+		}
 	}
 
-	/// Finishes all builds and returns the targets build
-	pub fn await_runner_thread(self) -> Result<HashMap<Target<String>, Result<BuildResult, AppError>>, AppError> {
-		// Drop the sender
-		// Note: We do this so the runner thread exits
-		mem::drop(self.cmd_tx);
-
-		// Then join the thread
-		self.cmd_runner
-			.join()
-			.map_err(|err| AppError::Other(anyhow::anyhow!("Unable to join command runner thread: {err:?}")))?;
-
-		let targets = self
-			.rules_lock
+	/// Returns all build results
+	pub fn into_build_results(self) -> HashMap<Target<String>, Result<BuildResult, AppError>> {
+		self.rules_lock
 			.into_iter()
 			.flat_map(|(_, lock)| lock.into_res())
-			.collect();
-
-		Ok(targets)
+			.collect()
 	}
 
 	/// Sends an event, if any are subscribers
@@ -168,8 +123,8 @@ impl Builder {
 	fn target_rule(
 		&self,
 		target: &Target<String>,
-		rules: &Rules,
-	) -> Result<Option<(Rule<String>, TargetRule)>, AppError> {
+		rules: &Rules<'s>,
+	) -> Result<Option<(Rule<'s, String>, TargetRule<'s>)>, AppError> {
 		let target_rule = match *target {
 			// If we got a file, check which rule can make it
 			Target::File { ref file, .. } => match self.find_rule_for_file(file, rules)? {
@@ -188,13 +143,13 @@ impl Builder {
 			// If we got a rule name with patterns, find it and replace all patterns
 			Target::Rule { ref rule, ref pats } => {
 				// Find the rule and expand it
-				let rule = rules.rules.get(rule).ok_or_else(|| AppError::UnknownRule {
+				let rule = rules.rules.get(rule.as_str()).ok_or_else(|| AppError::UnknownRule {
 					rule_name: rule.clone(),
 				})?;
 				let rule = self
 					.expander
 					.expand_rule(rule, &mut RuleVisitor::new(&rules.aliases, &rule.aliases, pats))
-					.map_err(AppError::expand_rule(&rule.name))?;
+					.map_err(AppError::expand_rule(rule.name.as_str()))?;
 				let target_rule = TargetRule {
 					name: rule.name.clone(),
 					pats: pats
@@ -206,11 +161,12 @@ impl Builder {
 				(rule, target_rule)
 			},
 		};
+
 		Ok(Some(target_rule))
 	}
 
 	/// Resets a build
-	pub async fn reset_build<'s>(&self, target: &Target<String>, rules: &Rules<'s>) -> Result<(), AppError> {
+	pub async fn reset_build(&self, target: &Target<String>, rules: &Rules<'s>) -> Result<(), AppError> {
 		// Get the rule for the target
 		let Some((_, target_rule)) = self.target_rule(target, rules)? else { return Ok(()) };
 
@@ -228,7 +184,7 @@ impl Builder {
 	}
 
 	/// Builds an expression-encoded target
-	pub async fn build_expr<'s>(
+	pub async fn build_expr(
 		&self,
 		target: &Target<Expr>,
 		rules: &Rules<'s>,
@@ -245,7 +201,7 @@ impl Builder {
 	}
 
 	/// Builds a target
-	pub async fn build<'s>(
+	pub async fn build(
 		&self,
 		target: &Target<String>,
 		rules: &Rules<'s>,
@@ -340,8 +296,8 @@ impl Builder {
 	async fn build_unchecked(
 		&self,
 		target: &Target<String>,
-		rule: &Rule<String>,
-		rules: &Rules,
+		rule: &Rule<'s, String>,
+		rules: &Rules<'s>,
 		ignore_missing: bool,
 	) -> Result<BuildResult, AppError> {
 		/// Dependency
@@ -365,6 +321,8 @@ impl Builder {
 		}
 
 		// Gather all normal dependencies
+		// Note: It's fine to fail early here, we don't need to check all files
+		//       if one fails
 		let normal_deps = rule
 			.deps
 			.iter()
@@ -404,6 +362,7 @@ impl Builder {
 			.await?;
 
 		// And all output dependencies
+		// Note: Fine to fail early here, see note above for `normal_deps`
 		let out_deps = rule
 			.output
 			.iter()
@@ -426,6 +385,10 @@ impl Builder {
 			.await?;
 
 		// Then build all dependencies, as well as any dependency files
+		// Note: We don't want to fail early here, since commands might still be
+		//       running, so we first collect all results, and then fail
+		// TODO: Cancel dependencies that haven't even started building yet before failing?
+		// TODO: Don't collect like 3 times during this
 		let deps = util::chain!(normal_deps, out_deps)
 			.map(|dep| {
 				tracing::trace!(?target, ?rule.name, ?dep, "Found target rule dependency");
@@ -513,8 +476,10 @@ impl Builder {
 				}
 			})
 			.collect::<FuturesUnordered<_>>()
-			.try_collect::<Vec<_>>()
-			.await?
+			.collect::<Vec<_>>()
+			.await
+			.into_iter()
+			.collect::<Result<Vec<_>, _>>()?
 			.into_iter()
 			.flatten()
 			.collect::<Vec<_>>();
@@ -547,7 +512,7 @@ impl Builder {
 			tracing::trace!(?target, ?rule.name, "Rebuilding target rule");
 			self.rebuild_rule(rule)
 				.await
-				.map_err(AppError::build_rule(&rule.name))?;
+				.map_err(AppError::build_rule(rule.name.as_str()))?;
 		}
 
 		// Then get the build time
@@ -564,11 +529,11 @@ impl Builder {
 	/// Builds all dependencies of a `deps` file.
 	///
 	/// Returns the latest modification date of the dependencies
-	async fn build_deps_file<'s>(
+	async fn build_deps_file(
 		&self,
 		parent_target: &Target<String>,
 		dep_file: &str,
-		rule: &Rule<String>,
+		rule: &Rule<'s, String>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,
 	) -> Result<Vec<(Target<String>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {
@@ -579,10 +544,10 @@ impl Builder {
 			// If there were no outputs, make sure it matches the rule name
 			// TODO: Seems kinda weird for it to match the rule name, but not sure how else to check this here
 			true =>
-				if output != rule.name {
+				if output != rule.name.as_str() {
 					return Err(AppError::DepFileMissingRuleName {
 						dep_file_path: dep_file.into(),
-						rule_name:     rule.name.clone(),
+						rule_name:     rule.name.to_string(),
 						dep_output:    output,
 					});
 				},
@@ -603,6 +568,7 @@ impl Builder {
 		}
 
 		// Build all dependencies
+		// Note: We don't want to fail-early, see the note on `deps` in `build_unchecked`
 		let deps_res = deps
 			.into_iter()
 			.map(|dep| {
@@ -628,83 +594,50 @@ impl Builder {
 				}
 			})
 			.collect::<FuturesUnordered<_>>()
-			.try_collect::<Vec<_>>()
-			.await?;
+			.collect::<Vec<_>>()
+			.await
+			.into_iter()
+			.collect::<Result<Vec<_>, _>>()?;
 
 		Ok(deps_res)
 	}
 
 	/// Rebuilds a rule
-	pub async fn rebuild_rule(&self, rule: &Rule<String>) -> Result<(), AppError> {
-		// Build the execution
-		let (res_tx, res_rx) = oneshot::channel();
-		let rule_exec = RuleExec {
-			rule_name: rule.name.clone(),
-			exec: rule.exec.clone(),
-			res_tx,
-		};
+	pub async fn rebuild_rule(&self, rule: &Rule<'s, String>) -> Result<(), AppError> {
+		// Lock the semaphore
+		let _permit = self.exec_semaphore.acquire().await;
 
-		// Then send it
-		self.cmd_tx
-			.send(rule_exec)
-			.context("Command runner thread quit")
-			.map_err(AppError::Other)?;
+		for cmd in &rule.exec.cmds {
+			let (program, args) = cmd.args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
+				rule_name: rule.name.to_string(),
+			})?;
 
-		// And wait for the response
-		res_rx
-			.await
-			.context("Command runner thread quit")
-			.map_err(AppError::Other)?
-	}
+			// Create the command
+			let mut os_cmd = Command::new(program);
+			os_cmd.args(args);
 
-	/// Command runner
-	#[tokio::main(flavor = "current_thread")]
-	async fn cmds_runner(cmd_rx: mpsc::UnboundedReceiver<RuleExec>, max_jobs: usize) {
-		UnboundedReceiverStream::new(cmd_rx)
-			.map(async move |exec| {
-				let res = async move {
-					for cmd in exec.exec.cmds {
-						let (program, args) = cmd.args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
-							rule_name: exec.rule_name.clone(),
-						})?;
+			// Set the working directory, if we have any
+			if let Some(cwd) = &rule.exec.cwd {
+				os_cmd.current_dir(cwd);
+			}
 
-						// Create the command
-						let mut os_cmd = Command::new(program);
-						os_cmd.args(args);
-
-						// Set the working directory, if we have any
-						if let Some(cwd) = &exec.exec.cwd {
-							os_cmd.current_dir(cwd);
-						}
-
-						// Then spawn it and measure
-						tracing::info!(target: "zbuild_exec", "{} {}", program, args.join(" "));
-						let (duration, ()) = util::try_measure_async(async {
-							os_cmd
-								.spawn()
-								.map_err(AppError::spawn_command(&cmd))?
-								.wait()
-								.await
-								.map_err(AppError::wait_command(&cmd))?
-								.exit_ok()
-								.map_err(AppError::command_failed(&cmd))
-						})
-						.await?;
-						tracing::debug!(target: "zbuild_exec", rule_name=?exec.rule_name, ?program, ?args, ?duration, "Execution duration");
-					}
-
-					Ok(())
-				}
-				.await;
-
-				// Note: We want to continue running until we're out of tasks, even
-				//       if the main thread has quit
-				#[expect(let_underscore_drop)]
-				let _ = exec.res_tx.send(res);
+			// Then spawn it and measure
+			tracing::info!(target: "zbuild_exec", "{} {}", program, args.join(" "));
+			let (duration, ()) = util::try_measure_async(async {
+				os_cmd
+					.spawn()
+					.map_err(AppError::spawn_command(cmd))?
+					.wait()
+					.await
+					.map_err(AppError::wait_command(cmd))?
+					.exit_ok()
+					.map_err(AppError::command_failed(cmd))
 			})
-			.buffer_unordered(max_jobs)
-			.collect::<()>()
-			.await;
+			.await?;
+			tracing::debug!(target: "zbuild_exec", rule_name=?rule.name, ?program, ?args, ?duration, "Execution duration");
+		}
+
+		Ok(())
 	}
 
 	/// Finds a rule for `file`
@@ -713,8 +646,8 @@ impl Builder {
 	pub fn find_rule_for_file(
 		&self,
 		file: &str,
-		rules: &Rules,
-	) -> Result<Option<(Rule<String>, HashMap<String, String>)>, AppError> {
+		rules: &Rules<'s>,
+	) -> Result<Option<(Rule<'s, String>, HashMap<String, String>)>, AppError> {
 		for rule in rules.rules.values() {
 			for output in &rule.output {
 				// Expand all expressions in the output file
@@ -731,7 +664,7 @@ impl Builder {
 					let rule = self
 						.expander
 						.expand_rule(rule, &mut RuleVisitor::new(&rules.aliases, &rule.aliases, &rule_pats))
-						.map_err(AppError::expand_rule(&rule.name))?;
+						.map_err(AppError::expand_rule(rule.name.to_string()))?;
 					return Ok(Some((rule, rule_pats)));
 				}
 			}
@@ -762,9 +695,10 @@ async fn parse_deps_file(file: &str) -> Result<(String, Vec<String>), AppError> 
 ///
 /// Returns `Err` if any files didn't exist,
 /// Returns `Ok(None)` if rule has no outputs
-async fn rule_last_build_time(rule: &Rule<String>) -> Result<Option<SystemTime>, AppError> {
+async fn rule_last_build_time<'s>(rule: &Rule<'s, String>) -> Result<Option<SystemTime>, AppError> {
 	// Note: We get the time of the oldest file in order to ensure all
 	//       files are at-least that old
+	// Note: It's fine to fail early here, see the note on `normal_deps` in `build_unchecked`.
 	let built_time = rule
 		.output
 		.iter()
