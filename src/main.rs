@@ -122,6 +122,10 @@ async fn main() -> Result<(), anyhow::Error> {
 
 	// Get the max number of jobs we can execute at once
 	let jobs = match args.jobs {
+		Some(0) => {
+			tracing::warn!("Cannot use 0 jobs, defaulting to 1");
+			1
+		},
 		Some(jobs) => jobs,
 		None => std::thread::available_parallelism()
 			.map_err(AppError::get_default_jobs())?
@@ -197,6 +201,13 @@ async fn main() -> Result<(), anyhow::Error> {
 	tracing::info!("Checked {total_targets} targets");
 
 	Ok(())
+}
+
+/// Returns the default number of jobs
+pub fn default_jobs() -> Result<usize, AppError> {
+	std::thread::available_parallelism()
+		.map_err(AppError::get_default_jobs())
+		.map(usize::from)
 }
 
 /// Finds the nearest zbuild file
