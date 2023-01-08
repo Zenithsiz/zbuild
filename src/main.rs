@@ -77,10 +77,10 @@ use {
 	std::{
 		collections::HashMap,
 		env,
+		fs,
 		path::{Path, PathBuf},
 		time::{Duration, SystemTime},
 	},
-	tokio::fs,
 	util::CowStr,
 	watcher::Watcher,
 };
@@ -111,9 +111,7 @@ async fn main() -> Result<(), anyhow::Error> {
 	std::env::set_current_dir(zbuild_dir).map_err(AppError::set_current_dir(zbuild_dir))?;
 
 	// Parse the ast
-	let zbuild_file = fs::read_to_string(&zbuild_path)
-		.await
-		.map_err(AppError::read_file(&zbuild_path))?;
+	let zbuild_file = fs::read_to_string(&zbuild_path).map_err(AppError::read_file(&zbuild_path))?;
 	tracing::trace!(?zbuild_file, "Read zbuild.yaml");
 	let ast = serde_yaml::from_str::<Ast>(&zbuild_file).map_err(AppError::parse_yaml(&zbuild_path))?;
 	tracing::trace!(?ast, "Parsed ast");
