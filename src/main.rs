@@ -58,6 +58,8 @@
 #![allow(clippy::module_name_repetitions)] // This is how we organize some modules
 #![allow(clippy::manual_let_else)] // Rustfmt has no support for let-else statements yet.
 
+use std::borrow::Cow;
+
 // Modules
 mod args;
 mod ast;
@@ -137,7 +139,7 @@ async fn main() -> Result<(), anyhow::Error> {
 	// Then get all targets to build
 	let targets_to_build = match args.targets.is_empty() {
 		// If none were specified, use the default rules
-		true => rules.default.clone(),
+		true => Cow::Borrowed(rules.default.as_slice()),
 
 		// Else infer them as either rules or files
 		// TODO: Maybe be explicit about rule-name inferring?
