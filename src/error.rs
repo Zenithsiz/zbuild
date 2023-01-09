@@ -316,6 +316,7 @@ pub enum AppError {
 ///
 /// These are functions that return functions to pass to `.map_err` to
 /// specify a certain error.
+#[allow(dead_code)] // They're convenience functions that might be used in the future
 impl AppError {
 	pub fn get_current_dir() -> impl FnOnce(io::Error) -> Self {
 		move |err| Self::GetCurrentDir { err }

@@ -204,13 +204,6 @@ async fn main() -> Result<(), anyhow::Error> {
 	Ok(())
 }
 
-/// Returns the default number of jobs
-pub fn default_jobs() -> Result<usize, AppError> {
-	std::thread::available_parallelism()
-		.map_err(AppError::get_default_jobs())
-		.map(usize::from)
-}
-
 /// Finds the nearest zbuild file
 async fn find_zbuild() -> Result<PathBuf, AppError> {
 	let cur_path = env::current_dir().map_err(AppError::get_current_dir())?;
