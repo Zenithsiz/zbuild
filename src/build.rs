@@ -223,33 +223,36 @@ impl<'s> Builder<'s> {
 		let (rule, target_rule) = match self.target_rule(&target, rules)? {
 			Some((rule, target_rule)) => (rule, target_rule),
 			None => match target {
-				Target::File { ref file, .. } =>
-					return match fs::metadata(&**file).await {
-						Ok(metadata) => {
-							let build_time = self::file_modified_time(metadata);
-							tracing::trace!(?target, ?build_time, "Found target file");
-							Ok((
-								BuildResult {
-									build_time,
-									built: false,
-								},
-								None,
-							))
-						},
-						Err(_) if ignore_missing => {
-							tracing::debug!(?file, "Ignoring missing target file");
-							Ok((
-								BuildResult {
-									// Note: We simply pretend the file was built right now
-									// TODO: Check if we should instead use a really old time?
-									build_time: SystemTime::now(),
-									built:      false,
-								},
-								None,
-							))
-						},
-						Err(err) => Err(AppError::missing_file(&**file)(err)),
+				Target::File { ref file, .. } => match fs::metadata(&**file).await {
+					Ok(metadata) => {
+						let build_time = self::file_modified_time(metadata);
+						tracing::trace!(?target, ?build_time, "Found target file");
+						return Ok((
+							BuildResult {
+								build_time,
+								built: false,
+							},
+							None,
+						));
 					},
+					Err(_) if ignore_missing => {
+						tracing::debug!(?file, "Ignoring missing target file");
+						return Ok((
+							BuildResult {
+								// Note: We simply pretend the file was built right now
+								// TODO: Check if we should instead use a really old time?
+								build_time: SystemTime::now(),
+								built:      false,
+							},
+							None,
+						));
+					},
+					Err(err) =>
+						do yeet AppError::MissingFile {
+							file_path: (**file).into(),
+							err,
+						},
+				},
 				// Note: If `target_rule` returns `Err` if this was a rule, so we can never reach here
 				Target::Rule { .. } => unreachable!(),
 			},
