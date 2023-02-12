@@ -46,11 +46,16 @@ pub struct Watcher<'s> {
 
 impl<'s> Watcher<'s> {
 	/// Creates a new watcher
-	pub fn new(builder_event_rx: async_broadcast::Receiver<build::Event<'s>>) -> Result<Self, AppError> {
+	pub fn new(
+		builder_event_rx: async_broadcast::Receiver<build::Event<'s>>,
+		watch_debouncer_timeout_ms: f64,
+	) -> Result<Self, AppError> {
 		// Create the watcher
 		let (fs_event_tx, fs_event_rx) = tokio::sync::mpsc::channel(16);
-		let watcher =
-			notify_debouncer_mini::new_debouncer(Duration::from_secs(1), None, move |fs_events| match fs_events {
+		let watcher = notify_debouncer_mini::new_debouncer(
+			Duration::from_secs_f64(watch_debouncer_timeout_ms / 1000.0),
+			None,
+			move |fs_events| match fs_events {
 				Ok(fs_events) =>
 					for fs_event in fs_events {
 						tracing::trace!(?fs_event, "Watcher fs event");
@@ -61,9 +66,10 @@ impl<'s> Watcher<'s> {
 					for err in errs {
 						tracing::warn!("Error while watching: {:?}", anyhow::Error::from(err));
 					},
-			})
-			.context("Unable to create file watcher")
-			.map_err(AppError::Other)?;
+			},
+		)
+		.context("Unable to create file watcher")
+		.map_err(AppError::Other)?;
 
 		Ok(Self {
 			watcher,
@@ -144,7 +150,7 @@ impl<'s> Watcher<'s> {
 						Some(rev_dep) => rev_dep.clone(),
 						None => return,
 					};
-					tracing::info!("Changed: {:?}", rev_dep.target);
+					tracing::debug!("Changed: {:?}", rev_dep.target);
 					tracing::trace!(?rev_dep, "Reverse dependencies");
 
 					// Note: We clone the parents so we don't hold onto the rev dep lock for too long
@@ -182,10 +188,7 @@ impl<'s> Watcher<'s> {
 					//       get rebuilt.
 					dep_parents
 						.iter()
-						.map(|target| {
-							tracing::info!("Rechecking: {target:?}");
-							crate::build_target(builder, target, rules, ignore_missing)
-						})
+						.map(|target| crate::build_target(builder, target, rules, ignore_missing))
 						.collect::<FuturesUnordered<_>>()
 						.collect::<()>()
 						.await;

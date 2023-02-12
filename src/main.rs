@@ -174,7 +174,12 @@ async fn main() -> Result<(), anyhow::Error> {
 	// Then create the watcher, if we're watching
 	let watcher = args
 		.watch
-		.then(|| Watcher::new(builder.subscribe_events()))
+		.then(|| {
+			Watcher::new(
+				builder.subscribe_events(),
+				args.watch_debouncer_timeout_ms.unwrap_or(100.0),
+			)
+		})
 		.transpose()?;
 
 	// Finally build all targets and start watching
