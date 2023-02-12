@@ -8,7 +8,6 @@
 	async_closure,
 	let_chains,
 	lint_reasons,
-	main_separator_str,
 	async_fn_in_trait,
 	yeet_expr
 )]
