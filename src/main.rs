@@ -247,11 +247,13 @@ async fn build_target<'s, T: BuildableTargetInner<'s> + std::fmt::Display + std:
 	// Then check if we did it
 	match res {
 		Ok(build_res) => {
-			let build_duration = build_res
-				.build_time
-				.duration_since(build_start_time)
-				.unwrap_or(Duration::ZERO);
-			tracing::info!("Built target {target} in {build_duration:.2?}");
+			if build_res.built_here {
+				let build_duration = build_res
+					.build_time
+					.duration_since(build_start_time)
+					.unwrap_or(Duration::ZERO);
+				tracing::info!("Built target {target} in {build_duration:.2?}")
+			};
 		},
 		Err(err) => tracing::error!("Unable to build target {target}: {:?}", anyhow::Error::new(err)),
 	}

@@ -13,6 +13,10 @@ pub struct BuildResult {
 	/// Build time
 	pub build_time: SystemTime,
 
+	/// If this task was the one who built it
+	// TODO: Rename to something here
+	pub built_here: bool,
+
 	/// If built from a rule
 	pub built: bool,
 }
