@@ -138,10 +138,18 @@ pub enum ExprCmpt<'a> {
 	String(&'a str),
 
 	/// Pattern
-	Pattern { name: &'a str, ops: Vec<PatternOp> },
+	Pattern(Pattern<'a>),
 
 	/// Alias
-	Alias { name: &'a str, ops: Vec<AliasOp> },
+	Alias(Alias<'a>),
+}
+
+/// Pattern
+#[derive(PartialEq, Eq, Clone, Hash, Debug)]
+/// Pattern
+pub struct Pattern<'a> {
+	pub name: &'a str,
+	pub ops:  Vec<PatternOp>,
 }
 
 /// Pattern operator
@@ -149,6 +157,14 @@ pub enum ExprCmpt<'a> {
 pub enum PatternOp {
 	/// Non-empty
 	NonEmpty,
+}
+
+/// Alias
+#[derive(PartialEq, Eq, Clone, Hash, Debug)]
+/// Alias
+pub struct Alias<'a> {
+	pub name: &'a str,
+	pub ops:  Vec<AliasOp>,
 }
 
 /// Alias operator
@@ -168,7 +184,7 @@ impl<'a> serde::Serialize for Expr<'a> {
 			.iter()
 			.map(|cmpt| match *cmpt {
 				ExprCmpt::String(s) => s.to_owned(),
-				ExprCmpt::Pattern { name, ref ops } => format!(
+				ExprCmpt::Pattern(Pattern { name, ref ops }) => format!(
 					"^({name}{})",
 					ops.iter()
 						.map(|op| format!("::{}", match op {
@@ -176,7 +192,7 @@ impl<'a> serde::Serialize for Expr<'a> {
 						}))
 						.join("")
 				),
-				ExprCmpt::Alias { name, ref ops } => format!(
+				ExprCmpt::Alias(Alias { name, ref ops }) => format!(
 					"$({name}{})",
 					ops.iter()
 						.map(|op| format!("::{}", match op {
@@ -246,7 +262,7 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 
 					// Finally check what it was originally and parse all operations
 					let cmpt = match kind {
-						Kind::Alias => ExprCmpt::Alias {
+						Kind::Alias => ExprCmpt::Alias(Alias {
 							name,
 							ops: ops
 								.into_iter()
@@ -255,8 +271,8 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 									op => Err(D::Error::custom(format!("Unknown alias operator {op:?}"))),
 								})
 								.collect::<Result<_, _>>()?,
-						},
-						Kind::Pattern => ExprCmpt::Pattern {
+						}),
+						Kind::Pattern => ExprCmpt::Pattern(Pattern {
 							name,
 							ops: ops
 								.into_iter()
@@ -265,7 +281,7 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 									op => Err(D::Error::custom(format!("Unknown pattern operator {op:?}"))),
 								})
 								.collect::<Result<_, _>>()?,
-						},
+						}),
 					};
 					cmpts.push(cmpt);
 				},
@@ -290,9 +306,10 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Rule<'a> {
 	/// Aliases
+	#[serde(rename = "alias")]
 	#[serde(default)]
 	#[serde(borrow)]
-	pub alias: HashMap<&'a str, Expr<'a>>,
+	pub aliases: HashMap<&'a str, Expr<'a>>,
 
 	/// Output items
 	#[serde(default)]

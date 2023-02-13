@@ -38,7 +38,7 @@ impl<'s> Expr<'s> {
 			.into_iter()
 			.map(|cmpt| match cmpt {
 				ast::ExprCmpt::String(s) => ExprCmpt::String(CowStr::Borrowed(s)),
-				ast::ExprCmpt::Pattern { name, ops } => ExprCmpt::Pattern(Pattern {
+				ast::ExprCmpt::Pattern(ast::Pattern { name, ops }) => ExprCmpt::Pattern(Pattern {
 					name,
 					ops: ops
 						.into_iter()
@@ -47,7 +47,7 @@ impl<'s> Expr<'s> {
 						})
 						.collect(),
 				}),
-				ast::ExprCmpt::Alias { name, ops } => ExprCmpt::Alias(Alias {
+				ast::ExprCmpt::Alias(ast::Alias { name, ops }) => ExprCmpt::Alias(Alias {
 					name,
 					ops: ops
 						.into_iter()

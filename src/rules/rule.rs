@@ -30,7 +30,7 @@ impl<'s> Rule<'s, Expr<'s>> {
 	/// Creates a new rule from it's ast
 	pub fn new(name: &'s str, rule: ast::Rule<'s>) -> Self {
 		let aliases = rule
-			.alias
+			.aliases
 			.into_iter()
 			.map(|(alias, expr)| (alias, Expr::new(expr)))
 			.collect();
