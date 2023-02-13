@@ -665,12 +665,12 @@ impl<'s> Builder<'s> {
 				let output_file = match output {
 					OutItem::File { file: output_file } | OutItem::DepsFile { file: output_file } => output_file,
 				};
-				let file_cmpts = self
+				let output_file = self
 					.expander
 					.expand_expr(output_file, &mut RuleOutputVisitor::new(&rules.aliases, &rule.aliases))?;
 
 				// Then try to match the output file to the file we need to create
-				if let Some(rule_pats) = self::match_expr(output_file, &file_cmpts, file)? {
+				if let Some(rule_pats) = self::match_expr(&output_file, &output_file.cmpts, file)? {
 					let rule = self
 						.expander
 						.expand_rule(rule, &mut RuleVisitor::new(&rules.aliases, &rule.aliases, &rule_pats))

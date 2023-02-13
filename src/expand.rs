@@ -23,11 +23,7 @@ impl Expander {
 	}
 
 	/// Expands an expression to it's components
-	pub fn expand_expr<'s>(
-		&self,
-		expr: &Expr<'s>,
-		visitor: &mut impl Visitor<'s>,
-	) -> Result<Vec<ExprCmpt<'s>>, AppError> {
+	pub fn expand_expr<'s>(&self, expr: &Expr<'s>, visitor: &mut impl Visitor<'s>) -> Result<Expr<'s>, AppError> {
 		// Go through all components
 		let cmpts = expr
 			.cmpts
@@ -56,7 +52,7 @@ impl Expander {
 						// If expanded, check if we need to apply any operations
 						FlowControl::ExpandTo(alias_expr) => match alias.ops.is_empty() {
 							// If not, just recursively expand it
-							true => cmpts.extend(self.expand_expr(&alias_expr, visitor)?),
+							true => cmpts.extend(self.expand_expr(&alias_expr, visitor)?.cmpts),
 
 							// Else expand it to a string, then apply all operations
 							// Note: We expand to string even if we don't *need* to to ensure the user doesn't
@@ -104,7 +100,7 @@ impl Expander {
 			})
 			.collect();
 
-		Ok(cmpts)
+		Ok(Expr { cmpts })
 	}
 
 	/// Expands an expression into a string
@@ -113,7 +109,7 @@ impl Expander {
 		expr: &Expr<'s>,
 		visitor: &mut impl Visitor<'s>,
 	) -> Result<CowStr<'s>, AppError> {
-		let expr_cmpts = self.expand_expr(expr, visitor)?.into_boxed_slice();
+		let expr_cmpts = self.expand_expr(expr, visitor)?.cmpts.into_boxed_slice();
 		let res = match Box::<[_; 0]>::try_from(expr_cmpts) {
 			Ok(box []) => Ok("".into()),
 			Err(cmpts) => match Box::<[_; 1]>::try_from(cmpts) {
