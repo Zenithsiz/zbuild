@@ -252,7 +252,8 @@ async fn build_target<'s, T: BuildableTargetInner<'s> + std::fmt::Display + std:
 					.build_time
 					.duration_since(build_start_time)
 					.unwrap_or(Duration::ZERO);
-				tracing::info!("Built target {target} in {build_duration:.2?}")
+				tracing::debug!("Built target {target} in {build_duration:.2?}");
+				println!("{target}");
 			};
 		},
 		Err(err) => tracing::error!("Unable to build target {target}: {:?}", anyhow::Error::new(err)),

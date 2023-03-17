@@ -632,7 +632,7 @@ impl<'s> Builder<'s> {
 			}
 
 			// Then spawn it and measure
-			tracing::info!(target: "zbuild_exec", "{} {}", program, args.join(" "));
+			tracing::debug!(target: "zbuild_exec", "{} {}", program, args.join(" "));
 			let (duration, ()) = util::try_measure_async(async {
 				os_cmd
 					.spawn()
