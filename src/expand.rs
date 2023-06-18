@@ -276,7 +276,7 @@ impl Expander {
 	}
 }
 
-/// Flow control for [`expand_expr_string`]
+/// Flow control for [`Expander::expand_expr_string`]
 pub enum FlowControl<T> {
 	/// Expand to
 	ExpandTo(T),
