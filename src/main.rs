@@ -11,7 +11,6 @@
 	async_fn_in_trait,
 	yeet_expr
 )]
-#![expect(incomplete_features)] // The ones we use are mature enough
 // Lints
 #![forbid(unsafe_code)]
 #![warn(
