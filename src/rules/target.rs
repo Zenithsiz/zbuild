@@ -34,7 +34,7 @@ pub enum Target<'s, T> {
 	},
 }
 
-impl<'s, T> Target<'s, T> {
+impl<T> Target<'_, T> {
 	/// Returns if this target is static
 	pub const fn is_static(&self) -> bool {
 		match *self {
@@ -60,7 +60,7 @@ impl<'s> Target<'s, Expr<'s>> {
 	}
 }
 
-impl<'s, T: Hash + Ord> Hash for Target<'s, T> {
+impl<T: Hash + Ord> Hash for Target<'_, T> {
 	fn hash<H: Hasher>(&self, state: &mut H) {
 		core::mem::discriminant(self).hash(state);
 		match self {
@@ -81,7 +81,7 @@ impl<'s, T: Hash + Ord> Hash for Target<'s, T> {
 }
 
 
-impl<'s, T: fmt::Display> fmt::Display for Target<'s, T> {
+impl<T: fmt::Display> fmt::Display for Target<'_, T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::File { file, is_static } => match is_static {

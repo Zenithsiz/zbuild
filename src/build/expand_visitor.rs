@@ -28,7 +28,7 @@ impl<'s, 'global> GlobalVisitor<'s, 'global> {
 	}
 }
 
-impl<'s, 'global> Visitor<'s> for GlobalVisitor<'s, 'global> {
+impl<'s> Visitor<'s> for GlobalVisitor<'s, '_> {
 	fn visit_alias(&mut self, alias_name: &str) -> FlowControl<Expr<'s>> {
 		self.aliases
 			.get(alias_name)
@@ -67,7 +67,7 @@ impl<'s, 'global, 'rule> RuleOutputVisitor<'s, 'global, 'rule> {
 	}
 }
 
-impl<'s, 'global, 'rule> Visitor<'s> for RuleOutputVisitor<'s, 'global, 'rule> {
+impl<'s> Visitor<'s> for RuleOutputVisitor<'s, '_, '_> {
 	fn visit_alias(&mut self, alias_name: &str) -> FlowControl<Expr<'s>> {
 		match self.rule_aliases.get(alias_name).cloned() {
 			Some(expr) => FlowControl::ExpandTo(expr),
@@ -115,7 +115,7 @@ impl<'s, 'global, 'rule, 'pats> RuleVisitor<'s, 'global, 'rule, 'pats> {
 	}
 }
 
-impl<'s, 'global, 'rule, 'pats> Visitor<'s> for RuleVisitor<'s, 'global, 'rule, 'pats> {
+impl<'s> Visitor<'s> for RuleVisitor<'s, '_, '_, '_> {
 	fn visit_alias(&mut self, alias_name: &str) -> FlowControl<Expr<'s>> {
 		match self.rule_aliases.get(alias_name).cloned() {
 			Some(expr) => FlowControl::ExpandTo(expr),

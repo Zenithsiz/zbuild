@@ -316,12 +316,14 @@ pub enum AppError {
 ///
 /// These are functions that return functions to pass to `.map_err` to
 /// specify a certain error.
-#[allow(dead_code)] // They're convenience functions that might be used in the future
+#[expect(dead_code, reason = "They're convenience functions we'll use in the future")]
 impl AppError {
+	/// Returns a function to create a [`Self::GetCurrentDir`] error from it's inner error.
 	pub fn get_current_dir() -> impl FnOnce(io::Error) -> Self {
 		move |err| Self::GetCurrentDir { err }
 	}
 
+	/// Returns a function to create a [`Self::SetCurrentDir`] error from it's inner error.
 	pub fn set_current_dir(dir_path: impl Into<PathBuf>) -> impl FnOnce(io::Error) -> Self {
 		move |err| Self::SetCurrentDir {
 			dir_path: dir_path.into(),
@@ -329,6 +331,7 @@ impl AppError {
 		}
 	}
 
+	/// Returns a function to create a [`Self::ReadFile`] error from it's inner error.
 	pub fn read_file(file_path: impl Into<PathBuf>) -> impl FnOnce(io::Error) -> Self {
 		move |err| Self::ReadFile {
 			file_path: file_path.into(),
@@ -336,6 +339,7 @@ impl AppError {
 		}
 	}
 
+	/// Returns a function to create a [`Self::ReadFileMetadata`] error from it's inner error.
 	pub fn read_file_metadata(file_path: impl Into<PathBuf>) -> impl FnOnce(io::Error) -> Self {
 		move |err| Self::ReadFileMetadata {
 			file_path: file_path.into(),
@@ -343,6 +347,7 @@ impl AppError {
 		}
 	}
 
+	/// Returns a function to create a [`Self::CheckFileExists`] error from it's inner error.
 	pub fn check_file_exists(file_path: impl Into<PathBuf>) -> impl FnOnce(io::Error) -> Self {
 		move |err| Self::CheckFileExists {
 			file_path: file_path.into(),
@@ -350,6 +355,7 @@ impl AppError {
 		}
 	}
 
+	/// Returns a function to create a [`Self::MissingFile`] error from it's inner error.
 	pub fn missing_file(file_path: impl Into<PathBuf>) -> impl FnOnce(io::Error) -> Self {
 		move |err| Self::MissingFile {
 			file_path: file_path.into(),
@@ -357,6 +363,7 @@ impl AppError {
 		}
 	}
 
+	/// Returns a function to create a [`Self::ParseYaml`] error from it's inner error.
 	pub fn parse_yaml(yaml_path: impl Into<PathBuf>) -> impl FnOnce(serde_yaml::Error) -> Self {
 		move |err| Self::ParseYaml {
 			yaml_path: yaml_path.into(),
@@ -364,6 +371,7 @@ impl AppError {
 		}
 	}
 
+	/// Returns a function to create a [`Self::SpawnCommand`] error from it's inner error.
 	pub fn spawn_command<T: fmt::Display>(cmd: &Command<T>) -> impl FnOnce(io::Error) -> Self + '_ {
 		move |err| Self::SpawnCommand {
 			cmd_fmt: cmd.args.iter().join(" "),
@@ -371,6 +379,7 @@ impl AppError {
 		}
 	}
 
+	/// Returns a function to create a [`Self::WaitCommand`] error from it's inner error.
 	pub fn wait_command<T: fmt::Display>(cmd: &Command<T>) -> impl FnOnce(io::Error) -> Self + '_ {
 		move |err| Self::WaitCommand {
 			cmd_fmt: cmd.args.iter().join(" "),
@@ -378,6 +387,7 @@ impl AppError {
 		}
 	}
 
+	/// Returns a function to create a [`Self::CommandFailed`] error from it's inner error.
 	pub fn command_failed<T: fmt::Display>(cmd: &Command<T>) -> impl FnOnce(ExitStatusError) -> Self + '_ {
 		move |err| Self::CommandFailed {
 			cmd_fmt: cmd.args.iter().join(" "),
@@ -385,10 +395,12 @@ impl AppError {
 		}
 	}
 
+	/// Returns a function to create a [`Self::GetDefaultJobs`] error from it's inner error.
 	pub fn get_default_jobs() -> impl FnOnce(io::Error) -> Self {
 		move |err| Self::GetDefaultJobs { err }
 	}
 
+	/// Returns a function to create a [`Self::AliasOp`] error from it's inner error.
 	pub fn alias_op(op: impl Into<AliasOp>) -> impl FnOnce(Self) -> Self {
 		move |err| Self::AliasOp {
 			op:  op.into(),
@@ -396,13 +408,17 @@ impl AppError {
 		}
 	}
 
-	pub fn build_target<'target, T: fmt::Display>(target: &'target Target<T>) -> impl FnOnce(Self) -> Self + 'target {
+	/// Returns a function to create a [`Self::BuildTarget`] error from it's inner error.
+	pub fn build_target<'target, T: fmt::Display>(
+		target: &'target Target<'_, T>,
+	) -> impl FnOnce(Self) -> Self + 'target {
 		move |err| Self::BuildTarget {
 			target_fmt: target.to_string(),
 			err:        Box::new(err),
 		}
 	}
 
+	/// Returns a function to create a [`Self::BuildRule`] error from it's inner error.
 	pub fn build_rule(rule_name: impl Into<String>) -> impl FnOnce(Self) -> Self {
 		move |err| Self::BuildRule {
 			rule_name: rule_name.into(),
@@ -410,6 +426,7 @@ impl AppError {
 		}
 	}
 
+	/// Returns a function to create a [`Self::BuildDepFile`] error from it's inner error.
 	pub fn build_dep_file(dep_file: impl Into<PathBuf>) -> impl FnOnce(Self) -> Self {
 		move |err| Self::BuildDepFile {
 			dep_file: dep_file.into(),
@@ -417,6 +434,7 @@ impl AppError {
 		}
 	}
 
+	/// Returns a function to create a [`Self::ExpandRule`] error from it's inner error.
 	pub fn expand_rule(rule_name: impl Into<String>) -> impl FnOnce(Self) -> Self {
 		move |err| Self::ExpandRule {
 			rule_name: rule_name.into(),
@@ -424,13 +442,17 @@ impl AppError {
 		}
 	}
 
-	pub fn expand_target<'target, T: fmt::Display>(target: &'target Target<T>) -> impl FnOnce(Self) -> Self + 'target {
+	/// Returns a function to create a [`Self::ExpandTarget`] error from it's inner error.
+	pub fn expand_target<'target, T: fmt::Display>(
+		target: &'target Target<'_, T>,
+	) -> impl FnOnce(Self) -> Self + 'target {
 		move |err| Self::ExpandTarget {
 			target_fmt: target.to_string(),
 			err:        Box::new(err),
 		}
 	}
 
+	/// Returns a function to create a [`Self::ExpandExpr`] error from it's inner error.
 	pub fn expand_expr<'expr>(expr: &'expr Expr<'_>) -> impl FnOnce(Self) -> Self + 'expr {
 		move |err| Self::ExpandExpr {
 			expr_fmt: expr.to_string(),

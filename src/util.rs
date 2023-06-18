@@ -25,7 +25,7 @@ pub macro chain {
 	},
 
 	($lhs:expr, $rhs:expr, $($rest:expr),+ $(,)?) => {
-		::std::iter::Iterator::chain($lhs.into_iter(), $crate::util::chain!($rhs, $($rest),*))
+		::std::iter::Iterator::chain($lhs.into_iter(), $crate::util::chain!($rhs, $($rest),+))
 	},
 }
 

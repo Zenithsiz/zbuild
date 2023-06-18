@@ -20,7 +20,7 @@ pub enum PatternOp {
 	NonEmpty,
 }
 
-impl<'s> fmt::Display for Pattern<'s> {
+impl fmt::Display for Pattern<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "^({}", self.name)?;
 

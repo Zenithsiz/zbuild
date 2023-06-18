@@ -162,7 +162,7 @@ impl Expander {
 		let output = rule
 			.output
 			.iter()
-			.map(|item: &OutItem<Expr>| match item {
+			.map(|item: &OutItem<Expr<'_>>| match item {
 				OutItem::File { file } => Ok::<_, AppError>(OutItem::File {
 					file: self.expand_expr_string(file, visitor)?,
 				}),
@@ -175,7 +175,7 @@ impl Expander {
 		let deps = rule
 			.deps
 			.iter()
-			.map(|item: &DepItem<Expr>| match *item {
+			.map(|item: &DepItem<Expr<'_>>| match *item {
 				DepItem::File {
 					ref file,
 					is_optional,

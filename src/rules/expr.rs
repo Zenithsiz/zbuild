@@ -70,7 +70,7 @@ impl<'s> Expr<'s> {
 	}
 }
 
-impl<'s> fmt::Display for Expr<'s> {
+impl fmt::Display for Expr<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		for cmpt in &self.cmpts {
 			write!(f, "{cmpt}")?;
@@ -80,7 +80,7 @@ impl<'s> fmt::Display for Expr<'s> {
 	}
 }
 
-impl<'s> fmt::Display for ExprCmpt<'s> {
+impl fmt::Display for ExprCmpt<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::String(s) => write!(f, "{s}"),

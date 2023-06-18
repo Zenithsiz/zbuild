@@ -21,7 +21,7 @@ pub enum AliasOp {
 }
 
 
-impl<'s> fmt::Display for Alias<'s> {
+impl fmt::Display for Alias<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "$({}", self.name)?;
 

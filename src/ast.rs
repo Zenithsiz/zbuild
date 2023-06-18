@@ -33,6 +33,7 @@ pub enum OutItem<'a> {
 
 	/// Dependencies file
 	DepsFile {
+		/// The dependency file's path
 		#[serde(borrow)]
 		deps_file: Expr<'a>,
 	},
@@ -48,9 +49,11 @@ pub enum DepItem<'a> {
 
 	/// Rule
 	Rule {
+		/// Rule name
 		#[serde(borrow)]
 		rule: Expr<'a>,
 
+		/// All patterns to expand the rule with
 		#[serde(default)]
 		#[serde(borrow)]
 		pats: HashMap<Expr<'a>, Expr<'a>>,
@@ -58,6 +61,7 @@ pub enum DepItem<'a> {
 
 	/// Dependencies file
 	DepsFile {
+		/// The dependency file's path
 		#[serde(borrow)]
 		deps_file: Expr<'a>,
 	},
@@ -66,6 +70,7 @@ pub enum DepItem<'a> {
 	//       blowup if we do them separately like this
 	/// Static dependency
 	Static {
+		/// Inner item
 		#[serde(rename = "static")]
 		#[serde(borrow)]
 		item: StaticDepItem<'a>,
@@ -73,6 +78,7 @@ pub enum DepItem<'a> {
 
 	/// Optional dependency
 	Opt {
+		/// Inner item
 		#[serde(rename = "opt")]
 		#[serde(borrow)]
 		item: OptDepItem<'a>,
@@ -89,6 +95,7 @@ pub enum StaticDepItem<'a> {
 
 	/// Dependencies file
 	DepsFile {
+		/// The dependency file's path
 		#[serde(borrow)]
 		deps_file: Expr<'a>,
 	},
@@ -104,6 +111,7 @@ pub enum OptDepItem<'a> {
 
 	/// Dependencies file
 	DepsFile {
+		/// The dependency file's path
 		#[serde(borrow)]
 		deps_file: Expr<'a>,
 	},
@@ -119,6 +127,7 @@ pub enum Target<'a> {
 
 	/// Rule
 	Rule {
+		/// Rule name
 		#[serde(borrow)]
 		rule: Expr<'a>,
 	},
@@ -148,8 +157,11 @@ pub enum ExprCmpt<'a> {
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
 /// Pattern
 pub struct Pattern<'a> {
+	/// Pattern name
 	pub name: &'a str,
-	pub ops:  Vec<PatternOp>,
+
+	/// Pattern operators
+	pub ops: Vec<PatternOp>,
 }
 
 /// Pattern operator
@@ -163,8 +175,11 @@ pub enum PatternOp {
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
 /// Alias
 pub struct Alias<'a> {
+	/// Alias name
 	pub name: &'a str,
-	pub ops:  Vec<AliasOp>,
+
+	/// Alias operators
+	pub ops: Vec<AliasOp>,
 }
 
 /// Alias operator
@@ -174,7 +189,7 @@ pub enum AliasOp {
 	DirName,
 }
 
-impl<'a> serde::Serialize for Expr<'a> {
+impl serde::Serialize for Expr<'_> {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: serde::Serializer,
@@ -229,6 +244,7 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 					}
 
 					// Then check if it was an alias or pattern
+					#[expect(clippy::missing_docs_in_private_items)]
 					enum Kind {
 						Alias,
 						Pattern,
@@ -347,7 +363,7 @@ pub enum Exec<'a> {
 	},
 }
 
-impl<'a> Default for Exec<'a> {
+impl Default for Exec<'_> {
 	fn default() -> Self {
 		Self::OnlyCmds(vec![])
 	}

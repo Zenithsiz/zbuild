@@ -42,8 +42,11 @@ use {
 pub enum Event<'s> {
 	/// Target dependency built
 	TargetDepBuilt {
+		/// Target that was being built
 		target: Target<'s, CowStr<'s>>,
-		dep:    Target<'s, CowStr<'s>>,
+
+		/// Dependency that was built
+		dep: Target<'s, CowStr<'s>>,
 	},
 }
 
@@ -308,6 +311,7 @@ impl<'s> Builder<'s> {
 	) -> Result<BuildResult, AppError> {
 		/// Dependency
 		#[derive(Clone, Debug)]
+		#[expect(clippy::missing_docs_in_private_items)]
 		enum Dep<'s, 'a> {
 			/// File
 			File {

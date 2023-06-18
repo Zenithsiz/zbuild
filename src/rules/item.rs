@@ -12,10 +12,16 @@ use {
 #[derive(Clone, Debug)]
 pub enum OutItem<T> {
 	/// File
-	File { file: T },
+	File {
+		/// File that will be built
+		file: T,
+	},
 
 	/// Dependencies file
-	DepsFile { file: T },
+	DepsFile {
+		/// Dependencies file that will be built
+		file: T,
+	},
 }
 
 impl<'s> OutItem<Expr<'s>> {
@@ -45,20 +51,36 @@ impl<T: fmt::Display> fmt::Display for OutItem<T> {
 pub enum DepItem<T> {
 	/// File
 	File {
-		file:        T,
+		/// File dependency
+		file: T,
+
+		/// If optional
 		is_optional: bool,
-		is_static:   bool,
+
+		/// If static
+		is_static: bool,
 	},
 
 	/// Dependencies file
 	DepsFile {
-		file:        T,
+		/// Dependencies file
+		file: T,
+
+		/// If optional
 		is_optional: bool,
-		is_static:   bool,
+
+		/// If static
+		is_static: bool,
 	},
 
 	/// Rule
-	Rule { name: T, pats: HashMap<T, T> },
+	Rule {
+		/// Rule name
+		name: T,
+
+		/// All rule patterns
+		pats: HashMap<T, T>,
+	},
 }
 
 impl<'s> DepItem<Expr<'s>> {
