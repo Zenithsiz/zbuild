@@ -67,7 +67,7 @@ impl<'s> Watcher<'s> {
 					},
 				Err(errs) =>
 					for err in errs {
-						tracing::warn!("Error while watching: {:?}", anyhow::Error::from(err));
+						tracing::warn!(err=?anyhow::Error::from(err), "Error while watching");
 					},
 			},
 		)
@@ -105,7 +105,7 @@ impl<'s> Watcher<'s> {
 									Target::File { file, .. } => match Path::new(&**file).canonicalize() {
 										Ok(path) => path,
 										Err(err) => {
-											tracing::warn!("Unable to canonicalize {file:?}: {err:?}");
+											tracing::warn!(?file, ?err, "Unable to canonicalize");
 											return;
 										},
 									},
@@ -121,12 +121,12 @@ impl<'s> Watcher<'s> {
 								//       We can't also watch it, since we'd need to that recursively
 								//       until the root, and by that point we'd just be watching
 								//       all filesystem changes...
-								tracing::debug!(?dep_path, "Starting to watch path");
+								tracing::trace!(?dep_path, "Starting to watch path");
 								if let Err(err) = self.watcher.watcher().watch(
 									&dep_path.parent().unwrap_or(&dep_path),
 									notify::RecursiveMode::Recursive,
 								) {
-									tracing::warn!("Unable to watch path {dep_path:?}: {err:?}")
+									tracing::warn!(?dep_path, ?err, "Unable to watch path")
 								}
 
 								rev_deps
@@ -154,7 +154,7 @@ impl<'s> Watcher<'s> {
 							// TODO: Warn on all occasions once this code path isn't hit
 							//       by random files that aren't actually dependencies.
 							if err.kind() != std::io::ErrorKind::NotFound {
-								tracing::warn!("Unable to canonicalize {:?}: {err:?}", path);
+								tracing::warn!(?path, ?err, "Unable to canonicalize");
 							}
 							return;
 						},
@@ -165,7 +165,7 @@ impl<'s> Watcher<'s> {
 						Some(rev_dep) => rev_dep.clone(),
 						None => return,
 					};
-					tracing::debug!("Changed: {:?}", rev_dep.target);
+					tracing::debug!(?rev_dep.target, "Changed");
 					tracing::trace!(?rev_dep, "Reverse dependencies");
 
 					// Note: We clone the parents so we don't hold onto the rev dep lock for too long

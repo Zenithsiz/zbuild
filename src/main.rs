@@ -213,7 +213,7 @@ async fn build_target<'s, T: BuildableTargetInner<'s> + std::fmt::Display + std:
 				println!("{target}");
 			};
 		},
-		Err(err) => tracing::error!("Unable to build target {target}: {:?}", anyhow::Error::new(err)),
+		Err(err) => tracing::error!(?target, err=?anyhow::Error::new(err), "Unable to build target"),
 	}
 }
 
