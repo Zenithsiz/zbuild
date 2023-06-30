@@ -133,7 +133,8 @@ async fn main() -> Result<(), anyhow::Error> {
 		.then(|| {
 			Watcher::new(
 				builder.subscribe_events(),
-				args.watch_debouncer_timeout_ms.unwrap_or(100.0),
+				// TODO: Better default?
+				args.watch_debouncer_timeout_ms.unwrap_or(0.0),
 			)
 		})
 		.transpose()?;
