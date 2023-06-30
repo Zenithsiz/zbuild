@@ -648,7 +648,7 @@ impl<'s> Builder<'s> {
 					.map_err(AppError::command_failed(cmd))
 			})
 			.await?;
-			tracing::debug!(target: "zbuild_exec", rule_name=?rule.name, ?program, ?args, ?duration, "Execution duration");
+			tracing::trace!(target: "zbuild_exec", rule_name=?rule.name, ?program, ?args, ?duration, "Execution duration");
 		}
 
 		Ok(())
