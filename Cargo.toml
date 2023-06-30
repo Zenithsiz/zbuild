@@ -32,7 +32,7 @@ serde_yaml = "0.9.22"
 
 # File system
 notify = "6.0.1"
-notify-debouncer-mini = "0.3.0"
+notify-debouncer-full = "0.2.0"
 filetime = "0.2.21"
 
 

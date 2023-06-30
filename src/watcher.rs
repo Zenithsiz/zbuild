@@ -4,13 +4,16 @@
 
 // TODO: Output dependencies aren't considered here, if they didn't exist when the file was first built.
 
+// TODO: Rule targets are called multiple times when rebuilding, somehow prevent that?
+
 // Imports
 use {
 	crate::{build, rules::Target, util::CowStr, AppError, Builder, Rules},
 	anyhow::Context,
 	dashmap::{DashMap, DashSet},
 	futures::{stream::FuturesUnordered, StreamExt},
-	notify_debouncer_mini::Debouncer,
+	notify::Watcher as _,
+	notify_debouncer_full::Debouncer,
 	std::{
 		path::{Path, PathBuf},
 		sync::Arc,
@@ -32,13 +35,13 @@ struct RevDep<'s> {
 /// Target watcher
 pub struct Watcher<'s> {
 	/// Watcher
-	watcher: Debouncer<notify::RecommendedWatcher>,
+	watcher: Debouncer<notify::RecommendedWatcher, notify_debouncer_full::FileIdMap>,
 
 	/// Reverse dependencies
 	rev_deps: DashMap<PathBuf, RevDep<'s>>,
 
 	/// File event stream
-	fs_event_stream: ReceiverStream<notify_debouncer_mini::DebouncedEvent>,
+	fs_event_stream: ReceiverStream<notify_debouncer_full::DebouncedEvent>,
 
 	/// Builder event receiver
 	builder_event_rx: async_broadcast::Receiver<build::Event<'s>>,
@@ -52,7 +55,7 @@ impl<'s> Watcher<'s> {
 	) -> Result<Self, AppError> {
 		// Create the watcher
 		let (fs_event_tx, fs_event_rx) = tokio::sync::mpsc::channel(16);
-		let watcher = notify_debouncer_mini::new_debouncer(
+		let watcher = notify_debouncer_full::new_debouncer(
 			Duration::from_secs_f64(watch_debouncer_timeout_ms / 1000.0),
 			None,
 			move |fs_events| match fs_events {
@@ -142,15 +145,16 @@ impl<'s> Watcher<'s> {
 				tracing::trace!("Watcher task exited");
 			},
 			self.fs_event_stream
-				.then(async move |event| {
+				.flat_map(|event| futures::stream::iter(event.event.paths))
+				.then(async move |path| {
 					// Canonicalize the path
-					let path = match event.path.canonicalize() {
+					let path = match path.canonicalize() {
 						Ok(path) => path,
 						Err(err) => {
 							// TODO: Warn on all occasions once this code path isn't hit
 							//       by random files that aren't actually dependencies.
 							if err.kind() != std::io::ErrorKind::NotFound {
-								tracing::warn!("Unable to canonicalize {:?}: {err:?}", event.path);
+								tracing::warn!("Unable to canonicalize {:?}: {err:?}", path);
 							}
 							return;
 						},
