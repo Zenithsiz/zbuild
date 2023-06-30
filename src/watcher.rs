@@ -110,12 +110,19 @@ impl<'s> Watcher<'s> {
 								};
 
 								// Watch the path
+								// Note: We watch the parent recursively to ensure we catch
+								//       removed files that are then re-created.
+								// TODO: This is a hack, rework this somehow without any
+								//       races.
+								// TODO: This hack doesn't work if the parent is also removed.
+								//       We can't also watch it, since we'd need to that recursively
+								//       until the root, and by that point we'd just be watching
+								//       all filesystem changes...
 								tracing::debug!(?dep_path, "Starting to watch path");
-								if let Err(err) = self
-									.watcher
-									.watcher()
-									.watch(&dep_path, notify::RecursiveMode::NonRecursive)
-								{
+								if let Err(err) = self.watcher.watcher().watch(
+									&dep_path.parent().unwrap_or(&dep_path),
+									notify::RecursiveMode::Recursive,
+								) {
 									tracing::warn!("Unable to watch path {dep_path:?}: {err:?}")
 								}
 
@@ -140,7 +147,11 @@ impl<'s> Watcher<'s> {
 					let path = match event.path.canonicalize() {
 						Ok(path) => path,
 						Err(err) => {
-							tracing::warn!("Unable to canonicalize {:?}: {err:?}", event.path);
+							// TODO: Warn on all occasions once this code path isn't hit
+							//       by random files that aren't actually dependencies.
+							if err.kind() != std::io::ErrorKind::NotFound {
+								tracing::warn!("Unable to canonicalize {:?}: {err:?}", event.path);
+							}
 							return;
 						},
 					};
