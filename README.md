@@ -32,3 +32,15 @@ You may also compile it yourself, with a nightly rust compiled (>= rustc 1.68.0-
 2. Build + install
 
    `cargo install --path zbuild`
+
+# License
+
+This project is dual-licensed under either of
+
+- [Apache license Version 2.0](LICENSE-APACHE)
+- [MIT license](LICENSE-MIT)
+
+# Contribution
+
+Feel free to open any issues with any bugs, opinions or suggestions you have
+on the project.
