@@ -26,34 +26,34 @@ use {crate::Ast, std::collections::HashMap};
 /// Stores all rules, along with associated information, such as
 /// global aliases and the default target.
 #[derive(Clone, Debug)]
-pub struct Rules {
+pub struct Rules<'s> {
 	/// Global aliases.
 	///
 	/// These are available for the whole program to
 	/// use.
-	pub aliases: HashMap<String, Expr>,
+	pub aliases: HashMap<&'s str, Expr<'s>>,
 
 	/// Default targets to build
-	pub default: Vec<Target<Expr>>,
+	pub default: Vec<Target<'s, Expr<'s>>>,
 
 	/// Rules
-	pub rules: HashMap<String, Rule<Expr>>,
+	pub rules: HashMap<&'s str, Rule<'s, Expr<'s>>>,
 }
 
-impl Rules {
+impl<'s> Rules<'s> {
 	/// Creates all rules from the ast
 	#[must_use]
-	pub fn new(ast: Ast) -> Self {
+	pub fn new(ast: Ast<'s>) -> Self {
 		let aliases = ast
 			.aliases
 			.into_iter()
-			.map(|(alias, value)| (alias.into_owned(), Expr::new(value)))
+			.map(|(alias, value)| (alias, Expr::new(value)))
 			.collect();
 		let default = ast.default.into_iter().map(Target::new).collect();
 		let rules = ast
 			.rules
 			.into_iter()
-			.map(|(name, rule)| (name.clone().into_owned(), Rule::new(name.into_owned(), rule)))
+			.map(|(name, rule)| (name, Rule::new(name, rule)))
 			.collect();
 
 		Self {

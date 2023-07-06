@@ -12,7 +12,7 @@ use std::path::PathBuf;
 ///
 /// Then you may request `zbuild` to create a certain file and it will parse
 /// all rules in order to find a way to build the output
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(Debug)]
 #[derive(clap::Parser)]
 #[clap(author, version, about)]
 pub struct Args {
@@ -46,4 +46,14 @@ pub struct Args {
 	/// Watch for file changes and rebuild any necessary targets
 	#[clap(long = "watch", short = 'w')]
 	pub watch: bool,
+
+	/// Watcher file event debouncer timeout
+	#[clap(long = "watcher-debouncer-timeout-ms")]
+	pub watch_debouncer_timeout_ms: Option<f64>,
+
+	/// Logs output to a file.
+	///
+	/// You can use `RUST_LOG_FILE` to set filtering options
+	#[clap(long = "log-file")]
+	pub log_file: Option<PathBuf>,
 }

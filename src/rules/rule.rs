@@ -9,12 +9,12 @@ use {
 
 /// Rule
 #[derive(Clone, Debug)]
-pub struct Rule<T> {
+pub struct Rule<'s, T> {
 	/// Name
-	pub name: String,
+	pub name: &'s str,
 
 	/// Aliases
-	pub aliases: HashMap<String, T>,
+	pub aliases: HashMap<&'s str, T>,
 
 	/// Output items
 	pub output: Vec<OutItem<T>>,
@@ -26,13 +26,13 @@ pub struct Rule<T> {
 	pub exec: Exec<T>,
 }
 
-impl Rule<Expr> {
+impl<'s> Rule<'s, Expr<'s>> {
 	/// Creates a new rule from it's ast
-	pub fn new(name: String, rule: ast::Rule) -> Self {
+	pub fn new(name: &'s str, rule: ast::Rule<'s>) -> Self {
 		let aliases = rule
-			.alias
+			.aliases
 			.into_iter()
-			.map(|(alias, expr)| (alias.into_owned(), Expr::new(expr)))
+			.map(|(alias, expr)| (alias, Expr::new(expr)))
 			.collect();
 		let output = rule.out.into_iter().map(OutItem::new).collect();
 		let deps = rule.deps.into_iter().map(DepItem::new).collect();

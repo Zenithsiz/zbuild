@@ -3,7 +3,7 @@
 // Imports
 use {
 	super::Expr,
-	crate::ast,
+	crate::{ast, util::CowStr},
 	itertools::Itertools,
 	std::{
 		collections::HashMap,
@@ -14,7 +14,7 @@ use {
 
 /// Target
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub enum Target<T> {
+pub enum Target<'s, T> {
 	/// File
 	File {
 		/// Target file
@@ -30,11 +30,11 @@ pub enum Target<T> {
 		rule: T,
 
 		/// Patterns
-		pats: HashMap<String, T>,
+		pats: HashMap<CowStr<'s>, T>,
 	},
 }
 
-impl<T> Target<T> {
+impl<T> Target<'_, T> {
 	/// Returns if this target is static
 	pub const fn is_static(&self) -> bool {
 		match *self {
@@ -44,9 +44,9 @@ impl<T> Target<T> {
 	}
 }
 
-impl Target<Expr> {
+impl<'s> Target<'s, Expr<'s>> {
 	/// Creates a new target from it's ast
-	pub fn new(ast: ast::Target) -> Self {
+	pub fn new(ast: ast::Target<'s>) -> Self {
 		match ast {
 			ast::Target::File(file) => Self::File {
 				file:      Expr::new(file),
@@ -60,7 +60,7 @@ impl Target<Expr> {
 	}
 }
 
-impl Hash for Target<String> {
+impl<T: Hash + Ord> Hash for Target<'_, T> {
 	fn hash<H: Hasher>(&self, state: &mut H) {
 		core::mem::discriminant(self).hash(state);
 		match self {
@@ -81,7 +81,7 @@ impl Hash for Target<String> {
 }
 
 
-impl<T: fmt::Display> fmt::Display for Target<T> {
+impl<T: fmt::Display> fmt::Display for Target<'_, T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::File { file, is_static } => match is_static {

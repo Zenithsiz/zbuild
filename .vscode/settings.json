@@ -12,6 +12,7 @@
     "oneshot",
     "petgraph",
     "thiserror",
+    "yeet",
     "Zbuild"
   ]
 }

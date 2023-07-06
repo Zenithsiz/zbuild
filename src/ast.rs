@@ -1,23 +1,17 @@
 //! Ast
 
 // Imports
-use {
-	serde::de::Error,
-	std::{borrow::Cow, collections::HashMap},
-};
-
-/// Alias for `Cow<'a, str>`
-type CowStr<'a> = Cow<'a, str>;
+use {itertools::Itertools, serde::de::Error, std::collections::HashMap};
 
 /// Zbuild ast
 #[derive(Clone, Debug)]
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Ast<'a> {
 	/// Aliases
 	#[serde(rename = "alias")]
 	#[serde(default)]
 	#[serde(borrow)]
-	pub aliases: HashMap<CowStr<'a>, Expr<'a>>,
+	pub aliases: HashMap<&'a str, Expr<'a>>,
 
 	/// Default target
 	#[serde(default)]
@@ -26,12 +20,12 @@ pub struct Ast<'a> {
 
 	/// Rules
 	#[serde(borrow)]
-	pub rules: HashMap<CowStr<'a>, Rule<'a>>,
+	pub rules: HashMap<&'a str, Rule<'a>>,
 }
 
 /// Output Item
 #[derive(Clone, Debug)]
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum OutItem<'a> {
 	/// File
@@ -39,6 +33,7 @@ pub enum OutItem<'a> {
 
 	/// Dependencies file
 	DepsFile {
+		/// The dependency file's path
 		#[serde(borrow)]
 		deps_file: Expr<'a>,
 	},
@@ -46,7 +41,7 @@ pub enum OutItem<'a> {
 
 /// Dependency Item
 #[derive(Clone, Debug)]
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum DepItem<'a> {
 	/// File
@@ -54,9 +49,11 @@ pub enum DepItem<'a> {
 
 	/// Rule
 	Rule {
+		/// Rule name
 		#[serde(borrow)]
 		rule: Expr<'a>,
 
+		/// All patterns to expand the rule with
 		#[serde(default)]
 		#[serde(borrow)]
 		pats: HashMap<Expr<'a>, Expr<'a>>,
@@ -64,6 +61,7 @@ pub enum DepItem<'a> {
 
 	/// Dependencies file
 	DepsFile {
+		/// The dependency file's path
 		#[serde(borrow)]
 		deps_file: Expr<'a>,
 	},
@@ -72,6 +70,7 @@ pub enum DepItem<'a> {
 	//       blowup if we do them separately like this
 	/// Static dependency
 	Static {
+		/// Inner item
 		#[serde(rename = "static")]
 		#[serde(borrow)]
 		item: StaticDepItem<'a>,
@@ -79,6 +78,7 @@ pub enum DepItem<'a> {
 
 	/// Optional dependency
 	Opt {
+		/// Inner item
 		#[serde(rename = "opt")]
 		#[serde(borrow)]
 		item: OptDepItem<'a>,
@@ -87,7 +87,7 @@ pub enum DepItem<'a> {
 
 /// Static Dependency Item
 #[derive(Clone, Debug)]
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum StaticDepItem<'a> {
 	/// File
@@ -95,6 +95,7 @@ pub enum StaticDepItem<'a> {
 
 	/// Dependencies file
 	DepsFile {
+		/// The dependency file's path
 		#[serde(borrow)]
 		deps_file: Expr<'a>,
 	},
@@ -102,7 +103,7 @@ pub enum StaticDepItem<'a> {
 
 /// Optional Dependency Item
 #[derive(Clone, Debug)]
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum OptDepItem<'a> {
 	/// File
@@ -110,6 +111,7 @@ pub enum OptDepItem<'a> {
 
 	/// Dependencies file
 	DepsFile {
+		/// The dependency file's path
 		#[serde(borrow)]
 		deps_file: Expr<'a>,
 	},
@@ -117,7 +119,7 @@ pub enum OptDepItem<'a> {
 
 /// Target
 #[derive(Clone, Debug)]
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum Target<'a> {
 	/// File
@@ -125,6 +127,7 @@ pub enum Target<'a> {
 
 	/// Rule
 	Rule {
+		/// Rule name
 		#[serde(borrow)]
 		rule: Expr<'a>,
 	},
@@ -141,13 +144,24 @@ pub struct Expr<'a> {
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub enum ExprCmpt<'a> {
 	/// String
-	String(CowStr<'a>),
+	String(&'a str),
 
 	/// Pattern
-	Pattern { name: CowStr<'a>, ops: Vec<PatternOp> },
+	Pattern(Pattern<'a>),
 
 	/// Alias
-	Alias { name: CowStr<'a>, ops: Vec<AliasOp> },
+	Alias(Alias<'a>),
+}
+
+/// Pattern
+#[derive(PartialEq, Eq, Clone, Hash, Debug)]
+/// Pattern
+pub struct Pattern<'a> {
+	/// Pattern name
+	pub name: &'a str,
+
+	/// Pattern operators
+	pub ops: Vec<PatternOp>,
 }
 
 /// Pattern operator
@@ -157,6 +171,17 @@ pub enum PatternOp {
 	NonEmpty,
 }
 
+/// Alias
+#[derive(PartialEq, Eq, Clone, Hash, Debug)]
+/// Alias
+pub struct Alias<'a> {
+	/// Alias name
+	pub name: &'a str,
+
+	/// Alias operators
+	pub ops: Vec<AliasOp>,
+}
+
 /// Alias operator
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub enum AliasOp {
@@ -164,15 +189,45 @@ pub enum AliasOp {
 	DirName,
 }
 
+impl serde::Serialize for Expr<'_> {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		// TODO: Less allocations
+		self.cmpts
+			.iter()
+			.map(|cmpt| match *cmpt {
+				ExprCmpt::String(s) => s.to_owned(),
+				ExprCmpt::Pattern(Pattern { name, ref ops }) => format!(
+					"^({name}{})",
+					ops.iter()
+						.map(|op| format!("::{}", match op {
+							PatternOp::NonEmpty => "non_empty",
+						}))
+						.join("")
+				),
+				ExprCmpt::Alias(Alias { name, ref ops }) => format!(
+					"$({name}{})",
+					ops.iter()
+						.map(|op| format!("::{}", match op {
+							AliasOp::DirName => "dir_name",
+						}))
+						.join("")
+				),
+			})
+			.join("")
+			.serialize(serializer)
+	}
+}
+
 impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
-	#[allow(clippy::indexing_slicing, clippy::string_slice)] // We verify the indexes are correct
+	#[expect(clippy::indexing_slicing, clippy::string_slice)] // We verify the indexes are correct
 	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
 	where
 		D: serde::Deserializer<'de>,
 	{
 		// Parse the string
-		// TODO: Use `CowStr<'a>`? We need to clone in case we to get an owned
-		//       version, however, which complicates the code below
 		let expr_str = <&'a str>::deserialize(deserializer)?;
 
 		// Then parse all components
@@ -185,10 +240,11 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 				Some(idx) => {
 					// Add the string until the pattern / alias, if it isn't empty
 					if !rest[..idx].is_empty() {
-						cmpts.push(ExprCmpt::String(Cow::Borrowed(&rest[..idx])));
+						cmpts.push(ExprCmpt::String(&rest[..idx]));
 					}
 
 					// Then check if it was an alias or pattern
+					#[expect(clippy::missing_docs_in_private_items)]
 					enum Kind {
 						Alias,
 						Pattern,
@@ -222,26 +278,26 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 
 					// Finally check what it was originally and parse all operations
 					let cmpt = match kind {
-						Kind::Alias => ExprCmpt::Alias {
-							name: Cow::Borrowed(name),
-							ops:  ops
+						Kind::Alias => ExprCmpt::Alias(Alias {
+							name,
+							ops: ops
 								.into_iter()
 								.map(|op| match op.trim() {
 									"dir_name" => Ok(AliasOp::DirName),
 									op => Err(D::Error::custom(format!("Unknown alias operator {op:?}"))),
 								})
 								.collect::<Result<_, _>>()?,
-						},
-						Kind::Pattern => ExprCmpt::Pattern {
-							name: Cow::Borrowed(name),
-							ops:  ops
+						}),
+						Kind::Pattern => ExprCmpt::Pattern(Pattern {
+							name,
+							ops: ops
 								.into_iter()
 								.map(|op| match op.trim() {
 									"non_empty" => Ok(PatternOp::NonEmpty),
 									op => Err(D::Error::custom(format!("Unknown pattern operator {op:?}"))),
 								})
 								.collect::<Result<_, _>>()?,
-						},
+						}),
 					};
 					cmpts.push(cmpt);
 				},
@@ -250,7 +306,7 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 				None => {
 					// Add the rest only if it isn't empty
 					if !rest.is_empty() {
-						cmpts.push(ExprCmpt::String(Cow::Borrowed(rest)));
+						cmpts.push(ExprCmpt::String(rest));
 					}
 					break;
 				},
@@ -263,12 +319,13 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 
 /// Rule
 #[derive(Clone, Debug)]
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Rule<'a> {
 	/// Aliases
+	#[serde(rename = "alias")]
 	#[serde(default)]
 	#[serde(borrow)]
-	pub alias: HashMap<CowStr<'a>, Expr<'a>>,
+	pub aliases: HashMap<&'a str, Expr<'a>>,
 
 	/// Output items
 	#[serde(default)]
@@ -288,7 +345,7 @@ pub struct Rule<'a> {
 
 /// Execution
 #[derive(Clone, Debug)]
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum Exec<'a> {
 	/// Only commands
@@ -306,7 +363,7 @@ pub enum Exec<'a> {
 	},
 }
 
-impl<'a> Default for Exec<'a> {
+impl Default for Exec<'_> {
 	fn default() -> Self {
 		Self::OnlyCmds(vec![])
 	}
@@ -315,7 +372,7 @@ impl<'a> Default for Exec<'a> {
 
 /// Command
 #[derive(Clone, Debug)]
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct Command<'a> {
 	/// All arguments

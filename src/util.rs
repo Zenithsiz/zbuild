@@ -6,6 +6,7 @@ use {
 	npath::NormPathExt,
 	pin_project::pin_project,
 	std::{
+		borrow::Cow,
 		path::Path,
 		pin::Pin,
 		task,
@@ -14,6 +15,9 @@ use {
 	tokio::fs,
 };
 
+/// Alias for `Cow<'a, str>`
+pub type CowStr<'a> = Cow<'a, str>;
+
 /// Chains together any number of `IntoIterator`s
 pub macro chain {
 	($lhs:expr, $rhs:expr $(,)?) => {
@@ -21,7 +25,7 @@ pub macro chain {
 	},
 
 	($lhs:expr, $rhs:expr, $($rest:expr),+ $(,)?) => {
-		::std::iter::Iterator::chain($lhs.into_iter(), $crate::util::chain!($rhs, $($rest),*))
+		::std::iter::Iterator::chain($lhs.into_iter(), $crate::util::chain!($rhs, $($rest),+))
 	},
 }
 
@@ -35,7 +39,7 @@ pub async fn fs_try_exists(path: impl AsRef<Path> + Send) -> Result<bool, std::i
 }
 
 /// Measures the duration of a fallible future
-#[allow(clippy::future_not_send)] // It is send if `F: Send`
+#[expect(clippy::future_not_send)] // It is send if `F: Send` (TODO: Check if this is true)
 pub async fn try_measure_async<F: Future<Output = Result<T, E>>, T, E>(fut: F) -> Result<(Duration, T), E> {
 	#[pin_project]
 	struct Wrapper<F> {

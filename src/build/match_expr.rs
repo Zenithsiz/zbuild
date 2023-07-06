@@ -4,6 +4,7 @@
 use {
 	crate::{
 		rules::{Expr, ExprCmpt, PatternOp},
+		util::CowStr,
 		AppError,
 	},
 	std::collections::HashMap,
@@ -14,11 +15,11 @@ use {
 /// Returns error if more than 1 pattern is found.
 ///
 /// Panics if any aliases are found
-pub fn match_expr(
-	expr: &Expr,
-	cmpts: &[ExprCmpt],
+pub fn match_expr<'s>(
+	expr: &Expr<'s>,
+	cmpts: &[ExprCmpt<'s>],
 	mut value: &str,
-) -> Result<Option<HashMap<String, String>>, AppError> {
+) -> Result<Option<HashMap<CowStr<'s>, CowStr<'s>>>, AppError> {
 	let mut patterns = HashMap::new();
 
 	// Until `rhs` has anything to match left
@@ -26,7 +27,7 @@ pub fn match_expr(
 	loop {
 		match cur_cmpts {
 			// If we start with a string, strip the prefix off
-			[ExprCmpt::String(lhs), rest @ ..] => match value.strip_prefix(lhs) {
+			[ExprCmpt::String(lhs), rest @ ..] => match value.strip_prefix(&**lhs) {
 				Some(new_rhs) => {
 					cur_cmpts = rest;
 					value = new_rhs;
@@ -35,7 +36,7 @@ pub fn match_expr(
 			},
 
 			// If we end with a string, strip the suffix off
-			[rest @ .., ExprCmpt::String(lhs)] => match value.strip_suffix(lhs) {
+			[rest @ .., ExprCmpt::String(lhs)] => match value.strip_suffix(&**lhs) {
 				Some(new_rhs) => {
 					cur_cmpts = rest;
 					value = new_rhs;
@@ -63,7 +64,8 @@ pub fn match_expr(
 				}
 
 				// If we get here, match everything
-				patterns.insert(pat.name.clone(), value.to_owned());
+				// TODO: Borrow some cases?
+				patterns.insert(CowStr::Borrowed(pat.name), CowStr::Owned(value.to_owned()));
 				cur_cmpts = &[];
 				value = "";
 			},

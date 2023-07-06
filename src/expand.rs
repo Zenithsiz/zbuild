@@ -5,6 +5,7 @@ use {
 	crate::{
 		error::AppError,
 		rules::{AliasOp, Command, DepItem, Exec, Expr, ExprCmpt, OutItem, Rule, Target},
+		util::CowStr,
 	},
 	itertools::Itertools,
 	std::path::PathBuf,
@@ -14,7 +15,7 @@ use {
 #[derive(Debug)]
 pub struct Expander;
 
-#[allow(clippy::unused_self)] // Currently expander doesn't do anything
+#[expect(clippy::unused_self)] // Currently expander doesn't do anything
 impl Expander {
 	/// Creates a new expander
 	pub const fn new() -> Self {
@@ -22,7 +23,7 @@ impl Expander {
 	}
 
 	/// Expands an expression to it's components
-	pub fn expand_expr(&self, expr: &Expr, visitor: &mut impl Visitor) -> Result<Vec<ExprCmpt>, AppError> {
+	pub fn expand_expr<'s>(&self, expr: &Expr<'s>, visitor: &mut impl Visitor<'s>) -> Result<Expr<'s>, AppError> {
 		// Go through all components
 		let cmpts = expr
 			.cmpts
@@ -34,7 +35,7 @@ impl Expander {
 
 					// If it's a pattern, we visit it
 					// Note: We don't care about the operations on patterns, those are for matching
-					ExprCmpt::Pattern(pat) => match visitor.visit_pat(&pat.name) {
+					ExprCmpt::Pattern(pat) => match visitor.visit_pat(pat.name) {
 						// If expanded, just replace it with a string
 						FlowControl::ExpandTo(value) => cmpts.push(ExprCmpt::String(value)),
 
@@ -42,16 +43,16 @@ impl Expander {
 						FlowControl::Keep => cmpts.push(cmpt.clone()),
 						FlowControl::Error =>
 							return Err(AppError::UnknownPattern {
-								pattern_name: pat.name.clone(),
+								pattern_name: pat.name.to_owned(),
 							}),
 					},
 
 					// If it's an alias, we visit and then expand it
-					ExprCmpt::Alias(alias) => match visitor.visit_alias(&alias.name) {
+					ExprCmpt::Alias(alias) => match visitor.visit_alias(alias.name) {
 						// If expanded, check if we need to apply any operations
 						FlowControl::ExpandTo(alias_expr) => match alias.ops.is_empty() {
 							// If not, just recursively expand it
-							true => cmpts.extend(self.expand_expr(&alias_expr, visitor)?),
+							true => cmpts.extend(self.expand_expr(&alias_expr, visitor)?.cmpts),
 
 							// Else expand it to a string, then apply all operations
 							// Note: We expand to string even if we don't *need* to to ensure the user doesn't
@@ -62,9 +63,12 @@ impl Expander {
 								let value = self.expand_expr_string(&alias_expr, visitor)?;
 
 								// Then apply all
-								#[allow(clippy::shadow_unrelated)] // They are the same value
+								#[expect(clippy::shadow_unrelated)] // They are the same value
 								let value = alias.ops.iter().try_fold(value, |value, &op| {
-									self.expand_alias_op(op, value).map_err(AppError::alias_op(op))
+									let s = CowStr::into_owned(value);
+									self.expand_alias_op(op, s)
+										.map(CowStr::from)
+										.map_err(AppError::alias_op(op))
 								})?;
 
 								cmpts.push(ExprCmpt::String(value));
@@ -75,7 +79,7 @@ impl Expander {
 						FlowControl::Keep => cmpts.push(cmpt.clone()),
 						FlowControl::Error =>
 							return Err(AppError::UnknownAlias {
-								alias_name: alias.name.clone(),
+								alias_name: alias.name.to_owned(),
 							}),
 					},
 				};
@@ -89,21 +93,25 @@ impl Expander {
 			.into_iter()
 			.coalesce(|prev, next| match (prev, next) {
 				// Merge strings
-				(ExprCmpt::String(prev), ExprCmpt::String(next)) => Ok(ExprCmpt::String(prev + &next)),
+				(ExprCmpt::String(prev), ExprCmpt::String(next)) => Ok(ExprCmpt::String(prev + next)),
 
 				// Everything else leave
 				(prev, next) => Err((prev, next)),
 			})
 			.collect();
 
-		Ok(cmpts)
+		Ok(Expr { cmpts })
 	}
 
 	/// Expands an expression into a string
-	pub fn expand_expr_string(&self, expr: &Expr, visitor: &mut impl Visitor) -> Result<String, AppError> {
-		let expr_cmpts = self.expand_expr(expr, visitor)?.into_boxed_slice();
+	pub fn expand_expr_string<'s>(
+		&self,
+		expr: &Expr<'s>,
+		visitor: &mut impl Visitor<'s>,
+	) -> Result<CowStr<'s>, AppError> {
+		let expr_cmpts = self.expand_expr(expr, visitor)?.cmpts.into_boxed_slice();
 		let res = match Box::<[_; 0]>::try_from(expr_cmpts) {
-			Ok(box []) => Ok(String::new()),
+			Ok(box []) => Ok("".into()),
 			Err(cmpts) => match Box::<[_; 1]>::try_from(cmpts) {
 				Ok(box [ExprCmpt::String(s)]) => Ok(s),
 				Ok(box [cmpt]) => Err(vec![cmpt]),
@@ -140,17 +148,21 @@ impl Expander {
 	}
 
 	/// Expands a rule of all it's aliases and patterns
-	pub fn expand_rule(&self, rule: &Rule<Expr>, visitor: &mut impl Visitor) -> Result<Rule<String>, AppError> {
+	pub fn expand_rule<'s>(
+		&self,
+		rule: &Rule<'s, Expr<'s>>,
+		visitor: &mut impl Visitor<'s>,
+	) -> Result<Rule<'s, CowStr<'s>>, AppError> {
 		let aliases = rule
 			.aliases
 			.iter()
-			.map(|(name, expr)| Ok((name.clone(), self.expand_expr_string(expr, visitor)?)))
+			.map(|(&name, expr)| Ok((name, self.expand_expr_string(expr, visitor)?)))
 			.collect::<Result<_, AppError>>()?;
 
 		let output = rule
 			.output
 			.iter()
-			.map(|item: &OutItem<Expr>| match item {
+			.map(|item: &OutItem<Expr<'_>>| match item {
 				OutItem::File { file } => Ok::<_, AppError>(OutItem::File {
 					file: self.expand_expr_string(file, visitor)?,
 				}),
@@ -163,7 +175,7 @@ impl Expander {
 		let deps = rule
 			.deps
 			.iter()
-			.map(|item: &DepItem<Expr>| match *item {
+			.map(|item: &DepItem<Expr<'_>>| match *item {
 				DepItem::File {
 					ref file,
 					is_optional,
@@ -221,7 +233,7 @@ impl Expander {
 		};
 
 		Ok(Rule {
-			name: rule.name.clone(),
+			name: rule.name,
 			aliases,
 			output,
 			deps,
@@ -230,7 +242,11 @@ impl Expander {
 	}
 
 	/// Expands a target expression
-	pub fn expand_target(&self, target: &Target<Expr>, visitor: &mut impl Visitor) -> Result<Target<String>, AppError> {
+	pub fn expand_target<'s>(
+		&self,
+		target: &Target<'s, Expr<'s>>,
+		visitor: &mut impl Visitor<'s>,
+	) -> Result<Target<'s, CowStr<'s>>, AppError> {
 		let target = match *target {
 			Target::File { ref file, is_static } => Target::File {
 				file: self
@@ -260,7 +276,7 @@ impl Expander {
 	}
 }
 
-/// Flow control for [`expand_expr_string`]
+/// Flow control for [`Expander::expand_expr_string`]
 pub enum FlowControl<T> {
 	/// Expand to
 	ExpandTo(T),
@@ -273,10 +289,10 @@ pub enum FlowControl<T> {
 }
 
 /// Visitor for [`Expander`]
-pub trait Visitor {
+pub trait Visitor<'s> {
 	/// Visits an alias
-	fn visit_alias(&mut self, alias_name: &str) -> FlowControl<Expr>;
+	fn visit_alias(&mut self, alias_name: &str) -> FlowControl<Expr<'s>>;
 
 	/// Visits a pattern
-	fn visit_pat(&mut self, pat_name: &str) -> FlowControl<String>;
+	fn visit_pat(&mut self, pat_name: &str) -> FlowControl<CowStr<'s>>;
 }

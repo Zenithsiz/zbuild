@@ -12,15 +12,21 @@ use {
 #[derive(Clone, Debug)]
 pub enum OutItem<T> {
 	/// File
-	File { file: T },
+	File {
+		/// File that will be built
+		file: T,
+	},
 
 	/// Dependencies file
-	DepsFile { file: T },
+	DepsFile {
+		/// Dependencies file that will be built
+		file: T,
+	},
 }
 
-impl OutItem<Expr> {
+impl<'s> OutItem<Expr<'s>> {
 	/// Creates a new item from it's `ast`.
-	pub fn new(item: ast::OutItem) -> Self {
+	pub fn new(item: ast::OutItem<'s>) -> Self {
 		match item {
 			ast::OutItem::File(file) => Self::File { file: Expr::new(file) },
 			ast::OutItem::DepsFile { deps_file } => Self::DepsFile {
@@ -45,25 +51,41 @@ impl<T: fmt::Display> fmt::Display for OutItem<T> {
 pub enum DepItem<T> {
 	/// File
 	File {
-		file:        T,
+		/// File dependency
+		file: T,
+
+		/// If optional
 		is_optional: bool,
-		is_static:   bool,
+
+		/// If static
+		is_static: bool,
 	},
 
 	/// Dependencies file
 	DepsFile {
-		file:        T,
+		/// Dependencies file
+		file: T,
+
+		/// If optional
 		is_optional: bool,
-		is_static:   bool,
+
+		/// If static
+		is_static: bool,
 	},
 
 	/// Rule
-	Rule { name: T, pats: HashMap<T, T> },
+	Rule {
+		/// Rule name
+		name: T,
+
+		/// All rule patterns
+		pats: HashMap<T, T>,
+	},
 }
 
-impl DepItem<Expr> {
+impl<'s> DepItem<Expr<'s>> {
 	/// Creates a new item from it's `ast`.
-	pub fn new(item: ast::DepItem) -> Self {
+	pub fn new(item: ast::DepItem<'s>) -> Self {
 		match item {
 			ast::DepItem::File(file) => Self::File {
 				file:        Expr::new(file),

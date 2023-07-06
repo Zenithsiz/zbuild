@@ -6,34 +6,172 @@ version = "0.1.1"
 [dependencies]
 
 # Futures
-tokio = { version = "1.20.1", features = ["full"] }
+tokio = { version = "1.29.1", features = ["full"] }
+tokio-stream = "0.1.14"
+async-broadcast = "0.5.1"
+async-recursion = "1.0.4"
+futures = "0.3.28"
+
+# Concurrency
+dashmap = "5.4.0"
 
 # Cmd
-clap = { version = "3.2.17", features = ["derive"] }
+clap = { version = "4.3.10", features = ["derive"] }
 
 # Logging
-tracing = "0.1.36"
-tracing-subscriber = { version = "0.3.15", features = ["env-filter"] }
+tracing = "0.1.37"
+tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 
 # Error handling
-anyhow = "1.0.61"
-thiserror = "1.0.35"
+anyhow = "1.0.71"
+thiserror = "1.0.40"
 
 # Serde
-serde = { version = "1.0.143", features = ["derive"] }
-serde_yaml = "0.9.9"
+serde = { version = "1.0.164", features = ["derive"] }
+serde_yaml = "0.9.22"
+
+# File system
+notify = "6.0.1"
+notify-debouncer-full = "0.2.0"
+filetime = "0.2.21"
+
 
 # Util
-async-broadcast = "0.4.1"
-async-recursion = "1.0.0"
-byteorder = "1.4.3"
-dashmap = "5.3.4"
-filetime = "0.2.17"
-futures = "0.3.23"
-itertools = "0.10.3"
-notify = "5.0.0"
-notify-debouncer-mini = "0.2.1"
+itertools = "0.11.0"
 npath = { git = "https://github.com/gdzx/npath", rev = "00acdd2974bb1682b6d1dcc6f0ea7cd54da42381" }
-petgraph = "0.6.2"
-tokio-stream = "0.1.10"
-pin-project = "1.0.12"
+pin-project = "1.1.1"
+
+[lints]
+
+# This project doesn't require unsafe code
+# TODO: This might be too restrictive in the future. If
+#       we end up removing it, use `rust.unsafe_op_in_unsafe_fn = "deny"`.
+rust.unsafe_code = "forbid"
+
+
+# Group lints
+# Note: We warn on the full group list, and then `allow` the
+#       lints of each group that don't make sense for this project.
+#       This is so that when new lints are added we can immediatly start
+#       receiving *warnings*, and can then remove them if they're not
+#       relevant.
+clippy.pedantic = { level = "warn", priority = -1 }
+clippy.nursery = { level = "warn", priority = -1 }
+clippy.restriction = { level = "warn", priority = -1 }
+clippy.blanket_clippy_restriction_lints = "allow"
+
+# Has false positives on dev-dependencies / tests
+# TODO: Turn on once the false positives have reduced. In the meantime
+#       turn it on, from time to time, and check manually the warnings.
+#rust.unused_crate_dependencies = "warn"
+
+# Prefer `expect` instead of `unwrap`
+clippy.unwrap_used = "deny"
+clippy.expect_used = "allow"
+
+# We must specify `'_` to avoid surprises
+rust.elided_lifetimes_in_paths = "deny"
+
+# `Debug` / `Copy` should be implemented wherever possible
+rust.missing_copy_implementations = "warn"
+rust.missing_debug_implementations = "warn"
+
+rust.noop_method_call = "warn"
+rust.unused_results = "warn"
+rust.explicit_outlives_requirements = "warn"
+rust.fuzzy_provenance_casts = "deny"
+rust.meta_variable_misuse = "warn"
+rust.must_not_suspend = "warn"
+rust.pointer_structural_match = "warn"
+rust.single_use_lifetimes = "warn"
+rust.trivial_numeric_casts = "warn"
+rust.unused_lifetimes = "warn"
+rust.unused_macro_rules = "warn"
+rust.unused_tuple_struct_fields = "warn"
+rust.variant_size_differences = "warn"
+
+# We don't need this kind of control over this application
+clippy.pub_use = "allow"
+clippy.question_mark_used = "allow"
+clippy.arithmetic_side_effects = "allow"
+clippy.integer_division = "allow"
+clippy.exhaustive_enums = "allow"
+clippy.exhaustive_structs = "allow"
+clippy.impl_trait_in_params = "allow"
+clippy.unreachable = "allow"
+clippy.mem_forget = "allow"
+clippy.shadow_same = "allow"
+clippy.shadow_reuse = "allow"
+clippy.shadow_unrelated = "allow"        # TODO: Maybe check this one every once in a while? Pretty noisy though
+clippy.wildcard_enum_match_arm = "allow"
+
+# Triggers in macro-generated code
+# TODO: Turn these on once they don't trigger in macro-generated code
+clippy.allow_attributes_without_reason = "allow"
+clippy.allow_attributes = "allow"
+clippy.indexing_slicing = "allow"
+clippy.string_slice = "allow"
+clippy.missing_const_for_fn = "allow"
+
+# Too many false positives
+# TODO: Turn these on once they don't have as many false positives
+clippy.significant_drop_in_scrutinee = "allow"
+clippy.significant_drop_tightening = "allow"
+clippy.tests_outside_test_module = "allow"     # Triggers for benches
+
+# Style
+clippy.implicit_return = "allow"
+clippy.multiple_inherent_impl = "allow"
+clippy.pattern_type_mismatch = "allow"
+clippy.match_bool = "allow"
+clippy.single_match_else = "allow"        # Note: `match` reads easier than `if / else`
+clippy.option_if_let_else = "allow"
+clippy.self_named_module_files = "allow"
+clippy.items_after_statements = "allow"
+clippy.module_name_repetitions = "allow"
+clippy.module_inception = "allow"
+clippy.separated_literal_suffix = "allow"
+# Matching on a vale and adding `ref` is easier than matching on ref and de-referencing values within the body
+clippy.ref_patterns = "allow"
+clippy.semicolon_outside_block = "allow"
+clippy.manual_let_else = "allow"         # Rustfmt doesn't support let-else yet
+
+
+# Performance of floats isn't paramount
+clippy.suboptimal_flops = "allow"
+
+# Some functions might return an error / be async in the future
+clippy.unnecessary_wraps = "allow"
+clippy.unused_async = "allow"
+
+# We use proper error types when it matters what errors can be returned, else = "allow"
+# such as when using `anyhow`, we just assume the caller won't check *what* error
+# happened and instead just bubbles it up
+clippy.missing_errors_doc = "allow"
+
+
+# We don't expose certain entities that should be documented for internal use.
+rustdoc.private_intra_doc_links = "allow"
+
+# This is too prevalent on generic functions, which we don't want to ALWAYS be `Send`
+clippy.future_not_send = "allow"
+
+# TODO: Use `core` / `alloc` instead of `std` where possible?
+clippy.std_instead_of_core = "allow"
+clippy.std_instead_of_alloc = "allow"
+
+# Single-letter generics / lifetimes are fine when there isn't a specific meaning to the generic
+clippy.single_char_lifetime_names = "allow"
+
+# We don't need to annotate `#[inline]` to every single function
+# TODO: Check if it might be required in some hot functions?
+clippy.missing_inline_in_public_items = "allow"
+
+# For most trait impls, the default is fine.
+# TODO: Turn this off every once in a while and check if there's any
+#       performance improvements from implementing default functions?
+clippy.missing_trait_methods = "allow"
+
+# We only panic when it's an unrecoverable error
+clippy.unwrap_in_result = "allow"
+clippy.panic_in_result_fn = "allow"

@@ -2,70 +2,17 @@
 
 // Features
 #![feature(
-	seek_stream_len,
-	map_try_insert,
-	never_type,
-	closure_lifetime_binder,
-	anonymous_lifetime_in_impl_trait,
-	fs_try_exists,
-	iterator_try_reduce,
 	exit_status_error,
-	poll_ready,
-	hash_raw_entry,
 	decl_macro,
 	box_patterns,
-	try_blocks,
 	async_closure,
 	let_chains,
 	lint_reasons,
-	main_separator_str,
-	async_fn_in_trait
+	async_fn_in_trait,
+	yeet_expr,
+	must_not_suspend,
+	strict_provenance
 )]
-#![allow(incomplete_features)] // The ones we use are mature enough
-// Lints
-#![forbid(unsafe_code)]
-#![warn(
-	clippy::pedantic,
-	clippy::nursery,
-	clippy::as_conversions,
-	clippy::as_underscore,
-	clippy::assertions_on_result_states,
-	clippy::clone_on_ref_ptr,
-	clippy::create_dir,
-	clippy::deref_by_slicing,
-	clippy::empty_drop,
-	clippy::empty_structs_with_brackets,
-	clippy::exhaustive_enums,
-	clippy::filetype_is_file,
-	clippy::format_push_string,
-	clippy::get_unwrap,
-	clippy::if_then_some_else_none,
-	clippy::indexing_slicing,
-	clippy::map_err_ignore,
-	clippy::mixed_read_write_in_expression,
-	clippy::mod_module_files,
-	clippy::rc_buffer,
-	clippy::rc_mutex,
-	clippy::rest_pat_in_fully_bound_structs,
-	clippy::same_name_method,
-	// Note: Good lint, but has a few too many false positives
-	//       so just enable every once in a while to check if
-	//       there are any true positive cases
-	//clippy::shadow_unrelated,
-	clippy::str_to_string,
-	clippy::string_slice,
-	clippy::string_to_string,
-	clippy::try_err,
-	clippy::unnecessary_self_imports,
-	clippy::unneeded_field_pattern,
-	clippy::unwrap_used,
-	clippy::verbose_file_reads,
-)]
-#![allow(clippy::match_bool, clippy::single_match_else)] // Matching boolean-likes looks better than if/else
-#![allow(clippy::items_after_statements)] // We'd prefer a lint that would trigger usages of it in previous statements
-#![allow(clippy::missing_errors_doc)] // TODO: Create errors on a per-function basic to avoid doing this
-#![allow(clippy::module_name_repetitions)] // This is how we organize some modules
-#![allow(clippy::manual_let_else)] // Rustfmt has no support for let-else statements yet.
 
 // Modules
 mod args;
@@ -82,15 +29,17 @@ mod watcher;
 use {
 	self::{ast::Ast, build::Builder, error::AppError, expand::Expander, rules::Rules},
 	args::Args,
-	clap::StructOpt,
+	clap::Parser,
 	futures::{stream::FuturesUnordered, StreamExt},
 	std::{
+		borrow::Cow,
 		collections::HashMap,
 		env,
+		fs,
 		path::{Path, PathBuf},
 		time::{Duration, SystemTime},
 	},
-	tokio::fs,
+	util::CowStr,
 	watcher::Watcher,
 };
 
@@ -99,11 +48,11 @@ use {
 // TODO: Return our own error once we improve formatting?
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-	// Initialize the logger
-	logger::init();
-
 	// Get all args
 	let args = Args::parse();
+
+	// Initialize the logger
+	logger::init(args.log_file.as_deref());
 	tracing::trace!(?args, "Arguments");
 
 	// Find the zbuild location and change the current directory to it
@@ -112,36 +61,40 @@ async fn main() -> Result<(), anyhow::Error> {
 		Some(path) => path,
 		None => self::find_zbuild().await?,
 	};
-	tracing::trace!(?zbuild_path, "Found zbuild path");
+	tracing::debug!(?zbuild_path, "Found zbuild path");
 	let zbuild_dir = zbuild_path.parent().expect("Zbuild path had no parent");
 	let zbuild_path = zbuild_path.file_name().expect("Zbuild path had no file name");
 	let zbuild_path = Path::new(zbuild_path);
+	tracing::debug!(?zbuild_dir, "Moving to zbuild directory");
 	std::env::set_current_dir(zbuild_dir).map_err(AppError::set_current_dir(zbuild_dir))?;
 
 	// Parse the ast
-	let zbuild_file = fs::read_to_string(&zbuild_path)
-		.await
-		.map_err(AppError::read_file(&zbuild_path))?;
-	let ast = serde_yaml::from_str::<Ast>(&zbuild_file).map_err(AppError::parse_yaml(&zbuild_path))?;
-	tracing::trace!(target: "zbuild_ast", ?ast, "Parsed ast");
+	let zbuild_file = fs::read_to_string(&zbuild_path).map_err(AppError::read_file(&zbuild_path))?;
+	tracing::trace!(?zbuild_file, "Read zbuild.yaml");
+	let ast = serde_yaml::from_str::<Ast<'_>>(&zbuild_file).map_err(AppError::parse_yaml(&zbuild_path))?;
+	tracing::trace!(?ast, "Parsed ast");
 
 	// Build the rules
 	let rules = Rules::new(ast);
-	tracing::trace!(target: "zbuild_rules", ?rules, "Rules");
+	tracing::trace!(?rules, "Built rules");
 
 	// Get the max number of jobs we can execute at once
 	let jobs = match args.jobs {
+		Some(0) => {
+			tracing::warn!("Cannot use 0 jobs, defaulting to 1");
+			1
+		},
 		Some(jobs) => jobs,
 		None => std::thread::available_parallelism()
 			.map_err(AppError::get_default_jobs())?
 			.into(),
 	};
-	tracing::debug!(?jobs, "Found number of jobs to run concurrently");
+	tracing::debug!(?jobs, "Concurrent jobs");
 
 	// Then get all targets to build
 	let targets_to_build = match args.targets.is_empty() {
 		// If none were specified, use the default rules
-		true => rules.default.clone(),
+		true => Cow::Borrowed(rules.default.as_slice()),
 
 		// Else infer them as either rules or files
 		// TODO: Maybe be explicit about rule-name inferring?
@@ -153,7 +106,7 @@ async fn main() -> Result<(), anyhow::Error> {
 			.targets
 			.into_iter()
 			.map(|target| {
-				rules.rules.get(&target).map_or_else(
+				rules.rules.get(target.as_str()).map_or_else(
 					// By default, use a file
 					|| rules::Target::File {
 						file:      rules::Expr::string(target),
@@ -162,40 +115,47 @@ async fn main() -> Result<(), anyhow::Error> {
 					// If there was a rule, use it without any patterns
 					// TODO: If it requires patterns maybe error out here?
 					|rule| rules::Target::Rule {
-						rule: rules::Expr::string(rule.name.clone()),
+						rule: rules::Expr::string(rule.name.to_string()),
 						pats: HashMap::new(),
 					},
 				)
 			})
 			.collect(),
 	};
-	tracing::trace!(target: "zbuild_targets", ?targets_to_build, "Found targets");
+	tracing::trace!(?targets_to_build, "Found targets to build");
 
 	// Create the builder
-	let builder = Builder::new(jobs)?;
+	let builder = Builder::new(jobs);
 
 	// Then create the watcher, if we're watching
 	let watcher = args
 		.watch
-		.then(|| Watcher::new(builder.subscribe_events()))
+		.then(|| {
+			Watcher::new(
+				builder.subscribe_events(),
+				// TODO: Better default?
+				args.watch_debouncer_timeout_ms.unwrap_or(0.0),
+			)
+		})
 		.transpose()?;
 
-	// Finally build all targets
-	targets_to_build
-		.iter()
-		.map(|target| self::build_target(&builder, target, &rules, args.ignore_missing))
-		.collect::<FuturesUnordered<_>>()
-		.collect::<()>()
-		.await;
+	// Finally build all targets and start watching
+	futures::join!(
+		targets_to_build
+			.iter()
+			.map(|target| self::build_target(&builder, target, &rules, args.ignore_missing))
+			.collect::<FuturesUnordered<_>>()
+			.collect::<()>(),
+		async {
+			if let Some(watcher) = watcher {
+				tracing::info!("Starting to watch for all targets");
+				watcher.watch_rebuild(&builder, &rules, args.ignore_missing).await;
+			}
+		}
+	);
 
-	// Then, if we have a watcher, watch all the dependencies
-	if let Some(watcher) = watcher {
-		tracing::info!("Starting to watch for all targets");
-		watcher.watch_rebuild(&builder, &rules, args.ignore_missing).await?;
-	}
-
-	// Finally wait for the runner thread to finish
-	let targets = builder.await_runner_thread()?;
+	// Finally print some statistics
+	let targets = builder.into_build_results();
 	let total_targets = targets.len();
 	let built_targets = targets
 		.iter()
@@ -228,13 +188,15 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 }
 
 /// Builds a target.
-#[allow(clippy::future_not_send)] // Auto-traits are propagated
-async fn build_target<T: BuildableTargetInner + std::fmt::Display>(
-	builder: &Builder,
-	target: &rules::Target<T>,
-	rules: &Rules,
+#[expect(clippy::future_not_send)] // Auto-traits are propagated (TODO: Maybe? Check if this is true)
+async fn build_target<'s, T: BuildableTargetInner<'s> + std::fmt::Display + std::fmt::Debug>(
+	builder: &Builder<'s>,
+	target: &rules::Target<'s, T>,
+	rules: &Rules<'s>,
 	ignore_missing: bool,
 ) {
+	tracing::debug!(%target, "Building target");
+
 	// Try to build the target
 	let build_start_time = SystemTime::now();
 	let res = T::build(target, builder, rules, ignore_missing).await;
@@ -242,32 +204,35 @@ async fn build_target<T: BuildableTargetInner + std::fmt::Display>(
 	// Then check if we did it
 	match res {
 		Ok(build_res) => {
-			let build_duration = build_res
-				.build_time
-				.duration_since(build_start_time)
-				.unwrap_or(Duration::ZERO);
-			tracing::info!("Built target {target} in {build_duration:.2?}");
+			if build_res.built_here {
+				let build_duration = build_res
+					.build_time
+					.duration_since(build_start_time)
+					.unwrap_or(Duration::ZERO);
+				tracing::debug!("Built target {target} in {build_duration:.2?}");
+				println!("{target}");
+			};
 		},
-		Err(err) => tracing::error!("Unable to build target {target}: {:?}", anyhow::Error::new(err)),
+		Err(err) => tracing::error!(?target, err=?anyhow::Error::new(err), "Unable to build target"),
 	}
 }
 
 /// A buildable target inner type
-trait BuildableTargetInner: Sized {
+trait BuildableTargetInner<'s>: Sized {
 	/// Builds this target
 	async fn build(
-		target: &rules::Target<Self>,
-		builder: &Builder,
-		rules: &Rules,
+		target: &rules::Target<'s, Self>,
+		builder: &Builder<'s>,
+		rules: &Rules<'s>,
 		ignore_missing: bool,
 	) -> Result<build::BuildResult, AppError>;
 }
 
-impl BuildableTargetInner for rules::Expr {
+impl<'s> BuildableTargetInner<'s> for rules::Expr<'s> {
 	async fn build(
-		target: &rules::Target<Self>,
-		builder: &Builder,
-		rules: &Rules,
+		target: &rules::Target<'s, Self>,
+		builder: &Builder<'s>,
+		rules: &Rules<'s>,
 		ignore_missing: bool,
 	) -> Result<build::BuildResult, AppError> {
 		builder
@@ -277,11 +242,11 @@ impl BuildableTargetInner for rules::Expr {
 	}
 }
 
-impl BuildableTargetInner for String {
+impl<'s> BuildableTargetInner<'s> for CowStr<'s> {
 	async fn build(
-		target: &rules::Target<Self>,
-		builder: &Builder,
-		rules: &Rules,
+		target: &rules::Target<'s, Self>,
+		builder: &Builder<'s>,
+		rules: &Rules<'s>,
 		ignore_missing: bool,
 	) -> Result<build::BuildResult, AppError> {
 		builder
