@@ -73,7 +73,7 @@ pub struct Builder<'s> {
 	_event_rx: async_broadcast::InactiveReceiver<Event<'s>>,
 
 	/// Expander
-	expander: Expander,
+	expander: Expander<'s>,
 
 	/// All rules' build lock
 	rules_lock: DashMap<TargetRule<'s>, BuildLock<'s>>,

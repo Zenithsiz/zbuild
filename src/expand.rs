@@ -8,22 +8,25 @@ use {
 		util::CowStr,
 	},
 	itertools::Itertools,
-	std::path::PathBuf,
+	std::{marker::PhantomData, path::PathBuf},
 };
 
 /// Expander
 #[derive(Debug)]
-pub struct Expander;
+pub struct Expander<'s> {
+	/// Phantom for `'s`
+	_phantom: PhantomData<&'s ()>,
+}
 
 #[expect(clippy::unused_self)] // Currently expander doesn't do anything
-impl Expander {
+impl<'s> Expander<'s> {
 	/// Creates a new expander
 	pub const fn new() -> Self {
-		Self
+		Self { _phantom: PhantomData }
 	}
 
 	/// Expands an expression to it's components
-	pub fn expand_expr<'s>(&self, expr: &Expr<'s>, visitor: &mut impl Visitor<'s>) -> Result<Expr<'s>, AppError> {
+	pub fn expand_expr(&self, expr: &Expr<'s>, visitor: &mut impl Visitor<'s>) -> Result<Expr<'s>, AppError> {
 		// Go through all components
 		let cmpts = expr
 			.cmpts
@@ -104,11 +107,7 @@ impl Expander {
 	}
 
 	/// Expands an expression into a string
-	pub fn expand_expr_string<'s>(
-		&self,
-		expr: &Expr<'s>,
-		visitor: &mut impl Visitor<'s>,
-	) -> Result<CowStr<'s>, AppError> {
+	pub fn expand_expr_string(&self, expr: &Expr<'s>, visitor: &mut impl Visitor<'s>) -> Result<CowStr<'s>, AppError> {
 		let expr_cmpts = self.expand_expr(expr, visitor)?.cmpts.into_boxed_slice();
 		let res = match Box::<[_; 0]>::try_from(expr_cmpts) {
 			Ok(box []) => Ok("".into()),
@@ -148,7 +147,7 @@ impl Expander {
 	}
 
 	/// Expands a rule of all it's aliases and patterns
-	pub fn expand_rule<'s>(
+	pub fn expand_rule(
 		&self,
 		rule: &Rule<'s, Expr<'s>>,
 		visitor: &mut impl Visitor<'s>,
@@ -242,7 +241,7 @@ impl Expander {
 	}
 
 	/// Expands a target expression
-	pub fn expand_target<'s>(
+	pub fn expand_target(
 		&self,
 		target: &Target<'s, Expr<'s>>,
 		visitor: &mut impl Visitor<'s>,
