@@ -110,7 +110,9 @@ impl<'s> Builder<'s> {
 		// Note: We only send them if there are any receivers (excluding ours, which is inactive),
 		//       to ensure we don't deadlock waiting for someone to read the events
 		if self.event_tx.receiver_count() > 0 {
-			self.event_tx
+			// Note: We don't care about the event
+			let _: Option<Event<'_>> = self
+				.event_tx
 				.broadcast(make_event())
 				.await
 				.expect("Event channel was closed");
@@ -311,7 +313,6 @@ impl<'s> Builder<'s> {
 	) -> Result<BuildResult, AppError> {
 		/// Dependency
 		#[derive(Clone, Debug)]
-		#[expect(clippy::missing_docs_in_private_items)]
 		enum Dep<'s, 'a> {
 			/// File
 			File {
@@ -617,6 +618,7 @@ impl<'s> Builder<'s> {
 	}
 
 	/// Rebuilds a rule
+	#[expect(unused_results)] // Due to the builder pattern of `Command`
 	pub async fn rebuild_rule(&self, rule: &Rule<'s, CowStr<'s>>) -> Result<(), AppError> {
 		// Lock the semaphore
 		let _permit = self.exec_semaphore.acquire().await;

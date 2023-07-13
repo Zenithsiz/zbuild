@@ -102,8 +102,11 @@ clippy.unreachable = "allow"
 clippy.mem_forget = "allow"
 clippy.shadow_same = "allow"
 clippy.shadow_reuse = "allow"
-clippy.shadow_unrelated = "allow"        # TODO: Maybe check this one every once in a while? Pretty noisy though
+clippy.shadow_unrelated = "allow"         # TODO: Maybe check this one every once in a while? Pretty noisy though
 clippy.wildcard_enum_match_arm = "allow"
+clippy.float_arithmetic = "allow"
+clippy.default_numeric_fallback = "allow"
+clippy.print_stdout = "allow"
 
 # Triggers in macro-generated code
 # TODO: Turn these on once they don't trigger in macro-generated code
@@ -175,3 +178,6 @@ clippy.missing_trait_methods = "allow"
 # We only panic when it's an unrecoverable error
 clippy.unwrap_in_result = "allow"
 clippy.panic_in_result_fn = "allow"
+
+# Sometimes small structs defined inline don't need documentation
+clippy.missing_docs_in_private_items = "allow"

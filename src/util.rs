@@ -40,6 +40,7 @@ pub async fn fs_try_exists(path: impl AsRef<Path> + Send) -> Result<bool, std::i
 
 /// Measures the duration of a fallible future
 pub async fn try_measure_async<F: Future<Output = Result<T, E>>, T, E>(fut: F) -> Result<(Duration, T), E> {
+	/// Wrapper future for measuring the future
 	#[pin_project]
 	struct Wrapper<F> {
 		/// Future

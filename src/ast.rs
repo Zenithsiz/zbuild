@@ -244,7 +244,6 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 					}
 
 					// Then check if it was an alias or pattern
-					#[expect(clippy::missing_docs_in_private_items)]
 					enum Kind {
 						Alias,
 						Pattern,

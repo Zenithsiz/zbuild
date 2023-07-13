@@ -11,7 +11,8 @@
 	async_fn_in_trait,
 	yeet_expr,
 	must_not_suspend,
-	strict_provenance
+	strict_provenance,
+	assert_matches
 )]
 
 // Modules
@@ -69,7 +70,7 @@ async fn main() -> Result<(), anyhow::Error> {
 	std::env::set_current_dir(zbuild_dir).map_err(AppError::set_current_dir(zbuild_dir))?;
 
 	// Parse the ast
-	let zbuild_file = fs::read_to_string(&zbuild_path).map_err(AppError::read_file(&zbuild_path))?;
+	let zbuild_file = fs::read_to_string(zbuild_path).map_err(AppError::read_file(&zbuild_path))?;
 	tracing::trace!(?zbuild_file, "Read zbuild.yaml");
 	let ast = serde_yaml::from_str::<Ast<'_>>(&zbuild_file).map_err(AppError::parse_yaml(&zbuild_path))?;
 	tracing::trace!(?ast, "Parsed ast");
@@ -115,7 +116,7 @@ async fn main() -> Result<(), anyhow::Error> {
 					// If there was a rule, use it without any patterns
 					// TODO: If it requires patterns maybe error out here?
 					|rule| rules::Target::Rule {
-						rule: rules::Expr::string(rule.name.to_string()),
+						rule: rules::Expr::string(rule.name.to_owned()),
 						pats: HashMap::new(),
 					},
 				)

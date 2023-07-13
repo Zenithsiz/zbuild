@@ -62,8 +62,10 @@ impl<'s> Watcher<'s> {
 				Ok(fs_events) =>
 					for fs_event in fs_events {
 						tracing::trace!(?fs_event, "Watcher fs event");
-						#[expect(let_underscore_drop)] // We don't care if it succeeded or not
-						let _ = fs_event_tx.blocking_send(fs_event);
+
+						// Note: We don't care if it succeeded or not
+						#[expect(let_underscore_drop, clippy::let_underscore_must_use)]
+						let _: Result<(), _> = fs_event_tx.blocking_send(fs_event);
 					},
 				Err(errs) =>
 					for err in errs {
@@ -122,14 +124,16 @@ impl<'s> Watcher<'s> {
 								//       until the root, and by that point we'd just be watching
 								//       all filesystem changes...
 								tracing::trace!(?dep_path, "Starting to watch path");
-								if let Err(err) = self.watcher.watcher().watch(
-									&dep_path.parent().unwrap_or(&dep_path),
-									notify::RecursiveMode::Recursive,
-								) {
-									tracing::warn!(?dep_path, ?err, "Unable to watch path")
+								if let Err(err) = self
+									.watcher
+									.watcher()
+									.watch(dep_path.parent().unwrap_or(&dep_path), notify::RecursiveMode::Recursive)
+								{
+									tracing::warn!(?dep_path, ?err, "Unable to watch path");
 								}
 
-								rev_deps
+								// Note: We don't care if we add a duplicate target
+								let _: bool = rev_deps
 									.entry(dep_path)
 									.or_insert_with(|| RevDep {
 										target:  dep,
@@ -182,7 +186,7 @@ impl<'s> Watcher<'s> {
 							builder
 								.reset_build(&rev_dep.target, rules)
 								.await
-								.expect("Unable to reset existing build")
+								.expect("Unable to reset existing build");
 						},
 						dep_parents
 							.iter()
