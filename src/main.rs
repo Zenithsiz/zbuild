@@ -188,7 +188,6 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 }
 
 /// Builds a target.
-#[expect(clippy::future_not_send)] // Auto-traits are propagated (TODO: Maybe? Check if this is true)
 async fn build_target<'s, T: BuildableTargetInner<'s> + std::fmt::Display + std::fmt::Debug>(
 	builder: &Builder<'s>,
 	target: &rules::Target<'s, T>,
