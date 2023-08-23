@@ -99,7 +99,13 @@ pub enum CommandArg<T> {
 	Expr(T),
 
 	/// Command
-	Command(Command<T>),
+	Command {
+		/// Strip the command if failed
+		strip_on_fail: bool,
+
+		/// Command
+		cmd: Command<T>,
+	},
 }
 
 impl<'s> CommandArg<Expr<'s>> {
@@ -107,7 +113,18 @@ impl<'s> CommandArg<Expr<'s>> {
 	pub fn new(arg: ast::CommandArg<'s>) -> Self {
 		match arg {
 			ast::CommandArg::Expr(expr) => Self::Expr(Expr::new(expr)),
-			ast::CommandArg::Command(cmd) => Self::Command(Command::new(cmd)),
+			ast::CommandArg::Command(cmd) => Self::Command {
+				strip_on_fail: false,
+				cmd:           Command::new(cmd),
+			},
+			ast::CommandArg::CommandFull { strip_on_fail, cmd } => Self::Command {
+				strip_on_fail,
+				cmd: Command::new(cmd),
+			},
+			ast::CommandArg::StripOnFail { cmd } => Self::Command {
+				strip_on_fail: true,
+				cmd:           Command::new(cmd),
+			},
 		}
 	}
 }

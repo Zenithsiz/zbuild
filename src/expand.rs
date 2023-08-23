@@ -242,9 +242,12 @@ impl<'s> Expander<'s> {
 				.args
 				.iter()
 				.map(|arg| {
-					let arg = match arg {
-						CommandArg::Expr(expr) => CommandArg::Expr(self.expand_expr_string(expr, visitor)?),
-						CommandArg::Command(cmd) => CommandArg::Command(self.expand_cmd(cmd, visitor)?),
+					let arg = match *arg {
+						CommandArg::Expr(ref expr) => CommandArg::Expr(self.expand_expr_string(expr, visitor)?),
+						CommandArg::Command { strip_on_fail, ref cmd } => CommandArg::Command {
+							strip_on_fail,
+							cmd: self.expand_cmd(cmd, visitor)?,
+						},
 					};
 					Ok(arg)
 				})

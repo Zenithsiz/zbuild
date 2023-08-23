@@ -402,7 +402,7 @@ impl AppError {
 			.iter()
 			.map(|arg| match arg {
 				crate::rules::CommandArg::Expr(expr) => format!("\"{expr}\""),
-				crate::rules::CommandArg::Command(cmd) => Self::cmd_to_string(cmd),
+				crate::rules::CommandArg::Command { cmd, .. } => Self::cmd_to_string(cmd),
 			})
 			.join(" ");
 		format!("[{inner}]")

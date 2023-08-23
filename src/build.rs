@@ -649,38 +649,38 @@ impl<'s> Builder<'s> {
 		cmd: &Command<CowStr<'s>>,
 		capture_stdout: bool,
 	) -> Result<String, AppError> {
-		let (program, args) = cmd.args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
+		// Process all arguments
+		// Note: When recursing, always capture stdout
+		let args = cmd
+			.args
+			.iter()
+			.map(async move |arg| match arg {
+				CommandArg::Expr(arg) => Ok(Some(Cow::Borrowed(&**arg))),
+				CommandArg::Command { strip_on_fail, cmd } => {
+					let res = self.exec_cmd(rule_name, cmd, true).await;
+					match (res, strip_on_fail) {
+						(Ok(arg), _) => Ok(Some(Cow::Owned(arg))),
+						(Err(err), true) => {
+							tracing::debug!(?arg, ?err, "Stripping argument from failure");
+							Ok(None)
+						},
+						(Err(err), false) => Err(err),
+					}
+				},
+			})
+			.collect::<FuturesUnordered<_>>()
+			.try_collect::<Vec<_>>()
+			.await?
+			.into_iter()
+			.flatten()
+			.collect::<Vec<_>>();
+
+		let (program, args) = args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
 			rule_name: rule_name.to_owned(),
 		})?;
 
-		// Recurse on the arguments, if any is a command
-		// Note: When recursing, always capture stdout
-		let (program, args) = tokio::try_join!(
-			async move {
-				let program = match program {
-					CommandArg::Expr(program) => Cow::Borrowed(&**program),
-					CommandArg::Command(cmd) => self.exec_cmd(rule_name, cmd, true).await?.into(),
-				};
-
-				Ok(program)
-			},
-			async move {
-				args.iter()
-					.map(async move |arg| {
-						let arg = match arg {
-							CommandArg::Expr(arg) => Cow::Borrowed(&**arg),
-							CommandArg::Command(cmd) => self.exec_cmd(rule_name, cmd, true).await?.into(),
-						};
-						Ok(arg)
-					})
-					.collect::<FuturesUnordered<_>>()
-					.try_collect::<Vec<_>>()
-					.await
-			}
-		)?;
-
 		// Create the command
-		let mut os_cmd = process::Command::new(&*program);
+		let mut os_cmd = process::Command::new(&**program);
 		os_cmd.args(args.iter().map(|arg| &**arg));
 
 		// Set the working directory, if we have any

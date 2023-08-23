@@ -384,4 +384,22 @@ pub enum CommandArg<'a> {
 	/// Command
 	#[serde(borrow)]
 	Command(Command<'a>),
+
+	/// Command full
+	CommandFull {
+		/// Strip the command if failed
+		strip_on_fail: bool,
+
+		/// Command
+		#[serde(borrow)]
+		cmd: Command<'a>,
+	},
+
+	/// Strip on fail
+	StripOnFail {
+		/// Command
+		#[serde(rename = "strip_on_fail")]
+		#[serde(borrow)]
+		cmd: Command<'a>,
+	},
 }
