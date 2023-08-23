@@ -173,7 +173,9 @@ impl<'s> Builder<'s> {
 	/// Resets a build
 	pub async fn reset_build(&self, target: &Target<'s, CowStr<'s>>, rules: &Rules<'s>) -> Result<(), AppError> {
 		// Get the rule for the target
-		let Some((_, target_rule)) = self.target_rule(target, rules)? else { return Ok(()) };
+		let Some((_, target_rule)) = self.target_rule(target, rules)? else {
+			return Ok(());
+		};
 
 		// Get the built lock, or create it
 		// Note: Important to clone since we'll be `await`ing with it.
@@ -225,9 +227,8 @@ impl<'s> Builder<'s> {
 		};
 
 		// Get the rule for the target
-		let (rule, target_rule) = match self.target_rule(&target, rules)? {
-			Some((rule, target_rule)) => (rule, target_rule),
-			None => match target {
+		let Some((rule, target_rule)) = self.target_rule(&target, rules)? else {
+			match target {
 				Target::File { ref file, .. } => match fs::metadata(&**file).await {
 					Ok(metadata) => {
 						let build_time = self::file_modified_time(metadata);
@@ -262,7 +263,7 @@ impl<'s> Builder<'s> {
 				},
 				// Note: If `target_rule` returns `Err` if this was a rule, so we can never reach here
 				Target::Rule { .. } => unreachable!(),
-			},
+			}
 		};
 
 		// Get the built lock, or create it
@@ -456,6 +457,7 @@ impl<'s> Builder<'s> {
 					};
 
 					// If the dependency if a dependency deps file or an output deps file (and exists), build it's dependencies too
+					#[allow(clippy::wildcard_enum_match_arm, reason = "We only care about some variants")]
 					let dep_deps = match &dep {
 						Dep::File {
 							file,

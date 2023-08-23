@@ -103,10 +103,14 @@ clippy.mem_forget = "allow"
 clippy.shadow_same = "allow"
 clippy.shadow_reuse = "allow"
 clippy.shadow_unrelated = "allow"         # TODO: Maybe check this one every once in a while? Pretty noisy though
-clippy.wildcard_enum_match_arm = "allow"
+clippy.min_ident_chars = "allow"          # Useful for generics such as `f: impl FnOnce()`
+clippy.single_call_fn = "allow"           # It's still useful to separate blocks of code into functions
 clippy.float_arithmetic = "allow"
-clippy.default_numeric_fallback = "allow"
-clippy.print_stdout = "allow"
+clippy.default_numeric_fallback = "allow" # TODO: This isn't very useful for floats, but might be for integers
+
+# We prefer the short version
+clippy.pub_with_shorthand = "allow"
+clippy.pub_without_shorthand = "warn"
 
 # Triggers in macro-generated code
 # TODO: Turn these on once they don't trigger in macro-generated code
@@ -137,8 +141,6 @@ clippy.separated_literal_suffix = "allow"
 # Matching on a vale and adding `ref` is easier than matching on ref and de-referencing values within the body
 clippy.ref_patterns = "allow"
 clippy.semicolon_outside_block = "allow"
-clippy.manual_let_else = "allow"         # Rustfmt doesn't support let-else yet
-
 
 # Performance of floats isn't paramount
 clippy.suboptimal_flops = "allow"

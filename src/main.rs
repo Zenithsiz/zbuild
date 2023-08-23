@@ -14,6 +14,8 @@
 	strict_provenance,
 	assert_matches
 )]
+// Lints
+#![allow(clippy::print_stdout, reason = "We're a binary that should talk to the user")]
 
 // Modules
 mod args;
