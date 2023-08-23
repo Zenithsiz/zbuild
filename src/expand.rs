@@ -4,7 +4,7 @@
 use {
 	crate::{
 		error::AppError,
-		rules::{AliasOp, Command, DepItem, Exec, Expr, ExprCmpt, OutItem, Rule, Target},
+		rules::{AliasOp, Command, CommandArg, DepItem, Exec, Expr, ExprCmpt, OutItem, Rule, Target},
 		util::CowStr,
 	},
 	itertools::Itertools,
@@ -209,25 +209,11 @@ impl<'s> Expander<'s> {
 			.collect::<Result<_, _>>()?;
 
 		let exec = Exec {
-			cwd:  rule
-				.exec
-				.cwd
-				.as_ref()
-				.map(|cwd| self.expand_expr_string(cwd, visitor))
-				.transpose()?,
 			cmds: rule
 				.exec
 				.cmds
 				.iter()
-				.map(|cmd| {
-					Ok(Command {
-						args: cmd
-							.args
-							.iter()
-							.map(|arg| self.expand_expr_string(arg, visitor))
-							.collect::<Result<_, _>>()?,
-					})
-				})
+				.map(|cmd| self.expand_cmd(cmd, visitor))
 				.collect::<Result<_, _>>()?,
 		};
 
@@ -237,6 +223,32 @@ impl<'s> Expander<'s> {
 			output,
 			deps,
 			exec,
+		})
+	}
+
+	/// Expands a command
+	pub fn expand_cmd(
+		&self,
+		cmd: &Command<Expr<'s>>,
+		visitor: &mut impl Visitor<'s>,
+	) -> Result<Command<CowStr<'s>>, AppError> {
+		Ok(Command {
+			cwd:  cmd
+				.cwd
+				.as_ref()
+				.map(|cwd| self.expand_expr_string(cwd, visitor))
+				.transpose()?,
+			args: cmd
+				.args
+				.iter()
+				.map(|arg| {
+					let arg = match arg {
+						CommandArg::Expr(expr) => CommandArg::Expr(self.expand_expr_string(expr, visitor)?),
+						CommandArg::Command(cmd) => CommandArg::Command(self.expand_cmd(cmd, visitor)?),
+					};
+					Ok(arg)
+				})
+				.collect::<Result<_, _>>()?,
 		})
 	}
 

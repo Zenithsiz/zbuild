@@ -374,7 +374,7 @@ impl AppError {
 	/// Returns a function to create a [`Self::SpawnCommand`] error from it's inner error.
 	pub fn spawn_command<T: fmt::Display>(cmd: &Command<T>) -> impl FnOnce(io::Error) -> Self + '_ {
 		move |err| Self::SpawnCommand {
-			cmd_fmt: cmd.args.iter().join(" "),
+			cmd_fmt: Self::cmd_to_string(cmd),
 			err,
 		}
 	}
@@ -382,7 +382,7 @@ impl AppError {
 	/// Returns a function to create a [`Self::WaitCommand`] error from it's inner error.
 	pub fn wait_command<T: fmt::Display>(cmd: &Command<T>) -> impl FnOnce(io::Error) -> Self + '_ {
 		move |err| Self::WaitCommand {
-			cmd_fmt: cmd.args.iter().join(" "),
+			cmd_fmt: Self::cmd_to_string(cmd),
 			err,
 		}
 	}
@@ -390,9 +390,22 @@ impl AppError {
 	/// Returns a function to create a [`Self::CommandFailed`] error from it's inner error.
 	pub fn command_failed<T: fmt::Display>(cmd: &Command<T>) -> impl FnOnce(ExitStatusError) -> Self + '_ {
 		move |err| Self::CommandFailed {
-			cmd_fmt: cmd.args.iter().join(" "),
+			cmd_fmt: Self::cmd_to_string(cmd),
 			err,
 		}
+	}
+
+	/// Helper function to format a `Command` for errors
+	fn cmd_to_string<T: fmt::Display>(cmd: &Command<T>) -> String {
+		let inner = cmd
+			.args
+			.iter()
+			.map(|arg| match arg {
+				crate::rules::CommandArg::Expr(expr) => format!("\"{expr}\""),
+				crate::rules::CommandArg::Command(cmd) => Self::cmd_to_string(cmd),
+			})
+			.join(" ");
+		format!("[{inner}]")
 	}
 
 	/// Returns a function to create a [`Self::GetDefaultJobs`] error from it's inner error.

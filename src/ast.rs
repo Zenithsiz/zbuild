@@ -343,38 +343,45 @@ pub struct Rule<'a> {
 }
 
 /// Execution
-#[derive(Clone, Debug)]
+#[derive(Clone, Default, Debug)]
 #[derive(serde::Serialize, serde::Deserialize)]
-#[serde(untagged)]
-pub enum Exec<'a> {
-	/// Only commands
-	OnlyCmds(Vec<Command<'a>>),
-
-	/// Full
-	Full {
-		/// working directory
-		#[serde(default)]
-		#[serde(borrow)]
-		cwd: Option<Expr<'a>>,
-
-		/// Commands
-		cmds: Vec<Command<'a>>,
-	},
+#[serde(transparent)]
+pub struct Exec<'a> {
+	/// Commands
+	#[serde(borrow)]
+	pub cmds: Vec<Command<'a>>,
 }
-
-impl Default for Exec<'_> {
-	fn default() -> Self {
-		Self::OnlyCmds(vec![])
-	}
-}
-
 
 /// Command
 #[derive(Clone, Debug)]
 #[derive(serde::Serialize, serde::Deserialize)]
-#[serde(transparent)]
-pub struct Command<'a> {
-	/// All arguments
+#[serde(untagged)]
+pub enum Command<'a> {
+	/// Only arguments
+	OnlyArgs(Vec<CommandArg<'a>>),
+
+	/// Full
+	Full {
+		/// Working directory
+		#[serde(default)]
+		#[serde(borrow)]
+		cwd: Option<Expr<'a>>,
+
+		/// Arguments
+		args: Vec<CommandArg<'a>>,
+	},
+}
+
+/// Command argument
+#[derive(Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum CommandArg<'a> {
+	/// Expression
 	#[serde(borrow)]
-	pub args: Vec<Expr<'a>>,
+	Expr(Expr<'a>),
+
+	/// Command
+	#[serde(borrow)]
+	Command(Command<'a>),
 }

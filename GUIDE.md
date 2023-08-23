@@ -163,15 +163,14 @@ You may specify the execution as either:
 
 2. Full form
 
-   The full form allow you to fully specify everything, but you must put the commands within an inner `cmds` key.
+   The full form allow you to fully specify everything, but you must put the arguments of each command within an inner `args` key.
 
    ```
    exec:
-     cwd: "..."
-     cmds:
-       - [bash, ...]
-       - [cp, ...]
-       - ...
+      - cwd: "..."
+        args: [bash, ...]
+      - [cp, ...]
+      - ...
    ```
 
 ## Aliases

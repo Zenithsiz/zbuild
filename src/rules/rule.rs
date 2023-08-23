@@ -36,26 +36,7 @@ impl<'s> Rule<'s, Expr<'s>> {
 			.collect();
 		let output = rule.out.into_iter().map(OutItem::new).collect();
 		let deps = rule.deps.into_iter().map(DepItem::new).collect();
-		let exec = match rule.exec {
-			ast::Exec::OnlyCmds(cmds) => Exec {
-				cwd:  None,
-				cmds: cmds
-					.into_iter()
-					.map(|cmd| Command {
-						args: cmd.args.into_iter().map(Expr::new).collect(),
-					})
-					.collect(),
-			},
-			ast::Exec::Full { cwd, cmds } => Exec {
-				cwd:  cwd.map(Expr::new),
-				cmds: cmds
-					.into_iter()
-					.map(|cmd| Command {
-						args: cmd.args.into_iter().map(Expr::new).collect(),
-					})
-					.collect(),
-			},
-		};
+		let exec = Exec::new(rule.exec);
 
 		Self {
 			name,
@@ -71,17 +52,62 @@ impl<'s> Rule<'s, Expr<'s>> {
 /// Exec
 #[derive(Clone, Debug)]
 pub struct Exec<T> {
-	/// Working directory
-	pub cwd: Option<T>,
-
 	/// Commands
 	pub cmds: Vec<Command<T>>,
+}
+
+impl<'s> Exec<Expr<'s>> {
+	/// Creates a new exec from it's ast
+	pub fn new(exec: ast::Exec<'s>) -> Self {
+		Self {
+			cmds: exec.cmds.into_iter().map(Command::new).collect(),
+		}
+	}
 }
 
 
 /// Command
 #[derive(Clone, Debug)]
 pub struct Command<T> {
+	/// Working directory
+	pub cwd: Option<T>,
+
 	/// All arguments
-	pub args: Vec<T>,
+	pub args: Vec<CommandArg<T>>,
+}
+
+impl<'s> Command<Expr<'s>> {
+	/// Creates a new command from it's ast
+	pub fn new(cmd: ast::Command<'s>) -> Self {
+		match cmd {
+			ast::Command::OnlyArgs(args) => Self {
+				cwd:  None,
+				args: args.into_iter().map(CommandArg::new).collect(),
+			},
+			ast::Command::Full { cwd, args } => Self {
+				cwd:  cwd.map(Expr::new),
+				args: args.into_iter().map(CommandArg::new).collect(),
+			},
+		}
+	}
+}
+
+/// Command argument
+#[derive(Clone, Debug)]
+pub enum CommandArg<T> {
+	/// Expression
+	Expr(T),
+
+	/// Command
+	Command(Command<T>),
+}
+
+impl<'s> CommandArg<Expr<'s>> {
+	/// Creates a new command argument from it's ast
+	pub fn new(arg: ast::CommandArg<'s>) -> Self {
+		match arg {
+			ast::CommandArg::Expr(expr) => Self::Expr(Expr::new(expr)),
+			ast::CommandArg::Command(cmd) => Self::Command(Command::new(cmd)),
+		}
+	}
 }

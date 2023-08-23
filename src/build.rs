@@ -16,22 +16,24 @@ use {
 		match_expr::match_expr,
 	},
 	crate::{
-		rules::{DepItem, Expr, OutItem, Rule, Target},
+		rules::{Command, CommandArg, DepItem, Expr, OutItem, Rule, Target},
 		util::{self, CowStr},
 		AppError,
 		Expander,
 		Rules,
 	},
+	anyhow::Context,
 	dashmap::DashMap,
 	filetime::FileTime,
 	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
 	itertools::Itertools,
 	std::{
+		borrow::Cow,
 		collections::HashMap,
 		mem,
 		time::{Duration, SystemTime},
 	},
-	tokio::{fs, process::Command, sync::Semaphore},
+	tokio::{fs, process, sync::Semaphore},
 };
 
 // TODO: If the user zbuild file is not generated properly, it can
@@ -620,7 +622,6 @@ impl<'s> Builder<'s> {
 	}
 
 	/// Rebuilds a rule
-	#[expect(unused_results)] // Due to the builder pattern of `Command`
 	pub async fn rebuild_rule(&self, rule: &Rule<'s, CowStr<'s>>) -> Result<(), AppError> {
 		// Lock the semaphore
 		let _permit = self
@@ -631,36 +632,90 @@ impl<'s> Builder<'s> {
 			.map_err(AppError::Other)?;
 
 		for cmd in &rule.exec.cmds {
-			let (program, args) = cmd.args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
-				rule_name: rule.name.to_owned(),
-			})?;
-
-			// Create the command
-			let mut os_cmd = Command::new(&**program);
-			os_cmd.args(args.iter().map(|arg| &**arg));
-
-			// Set the working directory, if we have any
-			if let Some(cwd) = &rule.exec.cwd {
-				os_cmd.current_dir(&**cwd);
-			}
-
-			// Then spawn it and measure
-			tracing::debug!(target: "zbuild_exec", "{} {}", program, args.join(" "));
-			let (duration, ()) = util::try_measure_async(async {
-				os_cmd
-					.spawn()
-					.map_err(AppError::spawn_command(cmd))?
-					.wait()
-					.await
-					.map_err(AppError::wait_command(cmd))?
-					.exit_ok()
-					.map_err(AppError::command_failed(cmd))
-			})
-			.await?;
-			tracing::trace!(target: "zbuild_exec", rule_name=?rule.name, ?program, ?args, ?duration, "Execution duration");
+			// Note: We don't care about the stdout here and don't capture it anyway.
+			let _: String = self.exec_cmd(rule.name, cmd, false).await?;
 		}
 
 		Ok(())
+	}
+
+	/// Executes a command, returning it's stdout
+	#[expect(unused_results, reason = "Due to the builder pattern of `Command`")]
+	#[expect(clippy::only_used_in_recursion, reason = "It might be used in the future")]
+	#[async_recursion::async_recursion]
+	async fn exec_cmd(
+		&self,
+		rule_name: &str,
+		cmd: &Command<CowStr<'s>>,
+		capture_stdout: bool,
+	) -> Result<String, AppError> {
+		let (program, args) = cmd.args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
+			rule_name: rule_name.to_owned(),
+		})?;
+
+		// Recurse on the arguments, if any is a command
+		// Note: When recursing, always capture stdout
+		let (program, args) = tokio::try_join!(
+			async move {
+				let program = match program {
+					CommandArg::Expr(program) => Cow::Borrowed(&**program),
+					CommandArg::Command(cmd) => self.exec_cmd(rule_name, cmd, true).await?.into(),
+				};
+
+				Ok(program)
+			},
+			async move {
+				args.iter()
+					.map(async move |arg| {
+						let arg = match arg {
+							CommandArg::Expr(arg) => Cow::Borrowed(&**arg),
+							CommandArg::Command(cmd) => self.exec_cmd(rule_name, cmd, true).await?.into(),
+						};
+						Ok(arg)
+					})
+					.collect::<FuturesUnordered<_>>()
+					.try_collect::<Vec<_>>()
+					.await
+			}
+		)?;
+
+		// Create the command
+		let mut os_cmd = process::Command::new(&*program);
+		os_cmd.args(args.iter().map(|arg| &**arg));
+
+		// Set the working directory, if we have any
+		if let Some(cwd) = &cmd.cwd {
+			os_cmd.current_dir(&**cwd);
+		}
+
+		// If we capture pipe stdout, do it
+		if capture_stdout {
+			os_cmd.stdout(std::process::Stdio::piped());
+		}
+
+		// Then spawn it and measure
+		tracing::debug!(target: "zbuild_exec", "{} {}", program, args.join(" "));
+		let (duration, stdout) = util::try_measure_async(async {
+			let output = os_cmd
+				.spawn()
+				.map_err(AppError::spawn_command(cmd))?
+				.wait_with_output()
+				.await
+				.map_err(AppError::wait_command(cmd))?;
+
+			output.status.exit_ok().map_err(AppError::command_failed(cmd))?;
+			Ok(output.stdout)
+		})
+		.await?;
+		tracing::trace!(target: "zbuild_exec", ?rule_name, ?program, ?args, ?duration, "Execution duration");
+
+		// Finally parse stdout
+		// TODO: Not require utf8?
+		let stdout = String::from_utf8(stdout)
+			.context("Stdout was non-utf8")
+			.map_err(AppError::Other)?;
+
+		Ok(stdout)
 	}
 
 	/// Finds a rule for `file`
