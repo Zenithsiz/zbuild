@@ -623,7 +623,12 @@ impl<'s> Builder<'s> {
 	#[expect(unused_results)] // Due to the builder pattern of `Command`
 	pub async fn rebuild_rule(&self, rule: &Rule<'s, CowStr<'s>>) -> Result<(), AppError> {
 		// Lock the semaphore
-		let _permit = self.exec_semaphore.acquire().await;
+		let _permit = self
+			.exec_semaphore
+			.acquire()
+			.await
+			.context("Executable semaphore was closed")
+			.map_err(AppError::Other)?;
 
 		for cmd in &rule.exec.cmds {
 			let (program, args) = cmd.args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
