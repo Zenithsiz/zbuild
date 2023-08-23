@@ -668,11 +668,14 @@ impl<'s> Builder<'s> {
 					}
 				},
 			})
+			.enumerate()
+			.map(async move |(idx, fut)| fut.await.map(|arg| (idx, arg)))
 			.collect::<FuturesUnordered<_>>()
 			.try_collect::<Vec<_>>()
 			.await?
 			.into_iter()
-			.flatten()
+			.sorted_by_key(|&(idx, _)| idx)
+			.filter_map(|(_, arg)| arg)
 			.collect::<Vec<_>>();
 
 		let (program, args) = args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
