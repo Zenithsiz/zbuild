@@ -4,6 +4,7 @@
 use {
 	std::{
 		env::{self, VarError},
+		fs,
 		path::Path,
 	},
 	tracing::metadata::LevelFilter,
@@ -26,7 +27,7 @@ pub fn init(log_file: Option<&Path>) {
 	// Create the file layer, if requested
 	let file_layer = log_file.and_then(|log_file| {
 		// Try to create the file
-		let file = match std::fs::File::create(log_file) {
+		let file = match fs::File::create(log_file) {
 			Ok(file) => file,
 			Err(err) => {
 				warnings.push(format!("Unable to create log file: {err}"));

@@ -7,7 +7,8 @@ use {
 	pin_project::pin_project,
 	std::{
 		borrow::Cow,
-		path::Path,
+		io,
+		path::{self, Path},
 		pin::Pin,
 		task,
 		time::{Duration, Instant},
@@ -30,10 +31,10 @@ pub macro chain {
 }
 
 /// Async `std::fs_try_exists`
-pub async fn fs_try_exists(path: impl AsRef<Path> + Send) -> Result<bool, std::io::Error> {
+pub async fn fs_try_exists(path: impl AsRef<Path> + Send) -> Result<bool, io::Error> {
 	match fs::metadata(path).await {
 		Ok(_) => Ok(true),
-		Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+		Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
 		Err(err) => Err(err),
 	}
 }
@@ -71,7 +72,7 @@ pub async fn try_measure_async<F: Future<Output = Result<T, E>>, T, E>(fut: F) -
 
 /// Normalizes a string path
 pub fn normalize_path(path: &str) -> String {
-	let ends_with_sep = path.ends_with(std::path::MAIN_SEPARATOR_STR);
+	let ends_with_sep = path.ends_with(path::MAIN_SEPARATOR_STR);
 
 	let mut path = Path::new(&path)
 		.normalized()
@@ -82,7 +83,7 @@ pub fn normalize_path(path: &str) -> String {
 	// Note: `npath` doesn't keep `/` at the end, so we have to do it manually
 	match ends_with_sep {
 		true => {
-			path.push_str(std::path::MAIN_SEPARATOR_STR);
+			path.push_str(path::MAIN_SEPARATOR_STR);
 			path
 		},
 		false => path,

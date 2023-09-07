@@ -15,10 +15,12 @@ use {
 	notify::Watcher as _,
 	notify_debouncer_full::Debouncer,
 	std::{
+		io,
 		path::{Path, PathBuf},
 		sync::Arc,
 		time::Duration,
 	},
+	tokio::sync::mpsc,
 	tokio_stream::wrappers::ReceiverStream,
 };
 
@@ -54,7 +56,7 @@ impl<'s> Watcher<'s> {
 		watch_debouncer_timeout_ms: f64,
 	) -> Result<Self, AppError> {
 		// Create the watcher
-		let (fs_event_tx, fs_event_rx) = tokio::sync::mpsc::channel(16);
+		let (fs_event_tx, fs_event_rx) = mpsc::channel(16);
 		let watcher = notify_debouncer_full::new_debouncer(
 			Duration::from_secs_f64(watch_debouncer_timeout_ms / 1000.0),
 			None,
@@ -157,7 +159,7 @@ impl<'s> Watcher<'s> {
 						Err(err) => {
 							// TODO: Warn on all occasions once this code path isn't hit
 							//       by random files that aren't actually dependencies.
-							if err.kind() != std::io::ErrorKind::NotFound {
+							if err.kind() != io::ErrorKind::NotFound {
 								tracing::warn!(?path, ?err, "Unable to canonicalize");
 							}
 							return;

@@ -693,6 +693,10 @@ impl<'s> Builder<'s> {
 
 		// If we capture pipe stdout, do it
 		if capture_stdout {
+			#[expect(
+				clippy::absolute_paths,
+				reason = "We're already using a `process` (`tokio::process`)"
+			)]
 			os_cmd.stdout(std::process::Stdio::piped());
 		}
 
@@ -801,7 +805,11 @@ async fn rule_last_build_time<'s>(rule: &Rule<'s, CowStr<'s>>) -> Result<Option<
 }
 
 /// Returns the file modified time
-#[expect(clippy::needless_pass_by_value)] // We use it in `.map`, which makes it convenient to receive by value
+#[expect(
+	clippy::needless_pass_by_value,
+	reason = "We use it in `.map`, which makes it convenient to receive by value"
+)]
+#[expect(clippy::absolute_paths, reason = "We're already using a `fs` (`tokio::fs`)")]
 fn file_modified_time(metadata: std::fs::Metadata) -> SystemTime {
 	let file_time = FileTime::from_last_modification_time(&metadata);
 	let unix_offset = Duration::new(

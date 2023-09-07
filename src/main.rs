@@ -38,8 +38,10 @@ use {
 		borrow::Cow,
 		collections::HashMap,
 		env,
+		fmt,
 		fs,
 		path::{Path, PathBuf},
+		thread,
 		time::{Duration, SystemTime},
 	},
 	util::CowStr,
@@ -69,7 +71,7 @@ async fn main() -> Result<(), anyhow::Error> {
 	let zbuild_path = zbuild_path.file_name().expect("Zbuild path had no file name");
 	let zbuild_path = Path::new(zbuild_path);
 	tracing::debug!(?zbuild_dir, "Moving to zbuild directory");
-	std::env::set_current_dir(zbuild_dir).map_err(AppError::set_current_dir(zbuild_dir))?;
+	env::set_current_dir(zbuild_dir).map_err(AppError::set_current_dir(zbuild_dir))?;
 
 	// Parse the ast
 	let zbuild_file = fs::read_to_string(zbuild_path).map_err(AppError::read_file(&zbuild_path))?;
@@ -88,7 +90,7 @@ async fn main() -> Result<(), anyhow::Error> {
 			1
 		},
 		Some(jobs) => jobs,
-		None => std::thread::available_parallelism()
+		None => thread::available_parallelism()
 			.map_err(AppError::get_default_jobs())?
 			.into(),
 	};
@@ -191,7 +193,7 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 }
 
 /// Builds a target.
-async fn build_target<'s, T: BuildableTargetInner<'s> + std::fmt::Display + std::fmt::Debug>(
+async fn build_target<'s, T: BuildableTargetInner<'s> + fmt::Display + fmt::Debug>(
 	builder: &Builder<'s>,
 	target: &rules::Target<'s, T>,
 	rules: &Rules<'s>,

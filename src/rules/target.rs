@@ -9,6 +9,7 @@ use {
 		collections::HashMap,
 		fmt,
 		hash::{Hash, Hasher},
+		mem,
 	},
 };
 
@@ -62,7 +63,7 @@ impl<'s> Target<'s, Expr<'s>> {
 
 impl<T: Hash + Ord> Hash for Target<'_, T> {
 	fn hash<H: Hasher>(&self, state: &mut H) {
-		core::mem::discriminant(self).hash(state);
+		mem::discriminant(self).hash(state);
 		match self {
 			Self::File { file, is_static } => {
 				file.hash(state);

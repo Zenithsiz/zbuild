@@ -125,6 +125,7 @@ clippy.missing_const_for_fn = "allow"
 clippy.significant_drop_in_scrutinee = "allow"
 clippy.significant_drop_tightening = "allow"
 clippy.tests_outside_test_module = "allow"     # Triggers for benches
+clippy.multiple_unsafe_ops_per_block = "allow" # Triggers for async?
 
 # Style
 clippy.implicit_return = "allow"

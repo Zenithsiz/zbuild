@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	crate::rules::{AliasOp, Command, Expr, Target},
+	crate::rules::{self, AliasOp, Command, Expr, Target},
 	itertools::Itertools,
 	std::{fmt, io, path::PathBuf, process::ExitStatusError, sync::Arc},
 };
@@ -401,8 +401,8 @@ impl AppError {
 			.args
 			.iter()
 			.map(|arg| match arg {
-				crate::rules::CommandArg::Expr(expr) => format!("\"{expr}\""),
-				crate::rules::CommandArg::Command { cmd, .. } => Self::cmd_to_string(cmd),
+				rules::CommandArg::Expr(expr) => format!("\"{expr}\""),
+				rules::CommandArg::Command { cmd, .. } => Self::cmd_to_string(cmd),
 			})
 			.join(" ");
 		format!("[{inner}]")
