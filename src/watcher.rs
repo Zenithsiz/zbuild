@@ -53,28 +53,24 @@ impl<'s> Watcher<'s> {
 	/// Creates a new watcher
 	pub fn new(
 		builder_event_rx: async_broadcast::Receiver<build::Event<'s>>,
-		watch_debouncer_timeout_ms: f64,
+		debouncer_timeout: Duration,
 	) -> Result<Self, AppError> {
 		// Create the watcher
 		let (fs_event_tx, fs_event_rx) = mpsc::channel(16);
-		let watcher = notify_debouncer_full::new_debouncer(
-			Duration::from_secs_f64(watch_debouncer_timeout_ms / 1000.0),
-			None,
-			move |fs_events| match fs_events {
-				Ok(fs_events) =>
-					for fs_event in fs_events {
-						tracing::trace!(?fs_event, "Watcher fs event");
+		let watcher = notify_debouncer_full::new_debouncer(debouncer_timeout, None, move |fs_events| match fs_events {
+			Ok(fs_events) =>
+				for fs_event in fs_events {
+					tracing::trace!(?fs_event, "Watcher fs event");
 
-						// Note: We don't care if it succeeded or not
-						#[expect(let_underscore_drop, clippy::let_underscore_must_use)]
-						let _: Result<(), _> = fs_event_tx.blocking_send(fs_event);
-					},
-				Err(errs) =>
-					for err in errs {
-						tracing::warn!(err=?anyhow::Error::from(err), "Error while watching");
-					},
-			},
-		)
+					// Note: We don't care if it succeeded or not
+					#[expect(let_underscore_drop, clippy::let_underscore_must_use)]
+					let _: Result<(), _> = fs_event_tx.blocking_send(fs_event);
+				},
+			Err(errs) =>
+				for err in errs {
+					tracing::warn!(err=?anyhow::Error::from(err), "Error while watching");
+				},
+		})
 		.context("Unable to create file watcher")
 		.map_err(AppError::Other)?;
 

@@ -49,7 +49,7 @@ pub struct Args {
 
 	/// Watcher file event debouncer timeout
 	#[clap(long = "watcher-debouncer-timeout-ms")]
-	pub watch_debouncer_timeout_ms: Option<f64>,
+	pub watcher_debouncer_timeout_ms: Option<f64>,
 
 	/// Logs output to a file.
 	///

@@ -136,11 +136,11 @@ async fn main() -> Result<(), anyhow::Error> {
 	let watcher = args
 		.watch
 		.then(|| {
-			Watcher::new(
-				builder.subscribe_events(),
-				// TODO: Better default?
-				args.watch_debouncer_timeout_ms.unwrap_or(0.0),
-			)
+			// TODO: Better default?
+			let debouncer_timeout_ms = args.watcher_debouncer_timeout_ms.unwrap_or(0.0);
+			let debouncer_timeout = { Duration::from_secs_f64(debouncer_timeout_ms / 1000.0) };
+
+			Watcher::new(builder.subscribe_events(), debouncer_timeout)
 		})
 		.transpose()?;
 
