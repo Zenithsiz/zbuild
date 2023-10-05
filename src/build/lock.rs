@@ -3,7 +3,7 @@
 // Imports
 use {
 	crate::{rules::Target, util::CowStr, AppError},
-	std::{collections::HashMap, sync::Arc, time::SystemTime},
+	std::{assert_matches::assert_matches, collections::HashMap, sync::Arc, time::SystemTime},
 	tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock},
 };
 
@@ -100,7 +100,8 @@ impl<'s> BuildLockBuildGuard<'s> {
 
 	/// Resets this build.
 	pub fn reset(&mut self, target: &Target<'s, CowStr<'s>>) {
-		self.state.targets_res.remove(target);
+		// Note: We don't care about the previous build result
+		let _: Option<Result<BuildResult, _>> = self.state.targets_res.remove(target);
 	}
 
 	/// Finishes a build
@@ -110,7 +111,8 @@ impl<'s> BuildLockBuildGuard<'s> {
 		res: Result<BuildResult, AppError>,
 	) -> Result<BuildResult, AppError> {
 		let res = res.map_err(Arc::new);
-		self.state.targets_res.insert(target.clone(), res.clone());
+		let prev_res = self.state.targets_res.insert(target.clone(), res.clone());
+		assert_matches!(prev_res, None, "Build was already finished");
 		res.map_err(AppError::Shared)
 	}
 }

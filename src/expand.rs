@@ -4,26 +4,29 @@
 use {
 	crate::{
 		error::AppError,
-		rules::{AliasOp, Command, DepItem, Exec, Expr, ExprCmpt, OutItem, Rule, Target},
+		rules::{AliasOp, Command, CommandArg, DepItem, Exec, Expr, ExprCmpt, OutItem, Rule, Target},
 		util::CowStr,
 	},
 	itertools::Itertools,
-	std::path::PathBuf,
+	std::{marker::PhantomData, path::PathBuf},
 };
 
 /// Expander
 #[derive(Debug)]
-pub struct Expander;
+pub struct Expander<'s> {
+	/// Phantom for `'s`
+	_phantom: PhantomData<&'s ()>,
+}
 
 #[expect(clippy::unused_self)] // Currently expander doesn't do anything
-impl Expander {
+impl<'s> Expander<'s> {
 	/// Creates a new expander
 	pub const fn new() -> Self {
-		Self
+		Self { _phantom: PhantomData }
 	}
 
 	/// Expands an expression to it's components
-	pub fn expand_expr<'s>(&self, expr: &Expr<'s>, visitor: &mut impl Visitor<'s>) -> Result<Expr<'s>, AppError> {
+	pub fn expand_expr(&self, expr: &Expr<'s>, visitor: &mut impl Visitor<'s>) -> Result<Expr<'s>, AppError> {
 		// Go through all components
 		let cmpts = expr
 			.cmpts
@@ -104,11 +107,7 @@ impl Expander {
 	}
 
 	/// Expands an expression into a string
-	pub fn expand_expr_string<'s>(
-		&self,
-		expr: &Expr<'s>,
-		visitor: &mut impl Visitor<'s>,
-	) -> Result<CowStr<'s>, AppError> {
+	pub fn expand_expr_string(&self, expr: &Expr<'s>, visitor: &mut impl Visitor<'s>) -> Result<CowStr<'s>, AppError> {
 		let expr_cmpts = self.expand_expr(expr, visitor)?.cmpts.into_boxed_slice();
 		let res = match Box::<[_; 0]>::try_from(expr_cmpts) {
 			Ok(box []) => Ok("".into()),
@@ -148,7 +147,7 @@ impl Expander {
 	}
 
 	/// Expands a rule of all it's aliases and patterns
-	pub fn expand_rule<'s>(
+	pub fn expand_rule(
 		&self,
 		rule: &Rule<'s, Expr<'s>>,
 		visitor: &mut impl Visitor<'s>,
@@ -210,25 +209,11 @@ impl Expander {
 			.collect::<Result<_, _>>()?;
 
 		let exec = Exec {
-			cwd:  rule
-				.exec
-				.cwd
-				.as_ref()
-				.map(|cwd| self.expand_expr_string(cwd, visitor))
-				.transpose()?,
 			cmds: rule
 				.exec
 				.cmds
 				.iter()
-				.map(|cmd| {
-					Ok(Command {
-						args: cmd
-							.args
-							.iter()
-							.map(|arg| self.expand_expr_string(arg, visitor))
-							.collect::<Result<_, _>>()?,
-					})
-				})
+				.map(|cmd| self.expand_cmd(cmd, visitor))
 				.collect::<Result<_, _>>()?,
 		};
 
@@ -241,8 +226,37 @@ impl Expander {
 		})
 	}
 
+	/// Expands a command
+	pub fn expand_cmd(
+		&self,
+		cmd: &Command<Expr<'s>>,
+		visitor: &mut impl Visitor<'s>,
+	) -> Result<Command<CowStr<'s>>, AppError> {
+		Ok(Command {
+			cwd:  cmd
+				.cwd
+				.as_ref()
+				.map(|cwd| self.expand_expr_string(cwd, visitor))
+				.transpose()?,
+			args: cmd
+				.args
+				.iter()
+				.map(|arg| {
+					let arg = match *arg {
+						CommandArg::Expr(ref expr) => CommandArg::Expr(self.expand_expr_string(expr, visitor)?),
+						CommandArg::Command { strip_on_fail, ref cmd } => CommandArg::Command {
+							strip_on_fail,
+							cmd: self.expand_cmd(cmd, visitor)?,
+						},
+					};
+					Ok(arg)
+				})
+				.collect::<Result<_, _>>()?,
+		})
+	}
+
 	/// Expands a target expression
-	pub fn expand_target<'s>(
+	pub fn expand_target(
 		&self,
 		target: &Target<'s, Expr<'s>>,
 		visitor: &mut impl Visitor<'s>,

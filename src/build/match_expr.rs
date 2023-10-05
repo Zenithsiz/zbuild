@@ -7,7 +7,7 @@ use {
 		util::CowStr,
 		AppError,
 	},
-	std::collections::HashMap,
+	std::{assert_matches::assert_matches, collections::HashMap},
 };
 
 /// Returns if `value` matches all `cmpts` and returns all patterns resolved
@@ -65,7 +65,8 @@ pub fn match_expr<'s>(
 
 				// If we get here, match everything
 				// TODO: Borrow some cases?
-				patterns.insert(CowStr::Borrowed(pat.name), CowStr::Owned(value.to_owned()));
+				let prev_value = patterns.insert(CowStr::Borrowed(pat.name), CowStr::Owned(value.to_owned()));
+				assert_matches!(prev_value, None, "Found repeated pattern");
 				cur_cmpts = &[];
 				value = "";
 			},

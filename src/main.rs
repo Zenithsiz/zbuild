@@ -11,8 +11,11 @@
 	async_fn_in_trait,
 	yeet_expr,
 	must_not_suspend,
-	strict_provenance
+	strict_provenance,
+	assert_matches
 )]
+// Lints
+#![allow(clippy::print_stdout, reason = "We're a binary that should talk to the user")]
 
 // Modules
 mod args;
@@ -35,8 +38,10 @@ use {
 		borrow::Cow,
 		collections::HashMap,
 		env,
+		fmt,
 		fs,
 		path::{Path, PathBuf},
+		thread,
 		time::{Duration, SystemTime},
 	},
 	util::CowStr,
@@ -66,10 +71,10 @@ async fn main() -> Result<(), anyhow::Error> {
 	let zbuild_path = zbuild_path.file_name().expect("Zbuild path had no file name");
 	let zbuild_path = Path::new(zbuild_path);
 	tracing::debug!(?zbuild_dir, "Moving to zbuild directory");
-	std::env::set_current_dir(zbuild_dir).map_err(AppError::set_current_dir(zbuild_dir))?;
+	env::set_current_dir(zbuild_dir).map_err(AppError::set_current_dir(zbuild_dir))?;
 
 	// Parse the ast
-	let zbuild_file = fs::read_to_string(&zbuild_path).map_err(AppError::read_file(&zbuild_path))?;
+	let zbuild_file = fs::read_to_string(zbuild_path).map_err(AppError::read_file(&zbuild_path))?;
 	tracing::trace!(?zbuild_file, "Read zbuild.yaml");
 	let ast = serde_yaml::from_str::<Ast<'_>>(&zbuild_file).map_err(AppError::parse_yaml(&zbuild_path))?;
 	tracing::trace!(?ast, "Parsed ast");
@@ -85,7 +90,7 @@ async fn main() -> Result<(), anyhow::Error> {
 			1
 		},
 		Some(jobs) => jobs,
-		None => std::thread::available_parallelism()
+		None => thread::available_parallelism()
 			.map_err(AppError::get_default_jobs())?
 			.into(),
 	};
@@ -115,7 +120,7 @@ async fn main() -> Result<(), anyhow::Error> {
 					// If there was a rule, use it without any patterns
 					// TODO: If it requires patterns maybe error out here?
 					|rule| rules::Target::Rule {
-						rule: rules::Expr::string(rule.name.to_string()),
+						rule: rules::Expr::string(rule.name.to_owned()),
 						pats: HashMap::new(),
 					},
 				)
@@ -131,11 +136,11 @@ async fn main() -> Result<(), anyhow::Error> {
 	let watcher = args
 		.watch
 		.then(|| {
-			Watcher::new(
-				builder.subscribe_events(),
-				// TODO: Better default?
-				args.watch_debouncer_timeout_ms.unwrap_or(0.0),
-			)
+			// TODO: Better default?
+			let debouncer_timeout_ms = args.watcher_debouncer_timeout_ms.unwrap_or(0.0);
+			let debouncer_timeout = { Duration::from_secs_f64(debouncer_timeout_ms / 1000.0) };
+
+			Watcher::new(builder.subscribe_events(), debouncer_timeout)
 		})
 		.transpose()?;
 
@@ -188,8 +193,7 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 }
 
 /// Builds a target.
-#[expect(clippy::future_not_send)] // Auto-traits are propagated (TODO: Maybe? Check if this is true)
-async fn build_target<'s, T: BuildableTargetInner<'s> + std::fmt::Display + std::fmt::Debug>(
+async fn build_target<'s, T: BuildableTargetInner<'s> + fmt::Display + fmt::Debug>(
 	builder: &Builder<'s>,
 	target: &rules::Target<'s, T>,
 	rules: &Rules<'s>,
@@ -213,7 +217,7 @@ async fn build_target<'s, T: BuildableTargetInner<'s> + std::fmt::Display + std:
 				println!("{target}");
 			};
 		},
-		Err(err) => tracing::error!(?target, err=?anyhow::Error::new(err), "Unable to build target"),
+		Err(err) => tracing::error!(%target, err=?anyhow::Error::new(err), "Unable to build target"),
 	}
 }
 

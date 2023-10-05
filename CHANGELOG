@@ -1,0 +1,15 @@
+# 0.1.2
+
+## Major
+
+- Added commands within commands. Arguments to commands may now be commands themselves. The stdout of the command will be captured and passed as the argument.
+
+- (BREAKING) Working directory is now for each command, rather than for the executable section
+
+## Minor
+
+- (BREAKING) Option `--file-log` is now `--log-file`
+
+- Parent directories of built files now watched to ensure that deleted files are still properly watched.
+
+  This may cause some slowdowns if you're watching a file in a directory with a lot of movement, but it otherwise fixes some files randomly not being watched.

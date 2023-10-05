@@ -15,10 +15,12 @@ use {
 	notify::Watcher as _,
 	notify_debouncer_full::Debouncer,
 	std::{
+		io,
 		path::{Path, PathBuf},
 		sync::Arc,
 		time::Duration,
 	},
+	tokio::sync::mpsc,
 	tokio_stream::wrappers::ReceiverStream,
 };
 
@@ -51,26 +53,24 @@ impl<'s> Watcher<'s> {
 	/// Creates a new watcher
 	pub fn new(
 		builder_event_rx: async_broadcast::Receiver<build::Event<'s>>,
-		watch_debouncer_timeout_ms: f64,
+		debouncer_timeout: Duration,
 	) -> Result<Self, AppError> {
 		// Create the watcher
-		let (fs_event_tx, fs_event_rx) = tokio::sync::mpsc::channel(16);
-		let watcher = notify_debouncer_full::new_debouncer(
-			Duration::from_secs_f64(watch_debouncer_timeout_ms / 1000.0),
-			None,
-			move |fs_events| match fs_events {
-				Ok(fs_events) =>
-					for fs_event in fs_events {
-						tracing::trace!(?fs_event, "Watcher fs event");
-						#[expect(let_underscore_drop)] // We don't care if it succeeded or not
-						let _ = fs_event_tx.blocking_send(fs_event);
-					},
-				Err(errs) =>
-					for err in errs {
-						tracing::warn!(err=?anyhow::Error::from(err), "Error while watching");
-					},
-			},
-		)
+		let (fs_event_tx, fs_event_rx) = mpsc::channel(16);
+		let watcher = notify_debouncer_full::new_debouncer(debouncer_timeout, None, move |fs_events| match fs_events {
+			Ok(fs_events) =>
+				for fs_event in fs_events {
+					tracing::trace!(?fs_event, "Watcher fs event");
+
+					// Note: We don't care if it succeeded or not
+					#[expect(let_underscore_drop, clippy::let_underscore_must_use)]
+					let _: Result<(), _> = fs_event_tx.blocking_send(fs_event);
+				},
+			Err(errs) =>
+				for err in errs {
+					tracing::warn!(err=?anyhow::Error::from(err), "Error while watching");
+				},
+		})
 		.context("Unable to create file watcher")
 		.map_err(AppError::Other)?;
 
@@ -122,14 +122,16 @@ impl<'s> Watcher<'s> {
 								//       until the root, and by that point we'd just be watching
 								//       all filesystem changes...
 								tracing::trace!(?dep_path, "Starting to watch path");
-								if let Err(err) = self.watcher.watcher().watch(
-									&dep_path.parent().unwrap_or(&dep_path),
-									notify::RecursiveMode::Recursive,
-								) {
-									tracing::warn!(?dep_path, ?err, "Unable to watch path")
+								if let Err(err) = self
+									.watcher
+									.watcher()
+									.watch(dep_path.parent().unwrap_or(&dep_path), notify::RecursiveMode::Recursive)
+								{
+									tracing::warn!(?dep_path, ?err, "Unable to watch path");
 								}
 
-								rev_deps
+								// Note: We don't care if we add a duplicate target
+								let _: bool = rev_deps
 									.entry(dep_path)
 									.or_insert_with(|| RevDep {
 										target:  dep,
@@ -153,7 +155,7 @@ impl<'s> Watcher<'s> {
 						Err(err) => {
 							// TODO: Warn on all occasions once this code path isn't hit
 							//       by random files that aren't actually dependencies.
-							if err.kind() != std::io::ErrorKind::NotFound {
+							if err.kind() != io::ErrorKind::NotFound {
 								tracing::warn!(?path, ?err, "Unable to canonicalize");
 							}
 							return;
@@ -182,7 +184,7 @@ impl<'s> Watcher<'s> {
 							builder
 								.reset_build(&rev_dep.target, rules)
 								.await
-								.expect("Unable to reset existing build")
+								.expect("Unable to reset existing build");
 						},
 						dep_parents
 							.iter()

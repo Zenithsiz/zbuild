@@ -16,22 +16,24 @@ use {
 		match_expr::match_expr,
 	},
 	crate::{
-		rules::{DepItem, Expr, OutItem, Rule, Target},
+		rules::{Command, CommandArg, DepItem, Expr, OutItem, Rule, Target},
 		util::{self, CowStr},
 		AppError,
 		Expander,
 		Rules,
 	},
+	anyhow::Context,
 	dashmap::DashMap,
 	filetime::FileTime,
 	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
 	itertools::Itertools,
 	std::{
+		borrow::Cow,
 		collections::HashMap,
 		mem,
 		time::{Duration, SystemTime},
 	},
-	tokio::{fs, process::Command, sync::Semaphore},
+	tokio::{fs, process, sync::Semaphore},
 };
 
 // TODO: If the user zbuild file is not generated properly, it can
@@ -73,7 +75,7 @@ pub struct Builder<'s> {
 	_event_rx: async_broadcast::InactiveReceiver<Event<'s>>,
 
 	/// Expander
-	expander: Expander,
+	expander: Expander<'s>,
 
 	/// All rules' build lock
 	rules_lock: DashMap<TargetRule<'s>, BuildLock<'s>>,
@@ -110,7 +112,9 @@ impl<'s> Builder<'s> {
 		// Note: We only send them if there are any receivers (excluding ours, which is inactive),
 		//       to ensure we don't deadlock waiting for someone to read the events
 		if self.event_tx.receiver_count() > 0 {
-			self.event_tx
+			// Note: We don't care about the event
+			let _: Option<Event<'_>> = self
+				.event_tx
 				.broadcast(make_event())
 				.await
 				.expect("Event channel was closed");
@@ -171,7 +175,9 @@ impl<'s> Builder<'s> {
 	/// Resets a build
 	pub async fn reset_build(&self, target: &Target<'s, CowStr<'s>>, rules: &Rules<'s>) -> Result<(), AppError> {
 		// Get the rule for the target
-		let Some((_, target_rule)) = self.target_rule(target, rules)? else { return Ok(()) };
+		let Some((_, target_rule)) = self.target_rule(target, rules)? else {
+			return Ok(());
+		};
 
 		// Get the built lock, or create it
 		// Note: Important to clone since we'll be `await`ing with it.
@@ -223,9 +229,8 @@ impl<'s> Builder<'s> {
 		};
 
 		// Get the rule for the target
-		let (rule, target_rule) = match self.target_rule(&target, rules)? {
-			Some((rule, target_rule)) => (rule, target_rule),
-			None => match target {
+		let Some((rule, target_rule)) = self.target_rule(&target, rules)? else {
+			match target {
 				Target::File { ref file, .. } => match fs::metadata(&**file).await {
 					Ok(metadata) => {
 						let build_time = self::file_modified_time(metadata);
@@ -260,7 +265,7 @@ impl<'s> Builder<'s> {
 				},
 				// Note: If `target_rule` returns `Err` if this was a rule, so we can never reach here
 				Target::Rule { .. } => unreachable!(),
-			},
+			}
 		};
 
 		// Get the built lock, or create it
@@ -311,7 +316,6 @@ impl<'s> Builder<'s> {
 	) -> Result<BuildResult, AppError> {
 		/// Dependency
 		#[derive(Clone, Debug)]
-		#[expect(clippy::missing_docs_in_private_items)]
 		enum Dep<'s, 'a> {
 			/// File
 			File {
@@ -455,6 +459,7 @@ impl<'s> Builder<'s> {
 					};
 
 					// If the dependency if a dependency deps file or an output deps file (and exists), build it's dependencies too
+					#[allow(clippy::wildcard_enum_match_arm, reason = "We only care about some variants")]
 					let dep_deps = match &dep {
 						Dep::File {
 							file,
@@ -619,39 +624,105 @@ impl<'s> Builder<'s> {
 	/// Rebuilds a rule
 	pub async fn rebuild_rule(&self, rule: &Rule<'s, CowStr<'s>>) -> Result<(), AppError> {
 		// Lock the semaphore
-		let _permit = self.exec_semaphore.acquire().await;
+		let _permit = self
+			.exec_semaphore
+			.acquire()
+			.await
+			.context("Executable semaphore was closed")
+			.map_err(AppError::Other)?;
 
 		for cmd in &rule.exec.cmds {
-			let (program, args) = cmd.args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
-				rule_name: rule.name.to_owned(),
-			})?;
-
-			// Create the command
-			let mut os_cmd = Command::new(&**program);
-			os_cmd.args(args.iter().map(|arg| &**arg));
-
-			// Set the working directory, if we have any
-			if let Some(cwd) = &rule.exec.cwd {
-				os_cmd.current_dir(&**cwd);
-			}
-
-			// Then spawn it and measure
-			tracing::debug!(target: "zbuild_exec", "{} {}", program, args.join(" "));
-			let (duration, ()) = util::try_measure_async(async {
-				os_cmd
-					.spawn()
-					.map_err(AppError::spawn_command(cmd))?
-					.wait()
-					.await
-					.map_err(AppError::wait_command(cmd))?
-					.exit_ok()
-					.map_err(AppError::command_failed(cmd))
-			})
-			.await?;
-			tracing::trace!(target: "zbuild_exec", rule_name=?rule.name, ?program, ?args, ?duration, "Execution duration");
+			// Note: We don't care about the stdout here and don't capture it anyway.
+			let _: String = self.exec_cmd(rule.name, cmd, false).await?;
 		}
 
 		Ok(())
+	}
+
+	/// Executes a command, returning it's stdout
+	#[expect(unused_results, reason = "Due to the builder pattern of `Command`")]
+	#[expect(clippy::only_used_in_recursion, reason = "It might be used in the future")]
+	#[async_recursion::async_recursion]
+	async fn exec_cmd(
+		&self,
+		rule_name: &str,
+		cmd: &Command<CowStr<'s>>,
+		capture_stdout: bool,
+	) -> Result<String, AppError> {
+		// Process all arguments
+		// Note: When recursing, always capture stdout
+		let args = cmd
+			.args
+			.iter()
+			.map(async move |arg| match arg {
+				CommandArg::Expr(arg) => Ok(Some(Cow::Borrowed(&**arg))),
+				CommandArg::Command { strip_on_fail, cmd } => {
+					let res = self.exec_cmd(rule_name, cmd, true).await;
+					match (res, strip_on_fail) {
+						(Ok(arg), _) => Ok(Some(Cow::Owned(arg))),
+						(Err(err), true) => {
+							tracing::debug!(?arg, ?err, "Stripping argument from failure");
+							Ok(None)
+						},
+						(Err(err), false) => Err(err),
+					}
+				},
+			})
+			.enumerate()
+			.map(async move |(idx, fut)| fut.await.map(|arg| (idx, arg)))
+			.collect::<FuturesUnordered<_>>()
+			.try_collect::<Vec<_>>()
+			.await?
+			.into_iter()
+			.sorted_by_key(|&(idx, _)| idx)
+			.filter_map(|(_, arg)| arg)
+			.collect::<Vec<_>>();
+
+		let (program, args) = args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
+			rule_name: rule_name.to_owned(),
+		})?;
+
+		// Create the command
+		let mut os_cmd = process::Command::new(&**program);
+		os_cmd.args(args.iter().map(|arg| &**arg));
+
+		// Set the working directory, if we have any
+		if let Some(cwd) = &cmd.cwd {
+			os_cmd.current_dir(&**cwd);
+		}
+
+		// If we capture pipe stdout, do it
+		if capture_stdout {
+			#[expect(
+				clippy::absolute_paths,
+				reason = "We're already using a `process` (`tokio::process`)"
+			)]
+			os_cmd.stdout(std::process::Stdio::piped());
+		}
+
+		// Then spawn it and measure
+		tracing::debug!(target: "zbuild_exec", "{} {}", program, args.join(" "));
+		let (duration, stdout) = util::try_measure_async(async {
+			let output = os_cmd
+				.spawn()
+				.map_err(AppError::spawn_command(cmd))?
+				.wait_with_output()
+				.await
+				.map_err(AppError::wait_command(cmd))?;
+
+			output.status.exit_ok().map_err(AppError::command_failed(cmd))?;
+			Ok(output.stdout)
+		})
+		.await?;
+		tracing::trace!(target: "zbuild_exec", ?rule_name, ?program, ?args, ?duration, "Execution duration");
+
+		// Finally parse stdout
+		// TODO: Not require utf8?
+		let stdout = String::from_utf8(stdout)
+			.context("Stdout was non-utf8")
+			.map_err(AppError::Other)?;
+
+		Ok(stdout)
 	}
 
 	/// Finds a rule for `file`
@@ -734,7 +805,11 @@ async fn rule_last_build_time<'s>(rule: &Rule<'s, CowStr<'s>>) -> Result<Option<
 }
 
 /// Returns the file modified time
-#[expect(clippy::needless_pass_by_value)] // We use it in `.map`, which makes it convenient to receive by value
+#[expect(
+	clippy::needless_pass_by_value,
+	reason = "We use it in `.map`, which makes it convenient to receive by value"
+)]
+#[expect(clippy::absolute_paths, reason = "We're already using a `fs` (`tokio::fs`)")]
 fn file_modified_time(metadata: std::fs::Metadata) -> SystemTime {
 	let file_time = FileTime::from_last_modification_time(&metadata);
 	let unix_offset = Duration::new(
