@@ -154,7 +154,7 @@ You may specify the execution as either:
 
    You may not specify any options (such as the working directory) using this form
 
-   ```
+   ```yaml
    exec:
      - [bash, ...]
      - [cp, ...]
@@ -165,13 +165,57 @@ You may specify the execution as either:
 
    The full form allow you to fully specify everything, but you must put the arguments of each command within an inner `args` key.
 
-   ```
+   ```yaml
    exec:
-      - cwd: "..."
-        args: [bash, ...]
-      - [cp, ...]
-      - ...
+     - cwd: "..."
+       args: [bash, ...]
+     - [cp, ...]
+     - ...
    ```
+
+Each argument may also be a command. The `stdout` of the sub-command will be passed as the argument to the parent command. Supports the following versions:
+
+1. Short form
+
+   Similarly to top-level exec, you may just specify an array
+
+   ```yaml
+   exec:
+     - - cat
+       - pwd: ".."
+         args: [find, ".", -iname, "myfile.txt"]
+   ```
+
+2. Long form
+
+   ```yaml
+   exec:
+     - - cat
+       - strip_on_fail: false
+         cmd:
+           pwd: ".."
+           args: [find, ".", -iname, "myfile.txt"]
+   ```
+
+3. Special case for `strip_on_fail`
+
+   ```yaml
+   exec:
+     - - cat
+       - strip_on_fail:
+           pwd: ".."
+           args: [find, ".", -iname, "myfile.txt"]
+   ```
+
+`strip_on_fail` will strip the argument if the command within it fails. This is useful for optional arguments.
+
+The example uses the full syntax for the inner command, but you can use the short syntax. For example the following works:
+
+```yaml
+exec:
+  - - cat
+    - [find, ".", -iname, "myfile.txt"]
+```
 
 ## Aliases
 
