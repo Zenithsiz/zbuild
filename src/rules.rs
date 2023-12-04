@@ -10,10 +10,10 @@ mod target;
 
 // Exports
 pub use {
-	alias::{Alias, AliasOp},
+	alias::AliasOp,
 	expr::{Expr, ExprCmpt},
 	item::{DepItem, OutItem},
-	pattern::{Pattern, PatternOp},
+	pattern::PatternOp,
 	rule::{Command, CommandArg, Exec, Rule},
 	target::Target,
 };
