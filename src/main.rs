@@ -8,7 +8,6 @@
 	async_closure,
 	let_chains,
 	lint_reasons,
-	async_fn_in_trait,
 	yeet_expr,
 	must_not_suspend,
 	strict_provenance,
