@@ -96,7 +96,9 @@ impl<'s> Watcher<'s> {
 								// TODO: If the event is a removal event, we might care about a removal, or should
 								//       we enforce to the user that static items really should live for as long as
 								//       zbuild lives for?
-								if let Target::File { is_static, .. } = dep && is_static {
+								if let Target::File { is_static, .. } = dep &&
+									is_static
+								{
 									return;
 								}
 
@@ -112,21 +114,16 @@ impl<'s> Watcher<'s> {
 									Target::Rule { .. } => return,
 								};
 
-								// Watch the path
-								// Note: We watch the parent recursively to ensure we catch
-								//       removed files that are then re-created.
-								// TODO: This is a hack, rework this somehow without any
-								//       races.
-								// TODO: This hack doesn't work if the parent is also removed.
-								//       We can't also watch it, since we'd need to that recursively
-								//       until the root, and by that point we'd just be watching
-								//       all filesystem changes...
+								// Watch the path's parent
+								// Note: We do this since we may not receive events if the file is deleted,
+								//       but by watching the parent directory, we ensure we get it.
+								// TODO: Is this enough? What if the parent directory also gets deleted?
+								//       should we watch directories until the root?
 								tracing::trace!(?dep_path, "Starting to watch path");
-								if let Err(err) = self
-									.watcher
-									.watcher()
-									.watch(dep_path.parent().unwrap_or(&dep_path), notify::RecursiveMode::Recursive)
-								{
+								if let Err(err) = self.watcher.watcher().watch(
+									dep_path.parent().unwrap_or(&dep_path),
+									notify::RecursiveMode::NonRecursive,
+								) {
 									tracing::warn!(?dep_path, ?err, "Unable to watch path");
 								}
 
