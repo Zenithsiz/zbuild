@@ -107,6 +107,7 @@ clippy.min_ident_chars = "allow"          # Useful for generics such as `f: impl
 clippy.single_call_fn = "allow"           # It's still useful to separate blocks of code into functions
 clippy.float_arithmetic = "allow"
 clippy.default_numeric_fallback = "allow" # TODO: This isn't very useful for floats, but might be for integers
+clippy.struct_field_names = "allow"
 
 # We prefer the short version
 clippy.pub_with_shorthand = "allow"
