@@ -202,7 +202,10 @@ impl<'s> Watcher<'s> {
 					//       get rebuilt.
 					dep_parents
 						.iter()
-						.map(|target| crate::build_target(builder, target, rules, ignore_missing))
+						.map(|target| async {
+							#[expect(clippy::let_underscore_must_use, reason = "We don't care if the build succeeds")]
+							let _: Result<(), _> = crate::build_target(builder, target, rules, ignore_missing).await;
+						})
 						.collect::<FuturesUnordered<_>>()
 						.collect::<()>()
 						.await;

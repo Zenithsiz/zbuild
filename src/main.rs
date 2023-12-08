@@ -30,6 +30,7 @@ mod watcher;
 // Imports
 use {
 	self::{ast::Ast, build::Builder, error::AppError, expand::Expander, rules::Rules},
+	anyhow::Context,
 	args::Args,
 	clap::Parser,
 	futures::{stream::FuturesUnordered, StreamExt},
@@ -144,12 +145,18 @@ async fn main() -> Result<(), anyhow::Error> {
 		.transpose()?;
 
 	// Finally build all targets and start watching
-	futures::join!(
-		targets_to_build
-			.iter()
-			.map(|target| self::build_target(&builder, target, &rules, args.ignore_missing))
-			.collect::<FuturesUnordered<_>>()
-			.collect::<()>(),
+	let (build_res, ()) = futures::join!(
+		async {
+			targets_to_build
+				.iter()
+				.map(|target| self::build_target(&builder, target, &rules, args.ignore_missing))
+				.collect::<FuturesUnordered<_>>()
+				.collect::<Vec<Result<(), AppError>>>()
+				.await
+				.into_iter()
+				.collect::<Result<(), AppError>>()
+				.context("Unable to build all targets")
+		},
 		async {
 			if let Some(watcher) = watcher {
 				tracing::info!("Starting to watch for all targets");
@@ -168,7 +175,10 @@ async fn main() -> Result<(), anyhow::Error> {
 	tracing::info!("Built {built_targets} targets");
 	tracing::info!("Checked {total_targets} targets");
 
-	Ok(())
+	match build_res {
+		Ok(()) => Ok(()),
+		Err(_err) => anyhow::bail!("One or more builds failed"),
+	}
 }
 
 /// Finds the nearest zbuild file
@@ -197,7 +207,7 @@ async fn build_target<'s, T: BuildableTargetInner<'s> + fmt::Display + fmt::Debu
 	target: &rules::Target<'s, T>,
 	rules: &Rules<'s>,
 	ignore_missing: bool,
-) {
+) -> Result<(), AppError> {
 	tracing::debug!(%target, "Building target");
 
 	// Try to build the target
@@ -215,8 +225,14 @@ async fn build_target<'s, T: BuildableTargetInner<'s> + fmt::Display + fmt::Debu
 				tracing::debug!("Built target {target} in {build_duration:.2?}");
 				println!("{target}");
 			};
+
+			Ok(())
 		},
-		Err(err) => tracing::error!(%target, err=?anyhow::Error::new(err), "Unable to build target"),
+		Err(err) => {
+			let err = anyhow::Error::new(err);
+			tracing::error!(%target, ?err, "Unable to build target");
+			Err(err.downcast().expect("Should be app error"))
+		},
 	}
 }
 
