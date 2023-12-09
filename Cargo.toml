@@ -108,6 +108,10 @@ clippy.iter_over_hash_type = "allow"
 clippy.pub_with_shorthand = "allow"
 clippy.pub_without_shorthand = "warn"
 
+# We prefer the semicolon inside
+clippy.semicolon_inside_block = "allow"
+clippy.semicolon_outside_block = "deny"
+
 # Style
 clippy.implicit_return = "allow"
 clippy.multiple_inherent_impl = "allow"
@@ -120,9 +124,7 @@ clippy.items_after_statements = "allow"
 clippy.module_name_repetitions = "allow"
 clippy.module_inception = "allow"
 clippy.separated_literal_suffix = "allow"
-# Matching on a vale and adding `ref` is easier than matching on ref and de-referencing values within the body
-clippy.ref_patterns = "allow"
-clippy.semicolon_outside_block = "allow"
+clippy.ref_patterns = "allow"             # Matching on a vale and adding `ref` is easier than matching on ref and de-referencing values within the body
 
 # Performance of floats isn't paramount
 clippy.suboptimal_flops = "allow"
