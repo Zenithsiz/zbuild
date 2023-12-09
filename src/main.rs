@@ -11,10 +11,15 @@
 	yeet_expr,
 	must_not_suspend,
 	strict_provenance,
-	assert_matches
+	assert_matches,
+	try_trait_v2
 )]
 // Lints
-#![allow(clippy::print_stdout, reason = "We're a binary that should talk to the user")]
+#![allow(
+	clippy::print_stdout,
+	clippy::print_stderr,
+	reason = "We're a binary that should talk to the user"
+)]
 
 // Modules
 mod args;
@@ -29,7 +34,13 @@ mod watcher;
 
 // Imports
 use {
-	self::{ast::Ast, build::Builder, error::AppError, expand::Expander, rules::Rules},
+	self::{
+		ast::Ast,
+		build::Builder,
+		error::{AppError, ExitResult},
+		expand::Expander,
+		rules::Rules,
+	},
 	args::Args,
 	clap::Parser,
 	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
@@ -47,11 +58,8 @@ use {
 	watcher::Watcher,
 };
 
-
-// Note: We return an `anyhow::Error` because it has good formatting
-// TODO: Return our own error once we improve formatting?
 #[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+async fn main() -> ExitResult {
 	// Get all args
 	let args = Args::parse();
 
@@ -178,14 +186,14 @@ async fn main() -> Result<(), anyhow::Error> {
 	tracing::info!("Checked {total_targets} targets");
 
 	match failed_targets.is_empty() {
-		true => Ok(()),
+		true => ExitResult::Ok,
 		false => {
 			tracing::error!("One or more builds failed:");
 			for (target, err) in failed_targets {
-				tracing::error!(err=?anyhow::Error::new(err), "Failed to build target {target}");
+				tracing::error!(err=%err.pretty(), "Failed to build target {target}");
 			}
 
-			anyhow::bail!("Exiting with non-0 due to failed builds");
+			ExitResult::Err(AppError::ExitDueToFailedBuilds {})
 		},
 	}
 }
@@ -239,9 +247,8 @@ async fn build_target<'s, T: BuildableTargetInner<'s> + fmt::Display + fmt::Debu
 			Ok(())
 		},
 		Err(err) => {
-			let err = anyhow::Error::new(err);
-			tracing::error!(%target, ?err, "Unable to build target");
-			Err(err.downcast().expect("Should be app error"))
+			tracing::error!(%target, err=%err.pretty(), "Unable to build target");
+			Err(err)
 		},
 	}
 }

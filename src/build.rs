@@ -644,7 +644,7 @@ impl<'s> Builder<'s> {
 					match (res, strip_on_fail) {
 						(Ok(arg), _) => Ok(Some(Cow::Owned(OsString::from_vec(arg)))),
 						(Err(err), true) => {
-							tracing::debug!(?arg, ?err, "Stripping argument from failure");
+							tracing::debug!(?arg, err=%err.pretty(), "Stripping argument from failure");
 							Ok(None)
 						},
 						(Err(err), false) => Err(err),

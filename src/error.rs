@@ -4,7 +4,16 @@
 use {
 	crate::rules::{self, AliasOp, Command, Expr, Target},
 	itertools::Itertools,
-	std::{fmt, io, path::PathBuf, process::ExitStatusError, sync::Arc},
+	std::{
+		convert::Infallible,
+		error::Error as StdError,
+		fmt,
+		io,
+		ops::FromResidual,
+		path::PathBuf,
+		process::{self, ExitStatusError, Termination},
+		sync::Arc,
+	},
 };
 
 /// Generates the error enum
@@ -48,7 +57,9 @@ macro_rules! decl_error {
 					)?
 				)]
 			)?
-			$Variant:ident( $($variant_fmt:tt)* ) {
+			#[source($variant_source:expr)]
+			#[fmt($($variant_fmt:tt)*)]
+			$Variant:ident {
 				$(
 					$( #[$variant_field_meta:meta] )*
 					$variant_field:ident: $VariantField:ty
@@ -58,22 +69,19 @@ macro_rules! decl_error {
 		)*
 	) => {
 		$( #[ $meta ] )*
-		#[derive(Debug, thiserror::Error)]
+		#[derive(Debug)]
 		#[non_exhaustive]
 		pub enum $Name {
 			/// Shared
 			// TODO: Is this a good idea? Should we just use `Arc<AppError>` where relevant?
-			#[error(transparent)]
 			$Shared($SharedTy),
 
 			/// Other
 			// TODO: Removes usages of this, it's for quick prototyping
-			#[error(transparent)]
 			$Other($OtherTy),
 
 			$(
 				$( #[doc = $variant_doc] )*
-				#[error( $($variant_fmt)* )]
 				$Variant {
 					$(
 						$( #[$variant_field_meta] )*
@@ -114,9 +122,44 @@ macro_rules! decl_error {
 					}
 				)?
 			)*
+
+			/// Returns an object that can be used for a pretty display of this error
+			pub const fn pretty(&self) -> PrettyDisplay<'_> {
+				PrettyDisplay(self)
+			}
+		}
+
+		impl StdError for AppError {
+			fn source(&self) -> Option<&(dyn StdError + 'static)> {
+				match self {
+					Self::$Shared(source) => source.source(),
+					Self::$Other(source) => AsRef::<dyn StdError>::as_ref(source).source(),
+					$(
+						#[expect(clippy::allow_attributes, reason = "Auto-generated code")]
+						#[allow(unused_variables, reason = "Auto-generated code")]
+						Self::$Variant { $( $variant_field ),* } => $variant_source,
+					)*
+				}
+			}
+		}
+
+		impl fmt::Display for AppError {
+			fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+				// Display the main message
+				match self {
+					Self::$Shared(source) => source.fmt(f),
+					Self::$Other(source) => source.fmt(f),
+					$(
+						#[expect(clippy::allow_attributes, reason = "Auto-generated code")]
+						#[allow(unused_variables, reason = "Auto-generated code")]
+						Self::$Variant { $( $variant_field ),* } => write!(f, $($variant_fmt)*),
+					)*
+				}
+			}
 		}
 	}
 }
+
 
 decl_error! {
 	/// Test
@@ -126,7 +169,9 @@ decl_error! {
 
 	/// Get current directory
 	#[from_fn( fn get_current_dir(source: io::Error)() )]
-	GetCurrentDir("Unable to get current directory") {
+	#[source(Some(source))]
+	#[fmt("Unable to get current directory")]
+	GetCurrentDir {
 		/// Underlying error
 		source: io::Error
 	},
@@ -137,7 +182,9 @@ decl_error! {
 			dir: P => dir.into()
 		)
 	)]
-	SetCurrentDir("Unable to set current directory to {dir:?}") {
+	#[source(Some(source))]
+	#[fmt("Unable to set current directory to {dir:?}")]
+	SetCurrentDir {
 		/// Underlying error
 		source: io::Error,
 
@@ -151,7 +198,9 @@ decl_error! {
 			file_path: P => file_path.into()
 		)
 	)]
-	ReadFile("Unable to read file {file_path:?}") {
+	#[source(Some(source))]
+	#[fmt("Unable to read file {file_path:?}")]
+	ReadFile {
 		/// Underlying error
 		source: io::Error,
 
@@ -165,7 +214,9 @@ decl_error! {
 			file_path: P => file_path.into()
 		)
 	)]
-	ReadFileMetadata("Unable to read file metadata {file_path:?}") {
+	#[source(Some(source))]
+	#[fmt("Unable to read file metadata {file_path:?}")]
+	ReadFileMetadata {
 		/// Underlying error
 		source: io::Error,
 
@@ -179,7 +230,9 @@ decl_error! {
 			file_path: P => file_path.into()
 		)
 	)]
-	GetFileModifiedTime("Unable to get file modified time {file_path:?}") {
+	#[source(Some(source))]
+	#[fmt("Unable to get file modified time {file_path:?}")]
+	GetFileModifiedTime {
 		/// Underlying error
 		source: io::Error,
 
@@ -193,7 +246,9 @@ decl_error! {
 			file_path: P => file_path.into()
 		)
 	)]
-	CheckFileExists("Unable to check if file exists {file_path:?}") {
+	#[source(Some(source))]
+	#[fmt("Unable to check if file exists {file_path:?}")]
+	CheckFileExists {
 		/// Underlying error
 		source: io::Error,
 
@@ -208,7 +263,9 @@ decl_error! {
 			file_path: P => file_path.into()
 		)
 	)]
-	MissingFile("Missing file {file_path:?} and no rule to build it found") {
+	#[source(Some(source))]
+	#[fmt("Missing file {file_path:?} and no rule to build it found")]
+	MissingFile {
 		/// Underlying error
 		source: io::Error,
 
@@ -222,7 +279,9 @@ decl_error! {
 			yaml_path: P => yaml_path.into()
 		)
 	)]
-	ParseYaml("Unable to parse yaml file {yaml_path:?}") {
+	#[source(Some(source))]
+	#[fmt("Unable to parse yaml file {yaml_path:?}")]
+	ParseYaml {
 		/// Underlying error
 		source: serde_yaml::Error,
 
@@ -236,7 +295,9 @@ decl_error! {
 			cmd: &Command<T> => self::cmd_to_string(cmd)
 		) + '_
 	)]
-	SpawnCommand("Unable to spawn {cmd}") {
+	#[source(Some(source))]
+	#[fmt("Unable to spawn {cmd}")]
+	SpawnCommand {
 		/// Underlying error
 		source: io::Error,
 
@@ -250,7 +311,9 @@ decl_error! {
 			cmd: &Command<T> => self::cmd_to_string(cmd)
 		) + '_
 	)]
-	WaitCommand("Unable to wait for {cmd}") {
+	#[source(Some(source))]
+	#[fmt("Unable to wait for {cmd}")]
+	WaitCommand {
 		/// Underlying error
 		source: io::Error,
 
@@ -264,7 +327,9 @@ decl_error! {
 			cmd: &Command<T> => self::cmd_to_string(cmd)
 		) + '_
 	)]
-	CommandFailed("Command failed {cmd}") {
+	#[source(Some(source))]
+	#[fmt("Command failed {cmd}")]
+	CommandFailed {
 		/// Underlying error
 		source: ExitStatusError,
 
@@ -274,21 +339,22 @@ decl_error! {
 
 	/// Get default jobs
 	#[from_fn( fn get_default_jobs(source: io::Error)() )]
-	GetDefaultJobs("Unable to query system for available parallelism for default number of jobs") {
+	#[source(Some(source))]
+	#[fmt("Unable to query system for available parallelism for default number of jobs")]
+	GetDefaultJobs {
 		/// Underlying error
 		source: io::Error
 	},
 
 	/// Zbuild not found
-	ZBuildNotFound(
-		"No `zbuild.yaml` file found in current or parent directories.\n\
-		You can use `--path {{zbuild-path}}` in order to specify the manifest's path"
-	) {
-
-	},
+	#[source(None)]
+	#[fmt("No `zbuild.yaml` file found in current or parent directories.\nYou can use `--path {{zbuild-path}}` in order to specify the manifest's path")]
+	ZBuildNotFound {},
 
 	/// Path had no parent
-	PathParent("Path had no parent directory {path:?}") {
+	#[source(None)]
+	#[fmt("Path had no parent directory {path:?}")]
+	PathParent {
 		/// Path that had no parent
 		path: PathBuf,
 	},
@@ -299,7 +365,9 @@ decl_error! {
 			target: &'target Target<'_, T> => target.to_string()
 		) + 'target
 	)]
-	BuildTarget("Unable to build target {target}") {
+	#[source(Some(source))]
+	#[fmt("Unable to build target {target}")]
+	BuildTarget {
 		/// Underlying error
 		source: Box<Self>,
 
@@ -313,7 +381,9 @@ decl_error! {
 			rule_name: S => rule_name.into()
 		)
 	)]
-	BuildRule("Unable to build rule {rule_name}") {
+	#[source(Some(source))]
+	#[fmt("Unable to build rule {rule_name}")]
+	BuildRule {
 		/// Underlying error
 		source: Box<Self>,
 
@@ -327,7 +397,9 @@ decl_error! {
 			dep_file: P => dep_file.into()
 		)
 	)]
-	BuildDepFile("Unable to build dependency file {dep_file:?}") {
+	#[source(Some(source))]
+	#[fmt("Unable to build dependency file {dep_file:?}")]
+	BuildDepFile {
 		/// Underlying error
 		source: Box<Self>,
 
@@ -341,7 +413,9 @@ decl_error! {
 			rule_name: T => rule_name.into()
 		)
 	)]
-	ExpandRule("Unable to expand rule {rule_name}") {
+	#[source(Some(source))]
+	#[fmt("Unable to expand rule {rule_name}")]
+	ExpandRule {
 		/// Underlying error
 		source: Box<Self>,
 
@@ -355,7 +429,9 @@ decl_error! {
 			target: &'target Target<'_, T> => target.to_string()
 		) + 'target
 	)]
-	ExpandTarget("Unable to expand target {target}") {
+	#[source(Some(source))]
+	#[fmt("Unable to expand target {target}")]
+	ExpandTarget {
 		/// Underlying error
 		source: Box<Self>,
 
@@ -369,7 +445,9 @@ decl_error! {
 			expr: &'expr Expr<'_> => expr.to_string()
 		) + 'expr
 	)]
-	ExpandExpr("Unable to expand expression {expr}") {
+	#[source(Some(source))]
+	#[fmt("Unable to expand expression {expr}")]
+	ExpandExpr {
 		/// Underlying error
 		source: Box<Self>,
 
@@ -378,25 +456,33 @@ decl_error! {
 	},
 
 	/// Unknown rule
-	UnknownRule("Unknown rule {rule_name}") {
+	#[source(None)]
+	#[fmt("Unknown rule {rule_name}")]
+	UnknownRule {
 		/// Rule name
 		rule_name: String,
 	},
 
 	/// Unknown alias
-	UnknownAlias("Unknown alias {alias_name}") {
+	#[source(None)]
+	#[fmt("Unknown alias {alias_name}")]
+	UnknownAlias {
 		/// Alias name
 		alias_name: String,
 	},
 
 	/// Unknown pattern
-	UnknownPattern("Unknown pattern {pattern_name}") {
+	#[source(None)]
+	#[fmt("Unknown pattern {pattern_name}")]
+	UnknownPattern {
 		/// Pattern name
 		pattern_name: String,
 	},
 
 	/// Unresolved alias or patterns
-	UnresolvedAliasOrPats("Expression had unresolved alias or patterns: {expr} ({expr_cmpts:?})") {
+	#[source(None)]
+	#[fmt("Expression had unresolved alias or patterns: {expr} ({expr_cmpts:?})")]
+	UnresolvedAliasOrPats {
 		/// Formatted expression
 		expr: String,
 
@@ -405,7 +491,9 @@ decl_error! {
 	},
 
 	/// Match expression had 2 or moore patterns
-	MatchExprTooManyPats("Match expression had 2 or more patterns: {expr} ({expr_cmpts:?})") {
+	#[source(None)]
+	#[fmt("Match expression had 2 or more patterns: {expr} ({expr_cmpts:?})")]
+	MatchExprTooManyPats {
 		/// Formatted expression
 		expr: String,
 
@@ -415,7 +503,9 @@ decl_error! {
 
 	/// Alias operation
 	#[from_fn( fn alias_op(source: Self => Box::new(source))(op: AliasOp) )]
-	AliasOp("Unable to apply alias operation `{op}`") {
+	#[source(Some(source))]
+	#[fmt("Unable to apply alias operation `{op}`")]
+	AliasOp {
 		/// Underlying error
 		source: Box<Self>,
 
@@ -424,13 +514,17 @@ decl_error! {
 	},
 
 	/// Dependency file missing `:`
-	DepFileMissingColon("Dependency file {dep_file_path:?} was missing a `:`") {
+	#[source(None)]
+	#[fmt("Dependency file {dep_file_path:?} was missing a `:`")]
+	DepFileMissingColon {
 		/// Dep file path
 		dep_file_path: PathBuf,
 	},
 
 	/// Dependency file missing rule name
-	DepFileMissingRuleName("Dependency file {dep_file_path:?} is missing the rule name {rule_name}, found {dep_output}") {
+	#[source(None)]
+	#[fmt("Dependency file {dep_file_path:?} is missing the rule name {rule_name}, found {dep_output}")]
+	DepFileMissingRuleName {
 		/// Dep file path
 		dep_file_path: PathBuf,
 
@@ -442,7 +536,9 @@ decl_error! {
 	},
 
 	/// Dependency file missing rule name
-	DepFileMissingOutputs("Dependency file {dep_file_path:?} is missing any output of {rule_outputs:?}, found {dep_output}") {
+	#[source(None)]
+	#[fmt("Dependency file {dep_file_path:?} is missing any output of {rule_outputs:?}, found {dep_output}")]
+	DepFileMissingOutputs {
 		/// Dep file path
 		dep_file_path: PathBuf,
 
@@ -454,10 +550,17 @@ decl_error! {
 	},
 
 	/// Rule executable was empty
-	RuleExecEmpty("Rule {rule_name} executable as empty") {
+	#[source(None)]
+	#[fmt("Rule {rule_name} executable as empty")]
+	RuleExecEmpty {
 		/// Rule name
 		rule_name: String,
 	},
+
+	/// Exit due to failed builds
+	#[source(None)]
+	#[fmt("Exiting with non-0 due to failed builds")]
+	ExitDueToFailedBuilds {},
 }
 
 /// Helper function to format a `Command` for errors
@@ -471,4 +574,56 @@ fn cmd_to_string<T: fmt::Display>(cmd: &Command<T>) -> String {
 		})
 		.join(" ");
 	format!("[{inner}]")
+}
+
+/// Exit result
+pub enum ExitResult {
+	Ok,
+	Err(AppError),
+}
+
+impl Termination for ExitResult {
+	fn report(self) -> process::ExitCode {
+		match self {
+			Self::Ok => process::ExitCode::SUCCESS,
+			Self::Err(err) => {
+				eprintln!("Error: {}", err.pretty());
+				process::ExitCode::FAILURE
+			},
+		}
+	}
+}
+
+impl FromResidual<Result<Infallible, AppError>> for ExitResult {
+	fn from_residual(residual: Result<Infallible, AppError>) -> Self {
+		match residual {
+			Ok(never) => match never {},
+			Err(err) => Self::Err(err),
+		}
+	}
+}
+
+/// Pretty display for [`AppError`]
+pub struct PrettyDisplay<'a>(&'a AppError);
+
+impl fmt::Display for PrettyDisplay<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		// Write the top-level error
+		write!(f, "{}", self.0)?;
+
+		// Then, if there's a cause, write the rest
+		if let Some(mut cur_source) = self.0.source() {
+			write!(f, "\n\nCaused by:")?;
+			for cur_depth in 0_usize.. {
+				write!(f, "\n\t{cur_depth}: {cur_source}")?;
+				cur_source = match cur_source.source() {
+					Some(source) => source,
+					_ => break,
+				};
+			}
+		}
+
+
+		Ok(())
+	}
 }
