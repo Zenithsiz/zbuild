@@ -286,7 +286,6 @@ impl<'s> Builder<'s> {
 			//       lock here.
 			None => {
 				mem::drop(build_guard);
-				#[expect(clippy::shadow_unrelated, reason = "They are the same even if redeclared")]
 				let mut build_guard = build_lock.lock_build().await;
 
 				match build_guard.res(&target) {

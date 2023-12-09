@@ -66,7 +66,6 @@ impl<'s> Expander<'s> {
 								let value = self.expand_expr_string(&alias_expr, visitor)?;
 
 								// Then apply all
-								#[expect(clippy::shadow_unrelated, reason = "They are the same value")]
 								let value = alias.ops.iter().try_fold(value, |value, &op| {
 									let s = CowStr::into_owned(value);
 									self.expand_alias_op(op, s)
