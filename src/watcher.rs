@@ -62,8 +62,11 @@ impl<'s> Watcher<'s> {
 				for fs_event in fs_events {
 					tracing::trace!(?fs_event, "Watcher fs event");
 
-					// Note: We don't care if it succeeded or not
-					#[expect(let_underscore_drop, clippy::let_underscore_must_use)]
+					#[expect(
+						let_underscore_drop,
+						clippy::let_underscore_must_use,
+						reason = "We don't care if it succeeded or not"
+					)]
 					let _: Result<(), _> = fs_event_tx.blocking_send(fs_event);
 				},
 			Err(errs) =>

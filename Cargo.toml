@@ -108,18 +108,11 @@ clippy.single_call_fn = "allow"           # It's still useful to separate blocks
 clippy.float_arithmetic = "allow"
 clippy.default_numeric_fallback = "allow" # TODO: This isn't very useful for floats, but might be for integers
 clippy.struct_field_names = "allow"
+clippy.iter_over_hash_type = "allow"
 
 # We prefer the short version
 clippy.pub_with_shorthand = "allow"
 clippy.pub_without_shorthand = "warn"
-
-# Triggers in macro-generated code
-# TODO: Turn these on once they don't trigger in macro-generated code
-clippy.allow_attributes_without_reason = "allow"
-clippy.allow_attributes = "allow"
-clippy.indexing_slicing = "allow"
-clippy.string_slice = "allow"
-clippy.missing_const_for_fn = "allow"
 
 # Too many false positives
 # TODO: Turn these on once they don't have as many false positives

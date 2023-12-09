@@ -286,7 +286,7 @@ impl<'s> Builder<'s> {
 			//       lock here.
 			None => {
 				mem::drop(build_guard);
-				#[expect(clippy::shadow_unrelated)] // They are the same even if redeclared
+				#[expect(clippy::shadow_unrelated, reason = "They are the same even if redeclared")]
 				let mut build_guard = build_lock.lock_build().await;
 
 				match build_guard.res(&target) {
@@ -305,7 +305,7 @@ impl<'s> Builder<'s> {
 	}
 
 	/// Builds a target without checking if the target is already being built.
-	#[expect(clippy::too_many_lines)] // TODO: Split this function onto smaller ones
+	#[expect(clippy::too_many_lines, reason = "TODO: Split this function onto smaller ones")]
 	#[async_recursion::async_recursion]
 	async fn build_unchecked(
 		&self,
@@ -459,7 +459,7 @@ impl<'s> Builder<'s> {
 					};
 
 					// If the dependency if a dependency deps file or an output deps file (and exists), build it's dependencies too
-					#[allow(clippy::wildcard_enum_match_arm, reason = "We only care about some variants")]
+					#[expect(clippy::wildcard_enum_match_arm, reason = "We only care about some variants")]
 					let dep_deps = match &dep {
 						Dep::File {
 							file,
@@ -727,7 +727,7 @@ impl<'s> Builder<'s> {
 
 	/// Finds a rule for `file`
 	// TODO: Not make this `O(N)` for the number of rules.
-	#[expect(clippy::type_complexity)] // TODO: Add some type aliases / struct
+	#[expect(clippy::type_complexity, reason = "TODO: Add some type aliases / struct")]
 	pub fn find_rule_for_file(
 		&self,
 		file: &str,

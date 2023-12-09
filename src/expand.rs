@@ -18,7 +18,7 @@ pub struct Expander<'s> {
 	_phantom: PhantomData<&'s ()>,
 }
 
-#[expect(clippy::unused_self)] // Currently expander doesn't do anything
+#[expect(clippy::unused_self, reason = "Currently expander doesn't do anything")]
 impl<'s> Expander<'s> {
 	/// Creates a new expander
 	pub const fn new() -> Self {
@@ -66,7 +66,7 @@ impl<'s> Expander<'s> {
 								let value = self.expand_expr_string(&alias_expr, visitor)?;
 
 								// Then apply all
-								#[expect(clippy::shadow_unrelated)] // They are the same value
+								#[expect(clippy::shadow_unrelated, reason = "They are the same value")]
 								let value = alias.ops.iter().try_fold(value, |value, &op| {
 									let s = CowStr::into_owned(value);
 									self.expand_alias_op(op, s)
