@@ -99,11 +99,10 @@ clippy.unreachable = "allow"
 clippy.mem_forget = "allow"
 clippy.shadow_same = "allow"
 clippy.shadow_reuse = "allow"
-clippy.shadow_unrelated = "allow"         # TODO: Maybe check this one every once in a while? Pretty noisy though
-clippy.min_ident_chars = "allow"          # Useful for generics such as `f: impl FnOnce()`
-clippy.single_call_fn = "allow"           # It's still useful to separate blocks of code into functions
+clippy.shadow_unrelated = "allow"        # TODO: Maybe check this one every once in a while? Pretty noisy though
+clippy.min_ident_chars = "allow"         # Useful for generics such as `f: impl FnOnce()`
+clippy.single_call_fn = "allow"          # It's still useful to separate blocks of code into functions
 clippy.float_arithmetic = "allow"
-clippy.default_numeric_fallback = "allow" # TODO: This isn't very useful for floats, but might be for integers
 clippy.struct_field_names = "allow"
 clippy.iter_over_hash_type = "allow"
 
