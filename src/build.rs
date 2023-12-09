@@ -26,7 +26,15 @@ use {
 	dashmap::DashMap,
 	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
 	itertools::Itertools,
-	std::{borrow::Cow, collections::HashMap, time::SystemTime},
+	std::{
+		borrow::Cow,
+		collections::HashMap,
+		ffi::{OsStr, OsString},
+		// TODO: This locks us in to unix, but our path parsing already
+		//       essentially locks us in, so it might be fine?
+		os::unix::ffi::OsStringExt,
+		time::SystemTime,
+	},
 	tokio::{fs, process, sync::Semaphore},
 };
 
@@ -611,7 +619,7 @@ impl<'s> Builder<'s> {
 
 		for cmd in &rule.exec.cmds {
 			// Note: We don't care about the stdout here and don't capture it anyway.
-			let _: String = self.exec_cmd(rule.name, cmd, false).await?;
+			let _: Vec<u8> = self.exec_cmd(rule.name, cmd, false).await?;
 		}
 
 		Ok(())
@@ -626,18 +634,18 @@ impl<'s> Builder<'s> {
 		rule_name: &str,
 		cmd: &Command<CowStr<'s>>,
 		capture_stdout: bool,
-	) -> Result<String, AppError> {
+	) -> Result<Vec<u8>, AppError> {
 		// Process all arguments
 		// Note: When recursing, always capture stdout
 		let args = cmd
 			.args
 			.iter()
 			.map(async move |arg| match arg {
-				CommandArg::Expr(arg) => Ok(Some(Cow::Borrowed(&**arg))),
+				CommandArg::Expr(arg) => Ok(Some(Cow::Borrowed(OsStr::new(&**arg)))),
 				CommandArg::Command { strip_on_fail, cmd } => {
 					let res = self.exec_cmd(rule_name, cmd, true).await;
 					match (res, strip_on_fail) {
-						(Ok(arg), _) => Ok(Some(Cow::Owned(arg))),
+						(Ok(arg), _) => Ok(Some(Cow::Owned(OsString::from_vec(arg)))),
 						(Err(err), true) => {
 							tracing::debug!(?arg, ?err, "Stripping argument from failure");
 							Ok(None)
@@ -679,7 +687,10 @@ impl<'s> Builder<'s> {
 		}
 
 		// Then spawn it and measure
-		tracing::debug!(target: "zbuild_exec", "{} {}", program, args.join(" "));
+		tracing::debug!(target: "zbuild_exec", "{} {}",
+			program.to_string_lossy(),
+			args.iter().map(|arg| arg.to_string_lossy()).join(" ")
+		);
 		let (duration, stdout) = util::try_measure_async(async {
 			let output = os_cmd
 				.spawn()
@@ -693,12 +704,6 @@ impl<'s> Builder<'s> {
 		})
 		.await?;
 		tracing::trace!(target: "zbuild_exec", ?rule_name, ?program, ?args, ?duration, "Execution duration");
-
-		// Finally parse stdout
-		// TODO: Not require utf8?
-		let stdout = String::from_utf8(stdout)
-			.context("Stdout was non-utf8")
-			.map_err(AppError::Other)?;
 
 		Ok(stdout)
 	}
