@@ -95,6 +95,10 @@ impl<'s> Expander<'s> {
 			.into_iter()
 			.coalesce(|prev, next| match (prev, next) {
 				// Merge strings
+				#[expect(
+					clippy::arithmetic_side_effects,
+					reason = "String arithmetic doesn't have any side effects we care about"
+				)]
 				(ExprCmpt::String(prev), ExprCmpt::String(next)) => Ok(ExprCmpt::String(prev + next)),
 
 				// Everything else leave
