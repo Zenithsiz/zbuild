@@ -30,10 +30,9 @@ mod watcher;
 // Imports
 use {
 	self::{ast::Ast, build::Builder, error::AppError, expand::Expander, rules::Rules},
-	anyhow::Context,
 	args::Args,
 	clap::Parser,
-	futures::{stream::FuturesUnordered, StreamExt},
+	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
 	std::{
 		borrow::Cow,
 		collections::HashMap,
@@ -145,17 +144,20 @@ async fn main() -> Result<(), anyhow::Error> {
 		.transpose()?;
 
 	// Finally build all targets and start watching
-	let (build_res, ()) = futures::join!(
+	let (failed_targets, ()) = futures::join!(
 		async {
 			targets_to_build
 				.iter()
-				.map(|target| self::build_target(&builder, target, &rules, args.ignore_missing))
+				.map(|target| {
+					self::build_target(&builder, target, &rules, args.ignore_missing)
+						.map_err(|err| (target.clone(), err))
+				})
 				.collect::<FuturesUnordered<_>>()
-				.collect::<Vec<Result<(), AppError>>>()
+				.collect::<Vec<Result<(), _>>>()
 				.await
 				.into_iter()
-				.collect::<Result<(), AppError>>()
-				.context("Unable to build all targets")
+				.filter_map(Result::err)
+				.collect::<Vec<_>>()
 		},
 		async {
 			if let Some(watcher) = watcher {
@@ -175,9 +177,16 @@ async fn main() -> Result<(), anyhow::Error> {
 	tracing::info!("Built {built_targets} targets");
 	tracing::info!("Checked {total_targets} targets");
 
-	match build_res {
-		Ok(()) => Ok(()),
-		Err(_err) => anyhow::bail!("One or more builds failed"),
+	match failed_targets.is_empty() {
+		true => Ok(()),
+		false => {
+			tracing::error!("One or more builds failed:");
+			for (target, err) in failed_targets {
+				tracing::error!(err=?anyhow::Error::new(err), "Failed to build target {target}");
+			}
+
+			anyhow::bail!("Exiting with non-0 due to failed builds");
+		},
 	}
 }
 
