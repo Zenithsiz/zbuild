@@ -22,7 +22,6 @@ use {
 		Expander,
 		Rules,
 	},
-	anyhow::Context,
 	dashmap::DashMap,
 	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
 	itertools::Itertools,
@@ -610,12 +609,12 @@ impl<'s> Builder<'s> {
 	/// Rebuilds a rule
 	pub async fn rebuild_rule(&self, rule: &Rule<'s, CowStr<'s>>) -> Result<(), AppError> {
 		// Lock the semaphore
+		// Note: It should never be closed
 		let _permit = self
 			.exec_semaphore
 			.acquire()
 			.await
-			.context("Executable semaphore was closed")
-			.map_err(AppError::Other)?;
+			.expect("Executable semaphore was closed");
 
 		for cmd in &rule.exec.cmds {
 			// Note: We don't care about the stdout here and don't capture it anyway.
