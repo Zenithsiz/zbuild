@@ -24,15 +24,9 @@ use {
 	},
 	anyhow::Context,
 	dashmap::DashMap,
-	filetime::FileTime,
 	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
 	itertools::Itertools,
-	std::{
-		borrow::Cow,
-		collections::HashMap,
-		mem,
-		time::{Duration, SystemTime},
-	},
+	std::{borrow::Cow, collections::HashMap, mem, time::SystemTime},
 	tokio::{fs, process, sync::Semaphore},
 };
 
@@ -233,7 +227,7 @@ impl<'s> Builder<'s> {
 			match target {
 				Target::File { ref file, .. } => match fs::metadata(&**file).await {
 					Ok(metadata) => {
-						let build_time = self::file_modified_time(metadata);
+						let build_time = metadata.modified().map_err(AppError::get_file_modified_time(&**file))?;
 						tracing::trace!(?target, ?build_time, "Found target file");
 						return Ok((
 							BuildResult {
@@ -791,10 +785,12 @@ async fn rule_last_build_time<'s>(rule: &Rule<'s, CowStr<'s>>) -> Result<Option<
 			let file = match item {
 				OutItem::File { file } | OutItem::DepsFile { file } => file,
 			};
-			fs::metadata(&**file)
+			let metadata = fs::metadata(&**file)
 				.await
-				.map(self::file_modified_time)
-				.map_err(AppError::read_file_metadata(&**file))
+				.map_err(AppError::read_file_metadata(&**file))?;
+			let modified_time = metadata.modified().map_err(AppError::get_file_modified_time(&**file))?;
+
+			Ok(modified_time)
 		})
 		.collect::<FuturesUnordered<_>>()
 		.try_collect::<Vec<_>>()
@@ -802,23 +798,4 @@ async fn rule_last_build_time<'s>(rule: &Rule<'s, CowStr<'s>>) -> Result<Option<
 		.into_iter()
 		.min();
 	Ok(built_time)
-}
-
-/// Returns the file modified time
-#[expect(
-	clippy::needless_pass_by_value,
-	reason = "We use it in `.map`, which makes it convenient to receive by value"
-)]
-#[expect(clippy::absolute_paths, reason = "We're already using a `fs` (`tokio::fs`)")]
-fn file_modified_time(metadata: std::fs::Metadata) -> SystemTime {
-	let file_time = FileTime::from_last_modification_time(&metadata);
-	let unix_offset = Duration::new(
-		file_time
-			.unix_seconds()
-			.try_into()
-			.expect("File time was before unix epoch"),
-		file_time.nanoseconds(),
-	);
-
-	SystemTime::UNIX_EPOCH + unix_offset
 }

@@ -65,6 +65,17 @@ pub enum AppError {
 		err: io::Error,
 	},
 
+	/// Get file modified time
+	#[error("Unable to get file modified time {file_path:?}")]
+	GetFileModifiedTime {
+		/// File we failed to get the modified time of
+		file_path: PathBuf,
+
+		/// Underlying error
+		#[source]
+		err: io::Error,
+	},
+
 	/// Check if file exists
 	#[error("Unable to check if file exists {file_path:?}")]
 	CheckFileExists {
@@ -342,6 +353,14 @@ impl AppError {
 	/// Returns a function to create a [`Self::ReadFileMetadata`] error from it's inner error.
 	pub fn read_file_metadata(file_path: impl Into<PathBuf>) -> impl FnOnce(io::Error) -> Self {
 		move |err| Self::ReadFileMetadata {
+			file_path: file_path.into(),
+			err,
+		}
+	}
+
+	/// Returns a function to create a [`Self::GetFileModifiedTime`] error from it's inner error.
+	pub fn get_file_modified_time(file_path: impl Into<PathBuf>) -> impl FnOnce(io::Error) -> Self {
+		move |err| Self::GetFileModifiedTime {
 			file_path: file_path.into(),
 			err,
 		}

@@ -1104,7 +1104,6 @@ dependencies = [
  "async-recursion",
  "clap",
  "dashmap",
- "filetime",
  "futures",
  "itertools",
  "notify",
