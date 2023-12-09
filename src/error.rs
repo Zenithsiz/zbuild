@@ -3,16 +3,17 @@
 // Imports
 use {
 	crate::rules::{self, AliasOp, Command, Expr, Target},
-	itertools::Itertools,
+	itertools::{Itertools, Position as ItertoolsPos},
 	std::{
 		convert::Infallible,
 		error::Error as StdError,
 		fmt,
 		io,
-		ops::FromResidual,
+		ops::{ControlFlow, FromResidual, Try},
 		path::PathBuf,
 		process::{self, ExitStatusError, Termination},
 		sync::Arc,
+		vec,
 	},
 };
 
@@ -21,6 +22,7 @@ macro_rules! decl_error {
 	(
 		$(#[$meta:meta])*
 		$Name:ident;
+		$Multiple:ident($MultipleTy:ty);
 		$Shared:ident($SharedTy:ty);
 		$Other:ident($OtherTy:ty);
 
@@ -72,6 +74,9 @@ macro_rules! decl_error {
 		#[derive(Debug)]
 		#[non_exhaustive]
 		pub enum $Name {
+			/// Multiple
+			$Multiple($MultipleTy),
+
 			/// Shared
 			// TODO: Is this a good idea? Should we just use `Arc<AppError>` where relevant?
 			$Shared($SharedTy),
@@ -132,6 +137,9 @@ macro_rules! decl_error {
 		impl StdError for AppError {
 			fn source(&self) -> Option<&(dyn StdError + 'static)> {
 				match self {
+					// Note: We don't return any of the errors here, so that we can format
+					//       it properly without duplicating errors.
+					Self::$Multiple(_) => None,
 					Self::$Shared(source) => source.source(),
 					Self::$Other(source) => AsRef::<dyn StdError>::as_ref(source).source(),
 					$(
@@ -147,6 +155,7 @@ macro_rules! decl_error {
 			fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 				// Display the main message
 				match self {
+					Self::$Multiple(errs) => write!(f, "Multiple errors ({})", errs.len()),
 					Self::$Shared(source) => source.fmt(f),
 					Self::$Other(source) => source.fmt(f),
 					$(
@@ -164,6 +173,7 @@ macro_rules! decl_error {
 decl_error! {
 	/// Test
 	AppError;
+	Multiple(Vec<Self>);
 	Shared(Arc<Self>);
 	Other(anyhow::Error);
 
@@ -258,7 +268,9 @@ decl_error! {
 
 	/// Missing file
 	#[from_fn(
-		#[expect(dead_code, reason = "Not used yet")]
+		// TODO: For some reason, rustc thinks the following lint is
+		//       unfulfilled, check why.
+		//#[expect(dead_code, reason = "Not used yet")]
 		fn missing_file<P: Into<PathBuf>>(source: io::Error)(
 			file_path: P => file_path.into()
 		)
@@ -365,7 +377,7 @@ decl_error! {
 			target: &'target Target<'_, T> => target.to_string()
 		) + 'target
 	)]
-	#[source(Some(source))]
+	#[source(Some(&**source))]
 	#[fmt("Unable to build target {target}")]
 	BuildTarget {
 		/// Underlying error
@@ -381,7 +393,7 @@ decl_error! {
 			rule_name: S => rule_name.into()
 		)
 	)]
-	#[source(Some(source))]
+	#[source(Some(&**source))]
 	#[fmt("Unable to build rule {rule_name}")]
 	BuildRule {
 		/// Underlying error
@@ -397,7 +409,7 @@ decl_error! {
 			dep_file: P => dep_file.into()
 		)
 	)]
-	#[source(Some(source))]
+	#[source(Some(&**source))]
 	#[fmt("Unable to build dependency file {dep_file:?}")]
 	BuildDepFile {
 		/// Underlying error
@@ -413,7 +425,7 @@ decl_error! {
 			rule_name: T => rule_name.into()
 		)
 	)]
-	#[source(Some(source))]
+	#[source(Some(&**source))]
 	#[fmt("Unable to expand rule {rule_name}")]
 	ExpandRule {
 		/// Underlying error
@@ -429,7 +441,7 @@ decl_error! {
 			target: &'target Target<'_, T> => target.to_string()
 		) + 'target
 	)]
-	#[source(Some(source))]
+	#[source(Some(&**source))]
 	#[fmt("Unable to expand target {target}")]
 	ExpandTarget {
 		/// Underlying error
@@ -445,7 +457,7 @@ decl_error! {
 			expr: &'expr Expr<'_> => expr.to_string()
 		) + 'expr
 	)]
-	#[source(Some(source))]
+	#[source(Some(&**source))]
 	#[fmt("Unable to expand expression {expr}")]
 	ExpandExpr {
 		/// Underlying error
@@ -503,7 +515,7 @@ decl_error! {
 
 	/// Alias operation
 	#[from_fn( fn alias_op(source: Self => Box::new(source))(op: AliasOp) )]
-	#[source(Some(source))]
+	#[source(Some(&**source))]
 	#[fmt("Unable to apply alias operation `{op}`")]
 	AliasOp {
 		/// Underlying error
@@ -576,6 +588,70 @@ fn cmd_to_string<T: fmt::Display>(cmd: &Command<T>) -> String {
 	format!("[{inner}]")
 }
 
+/// Helper type to collect a `IntoIter<Item = Result<T, AppError>>`
+/// into a `Result<C, AppError::Multiple>`.
+#[derive(Debug)]
+pub enum ResultMultiple<C> {
+	Ok(C),
+	Err(Vec<AppError>),
+}
+
+impl<C, T> FromIterator<Result<T, AppError>> for ResultMultiple<C>
+where
+	C: Default + Extend<T>,
+{
+	fn from_iter<I>(iter: I) -> Self
+	where
+		I: IntoIterator<Item = Result<T, AppError>>,
+	{
+		// TODO: If we get any errors, don't allocate memory for the rest of the values?
+		let (values, errs) = iter.into_iter().partition_result::<C, Vec<_>, _, _>();
+		match errs.is_empty() {
+			true => Self::Ok(values),
+			false => Self::Err(errs),
+		}
+	}
+}
+
+#[derive(Debug)]
+pub struct ResultMultipleResidue(Vec<AppError>);
+
+impl<C> Try for ResultMultiple<C> {
+	type Output = C;
+	type Residual = ResultMultipleResidue;
+
+	fn from_output(output: Self::Output) -> Self {
+		Self::Ok(output)
+	}
+
+	fn branch(self) -> ControlFlow<Self::Residual, Self::Output> {
+		match self {
+			Self::Ok(values) => ControlFlow::Continue(values),
+			Self::Err(errs) => ControlFlow::Break(ResultMultipleResidue(errs)),
+		}
+	}
+}
+
+impl<T> FromResidual<ResultMultipleResidue> for ResultMultiple<T> {
+	fn from_residual(residual: ResultMultipleResidue) -> Self {
+		Self::Err(residual.0)
+	}
+}
+
+impl<T> FromResidual<ResultMultipleResidue> for Result<T, AppError> {
+	fn from_residual(residual: ResultMultipleResidue) -> Self {
+		let err = match <[_; 1]>::try_from(residual.0) {
+			Ok([err]) => err,
+			Err(errs) => {
+				assert!(!errs.is_empty(), "`ResultMultipleResidue` should hold at least 1 error");
+				AppError::Multiple(errs)
+			},
+		};
+
+		Err(err)
+	}
+}
+
 /// Exit result
 pub enum ExitResult {
 	Ok,
@@ -604,25 +680,118 @@ impl FromResidual<Result<Infallible, AppError>> for ExitResult {
 }
 
 /// Pretty display for [`AppError`]
+#[derive(Debug)]
 pub struct PrettyDisplay<'a>(&'a AppError);
 
-impl fmt::Display for PrettyDisplay<'_> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		// Write the top-level error
-		write!(f, "{}", self.0)?;
+#[derive(PartialEq, Clone, Copy, Debug)]
+enum Column {
+	Line,
+	Empty,
+}
+
+impl Column {
+	/// Returns the string for this column
+	const fn as_str(self) -> &'static str {
+		match self {
+			Self::Line => "│ ",
+			Self::Empty => "  ",
+		}
+	}
+}
+
+impl PrettyDisplay<'_> {
+	/// Formats a single error
+	fn fmt_single(f: &mut fmt::Formatter<'_>, err: &AppError, columns: &mut Vec<Column>) -> fmt::Result {
+		// If the inner value is shared, display the inner
+		if let AppError::Shared(inner) = err {
+			return Self::fmt_single(f, inner, columns);
+		}
+
+		// If it's multiple, display it as multiple
+		if let AppError::Multiple(errs) = err {
+			return Self::fmt_multiple(f, errs, columns);
+		}
+
+		// Else write the top-level error
+		write!(f, "{err}")?;
 
 		// Then, if there's a cause, write the rest
-		if let Some(mut cur_source) = self.0.source() {
-			write!(f, "\n\nCaused by:")?;
-			for cur_depth in 0_usize.. {
-				write!(f, "\n\t{cur_depth}: {cur_source}")?;
+		if let Some(mut cur_source) = err.source() {
+			let starting_columns = columns.len();
+			loop {
+				// Print the pre-amble
+				f.pad("\n")?;
+				for c in &*columns {
+					f.pad(c.as_str())?;
+				}
+				f.pad("└─")?;
+				columns.push(Column::Empty);
+
+				// While `cur_source` is `Shared`, downcast it
+				while let Some(source) = cur_source.downcast_ref::<AppError>() &&
+					let AppError::Shared(source) = source
+				{
+					cur_source = &**source;
+				}
+
+				// Then check if we got to a multiple.
+				match cur_source.downcast_ref::<AppError>() {
+					Some(AppError::Multiple(errs)) => {
+						Self::fmt_multiple(f, errs, columns)?;
+						break;
+					},
+					_ => write!(f, "{cur_source}",)?,
+				}
+
+				// And descend
 				cur_source = match cur_source.source() {
 					Some(source) => source,
 					_ => break,
 				};
 			}
+			let _: vec::Drain<'_, _> = columns.drain(starting_columns..);
 		}
 
+		Ok(())
+	}
+
+	/// Formats multiple errors
+	fn fmt_multiple(f: &mut fmt::Formatter<'_>, errs: &[AppError], columns: &mut Vec<Column>) -> fmt::Result {
+		// Write the top-level error
+		write!(f, "Multiple errors:")?;
+
+		// For each error, write it
+		for (pos, err) in errs.iter().with_position() {
+			f.pad("\n")?;
+			for c in &*columns {
+				f.pad(c.as_str())?;
+			}
+
+			match matches!(pos, ItertoolsPos::Last | ItertoolsPos::Only) {
+				true => {
+					f.pad("└─")?;
+					columns.push(Column::Empty);
+				},
+				false => {
+					f.pad("├─")?;
+					columns.push(Column::Line);
+				},
+			}
+
+			Self::fmt_single(f, err, columns)?;
+			let _: Option<_> = columns.pop();
+		}
+
+
+		Ok(())
+	}
+}
+
+impl fmt::Display for PrettyDisplay<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let mut columns = vec![];
+		Self::fmt_single(f, self.0, &mut columns)?;
+		assert_eq!(columns.len(), 0, "There should be no columns after formatting");
 
 		Ok(())
 	}

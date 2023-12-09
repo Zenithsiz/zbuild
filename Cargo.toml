@@ -102,6 +102,7 @@ clippy.single_call_fn = "allow"       # It's still useful to separate blocks of 
 clippy.float_arithmetic = "allow"
 clippy.struct_field_names = "allow"
 clippy.iter_over_hash_type = "allow"
+clippy.non_ascii_literal = "allow"
 
 # We prefer the short version
 clippy.pub_with_shorthand = "allow"

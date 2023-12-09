@@ -16,6 +16,7 @@ use {
 		match_expr::match_expr,
 	},
 	crate::{
+		error::ResultMultiple,
 		rules::{Command, CommandArg, DepItem, Expr, OutItem, Rule, Target},
 		util::{self, CowStr},
 		AppError,
@@ -24,7 +25,7 @@ use {
 	},
 	dashmap::DashMap,
 	futures::TryFutureExt,
-	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
+	futures::{stream::FuturesUnordered, StreamExt},
 	itertools::Itertools,
 	std::{
 		borrow::Cow,
@@ -368,8 +369,10 @@ impl<'s> Builder<'s> {
 				}),
 			})
 			.collect::<FuturesUnordered<_>>()
-			.try_collect::<Vec<_>>()
-			.await?;
+			.collect::<Vec<_>>()
+			.await
+			.into_iter()
+			.collect::<ResultMultiple<Vec<_>>>()?;
 
 		// And all output dependencies
 		// Note: Fine to fail early here, see note above for `normal_deps`
@@ -391,8 +394,10 @@ impl<'s> Builder<'s> {
 			})
 			.collect::<FuturesUnordered<_>>()
 			.filter_map(async move |res| res.transpose())
-			.try_collect::<Vec<_>>()
-			.await?;
+			.collect::<Vec<_>>()
+			.await
+			.into_iter()
+			.collect::<ResultMultiple<Vec<_>>>()?;
 
 		// Then build all dependencies, as well as any dependency files
 		// Note: We don't want to fail early here, since commands might still be
@@ -483,7 +488,7 @@ impl<'s> Builder<'s> {
 			.collect::<Vec<_>>()
 			.await
 			.into_iter()
-			.collect::<Result<Vec<_>, _>>()?
+			.collect::<ResultMultiple<Vec<_>>>()?
 			.into_iter()
 			.flatten()
 			.collect::<Vec<_>>();
@@ -599,7 +604,7 @@ impl<'s> Builder<'s> {
 			.collect::<Vec<_>>()
 			.await
 			.into_iter()
-			.collect::<Result<Vec<_>, _>>()?;
+			.collect::<ResultMultiple<_>>()?;
 
 		Ok(deps_res)
 	}
@@ -654,8 +659,10 @@ impl<'s> Builder<'s> {
 			.enumerate()
 			.map(|(idx, fut)| fut.map_ok(move |arg| (idx, arg)))
 			.collect::<FuturesUnordered<_>>()
-			.try_collect::<Vec<_>>()
-			.await?
+			.collect::<Vec<_>>()
+			.await
+			.into_iter()
+			.collect::<ResultMultiple<Vec<_>>>()?
 			.into_iter()
 			.sorted_by_key(|&(idx, _)| idx)
 			.filter_map(|(_, arg)| arg)
@@ -779,8 +786,10 @@ async fn rule_last_build_time<'s>(rule: &Rule<'s, CowStr<'s>>) -> Result<Option<
 			Ok(modified_time)
 		})
 		.collect::<FuturesUnordered<_>>()
-		.try_collect::<Vec<_>>()
-		.await?
+		.collect::<Vec<_>>()
+		.await
+		.into_iter()
+		.collect::<ResultMultiple<Vec<_>>>()?
 		.into_iter()
 		.min();
 	Ok(built_time)

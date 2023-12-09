@@ -3,7 +3,7 @@
 // Imports
 use {
 	crate::{
-		error::AppError,
+		error::{AppError, ResultMultiple},
 		rules::{AliasOp, Command, CommandArg, DepItem, Exec, Expr, ExprCmpt, OutItem, Rule, Target},
 		util::CowStr,
 	},
@@ -159,7 +159,7 @@ impl<'s> Expander<'s> {
 			.aliases
 			.iter()
 			.map(|(&name, expr)| Ok((name, self.expand_expr_string(expr, visitor)?)))
-			.collect::<Result<_, AppError>>()?;
+			.collect::<ResultMultiple<_>>()?;
 
 		let output = rule
 			.output
@@ -172,7 +172,7 @@ impl<'s> Expander<'s> {
 					file: self.expand_expr_string(file, visitor)?,
 				}),
 			})
-			.collect::<Result<_, _>>()?;
+			.collect::<ResultMultiple<_>>()?;
 
 		let deps = rule
 			.deps
@@ -206,10 +206,10 @@ impl<'s> Expander<'s> {
 								self.expand_expr_string(expr, visitor)?,
 							))
 						})
-						.collect::<Result<_, AppError>>()?,
+						.collect::<ResultMultiple<_>>()?,
 				}),
 			})
-			.collect::<Result<_, _>>()?;
+			.collect::<ResultMultiple<_>>()?;
 
 		let exec = Exec {
 			cmds: rule
@@ -217,7 +217,7 @@ impl<'s> Expander<'s> {
 				.cmds
 				.iter()
 				.map(|cmd| self.expand_cmd(cmd, visitor))
-				.collect::<Result<_, _>>()?,
+				.collect::<ResultMultiple<_>>()?,
 		};
 
 		Ok(Rule {
@@ -254,7 +254,7 @@ impl<'s> Expander<'s> {
 					};
 					Ok(arg)
 				})
-				.collect::<Result<_, _>>()?,
+				.collect::<ResultMultiple<_>>()?,
 		})
 	}
 
@@ -285,7 +285,7 @@ impl<'s> Expander<'s> {
 								.map_err(AppError::expand_expr(expr))?,
 						))
 					})
-					.collect::<Result<_, AppError>>()?,
+					.collect::<ResultMultiple<_>>()?,
 			},
 		};
 
