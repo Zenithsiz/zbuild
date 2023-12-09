@@ -11,8 +11,8 @@ use {
 macro decl_error(
 	$(#[$meta:meta])*
 	$Name:ident;
-	$Shared:ident;
-	$Other:ident;
+	$Shared:ident($SharedTy:ty);
+	$Other:ident($OtherTy:ty);
 
 	$(
 		$( #[doc = $variant_doc:expr] )*
@@ -63,12 +63,12 @@ macro decl_error(
 		/// Shared
 		// TODO: Is this a good idea? Should we just use `Arc<AppError>` where relevant?
 		#[error(transparent)]
-		$Shared(Arc<Self>),
+		$Shared($SharedTy),
 
 		/// Other
 		// TODO: Removes usages of this, it's for quick prototyping
 		#[error(transparent)]
-		$Other(anyhow::Error),
+		$Other($OtherTy),
 
 		$(
 			$( #[doc = $variant_doc] )*
@@ -119,8 +119,8 @@ macro decl_error(
 decl_error! {
 	/// Test
 	AppError;
-	Shared;
-	Other;
+	Shared(Arc<Self>);
+	Other(anyhow::Error);
 
 	/// Get current directory
 	#[from_fn( fn get_current_dir(source: io::Error)() )]
