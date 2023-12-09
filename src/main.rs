@@ -223,17 +223,18 @@ async fn build_target<'s, T: BuildableTargetInner<'s> + fmt::Display + fmt::Debu
 	let build_start_time = SystemTime::now();
 	let res = T::build(target, builder, rules, ignore_missing).await;
 
-	// Then check if we did it
+	// Then check the status
 	match res {
 		Ok(build_res) => {
-			if build_res.built_here {
+			// If we actually built the rule, and it didn't just exist, log it
+			if build_res.built {
 				let build_duration = build_res
 					.build_time
 					.duration_since(build_start_time)
 					.unwrap_or(Duration::ZERO);
 				tracing::debug!("Built target {target} in {build_duration:.2?}");
 				println!("{target}");
-			};
+			}
 
 			Ok(())
 		},

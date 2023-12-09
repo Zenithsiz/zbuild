@@ -240,7 +240,6 @@ impl<'s> Builder<'s> {
 						return Ok((
 							BuildResult {
 								build_time,
-								built_here: false,
 								built: false,
 							},
 							None,
@@ -253,7 +252,6 @@ impl<'s> Builder<'s> {
 								// Note: We simply pretend the file was built right now
 								// TODO: Check if we should instead use a really old time?
 								build_time: SystemTime::now(),
-								built_here: false,
 								built:      false,
 							},
 							None,
@@ -524,7 +522,6 @@ impl<'s> Builder<'s> {
 		let cur_build_time = self::rule_last_build_time(rule).await?.unwrap_or_else(SystemTime::now);
 		let res = BuildResult {
 			build_time: cur_build_time,
-			built_here: needs_rebuilt,
 			built:      needs_rebuilt,
 		};
 
