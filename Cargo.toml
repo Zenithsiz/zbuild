@@ -108,10 +108,6 @@ clippy.iter_over_hash_type = "allow"
 clippy.pub_with_shorthand = "allow"
 clippy.pub_without_shorthand = "warn"
 
-# Too many false positives
-# TODO: Turn these on once they don't have as many false positives
-clippy.significant_drop_in_scrutinee = "allow"
-
 # Style
 clippy.implicit_return = "allow"
 clippy.multiple_inherent_impl = "allow"

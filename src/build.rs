@@ -26,7 +26,7 @@ use {
 	dashmap::DashMap,
 	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
 	itertools::Itertools,
-	std::{borrow::Cow, collections::HashMap, mem, time::SystemTime},
+	std::{borrow::Cow, collections::HashMap, time::SystemTime},
 	tokio::{fs, process, sync::Semaphore},
 };
 
@@ -269,33 +269,26 @@ impl<'s> Builder<'s> {
 			.or_insert_with(BuildLock::new)
 			.clone();
 
-		// Then check if built
-		let build_guard = build_lock.lock_dep().await;
-		match build_guard.res(&target) {
-			// If we got it, we were built, so just return the guard
-			Some(res) => res.map(|res| (res, Some(build_guard))),
-
-			// Else build first
-			// Note: Tokio read lock don't support upgrading, so we do a double-checked
-			//       lock here.
-			None => {
-				mem::drop(build_guard);
-				let mut build_guard = build_lock.lock_build().await;
-
-				match build_guard.res(&target) {
-					// If we got it in the meantime, return it
-					Some(res) => res.map(|res| (res, Some(build_guard.into_dep()))),
-
-					// Else build
-					None => {
-						let res = self.build_unchecked(&target, &rule, rules, ignore_missing).await;
-						build_guard
-							.finish(&target, res)
-							.map(|res| (res, Some(build_guard.into_dep())))
-					},
-				}
-			},
+		// Then check if we're already built
+		// Note: Tokio doesn't support lock upgrading, so we perform a double-checked lock
+		#[expect(irrefutable_let_patterns, reason = "We want to scope it to the `if` block")]
+		if let build_guard = build_lock.lock_dep().await &&
+			let Some(res) = build_guard.res(&target)
+		{
+			return res.map(|res| (res, Some(build_guard)));
 		}
+
+		// Else lock it for building and re-check
+		let mut build_guard = build_lock.lock_build().await;
+		if let Some(res) = build_guard.res(&target) {
+			return res.map(|res| (res, Some(build_guard.into_dep())));
+		}
+
+		// Else build
+		let res = self.build_unchecked(&target, &rule, rules, ignore_missing).await;
+		build_guard
+			.finish(&target, res)
+			.map(|res| (res, Some(build_guard.into_dep())))
 	}
 
 	/// Builds a target without checking if the target is already being built.
@@ -428,16 +421,16 @@ impl<'s> Builder<'s> {
 					};
 
 					// Then build it, if we should
-					let (dep_res, dep_guard) = match &dep_target {
+					let dep_res = match dep_target {
 						Some(dep_target) => {
 							let (res, dep_guard) = self
 								.build(
-									dep_target,
+									&dep_target,
 									rules,
 									ignore_missing | matches!(dep, Dep::File { is_optional: true, .. }),
 								)
 								.await
-								.map_err(AppError::build_target(dep_target))?;
+								.map_err(AppError::build_target(&dep_target))?;
 							tracing::trace!(?target, ?rule.name, ?dep, ?res, "Built target rule dependency");
 
 							self.send_event(|| Event::TargetDepBuilt {
@@ -446,10 +439,10 @@ impl<'s> Builder<'s> {
 							})
 							.await;
 
-							(Some(res), Some(dep_guard))
+							Some((dep_target, res, dep_guard))
 						},
 
-						None => (None, None),
+						None => None,
 					};
 
 					// If the dependency if a dependency deps file or an output deps file (and exists), build it's dependencies too
@@ -474,16 +467,7 @@ impl<'s> Builder<'s> {
 						_ => vec![],
 					};
 
-					let deps = util::chain!(
-						match (dep_target, dep_res, dep_guard) {
-							(Some(dep_target), Some(dep_res), Some(dep_guard)) =>
-								Some((dep_target, dep_res, dep_guard)),
-							(None, None, None) => None,
-							_ => unreachable!(),
-						},
-						dep_deps.into_iter()
-					)
-					.collect::<Vec<_>>();
+					let deps = util::chain!(dep_res, dep_deps.into_iter()).collect::<Vec<_>>();
 					tracing::trace!(?target, ?rule.name, ?dep, ?deps, "Built target rule dependency dependencies");
 
 					Ok(deps)
