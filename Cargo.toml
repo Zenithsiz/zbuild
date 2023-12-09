@@ -44,10 +44,10 @@ pin-project = "1.1.3"
 [lints]
 
 # This project doesn't require unsafe code
-# TODO: This might be too restrictive in the future. If
-#       we end up removing it, use `rust.unsafe_op_in_unsafe_fn = "deny"`.
+# Note: Although we don't use unsafe code, if we do in the future, `unsafe_op_in_unsafe_fn`
+#       should be denied, so we deny it already, despite it never triggering due to forbidding `rust.unsafe_code`
 rust.unsafe_code = "forbid"
-
+rust.unsafe_op_in_unsafe_fn = "deny"
 
 # Group lints
 # Note: We warn on the full group list, and then `allow` the
@@ -60,11 +60,6 @@ clippy.nursery = { level = "warn", priority = -1 }
 clippy.restriction = { level = "warn", priority = -1 }
 clippy.blanket_clippy_restriction_lints = "allow"
 
-# Has false positives on dev-dependencies / tests
-# TODO: Turn on once the false positives have reduced. In the meantime
-#       turn it on, from time to time, and check manually the warnings.
-#rust.unused_crate_dependencies = "warn"
-
 # Prefer `expect` instead of `unwrap`
 clippy.unwrap_used = "deny"
 clippy.expect_used = "allow"
@@ -76,6 +71,7 @@ rust.elided_lifetimes_in_paths = "deny"
 rust.missing_copy_implementations = "warn"
 rust.missing_debug_implementations = "warn"
 
+# Misc.
 rust.noop_method_call = "warn"
 rust.unused_results = "warn"
 rust.explicit_outlives_requirements = "warn"
@@ -89,6 +85,7 @@ rust.unused_lifetimes = "warn"
 rust.unused_macro_rules = "warn"
 rust.unused_tuple_struct_fields = "warn"
 rust.variant_size_differences = "warn"
+rust.unused_crate_dependencies = "warn"
 
 # We don't need this kind of control over this application
 clippy.pub_use = "allow"
