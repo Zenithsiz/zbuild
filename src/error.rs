@@ -7,291 +7,428 @@ use {
 	std::{fmt, io, path::PathBuf, process::ExitStatusError, sync::Arc},
 };
 
-/// App error
-///
-/// Error that will be bubbled up to main when a fatal error occurs
-// TODO: Not use debug output sometimes?
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum AppError {
-	/// Shared
-	// TODO: Is this a good idea? Should we just use `Arc<AppError>` here relevant?
-	#[error(transparent)]
-	Shared(Arc<Self>),
+/// Generates the error enum
+macro decl_error(
+	$(#[$meta:meta])*
+	$Name:ident;
+	$Shared:ident;
+	$Other:ident;
 
-	/// Other
-	// TODO: Removes usages of this, it's for quick prototyping
-	#[error(transparent)]
-	Other(anyhow::Error),
+	$(
+		$( #[doc = $variant_doc:expr] )*
+		$(
+			#[from_fn(
+				// Function definition
+				$(#[$variant_fn_meta:meta])*
+				fn $variant_fn:ident
+
+				// Generics
+				$( <
+					$( $VariantLifetimes:lifetime, )*
+					$( $VariantGenerics:ident $(: $VariantBound:path )? ),* $(,)?
+				> )?
+
+				// Error
+				(
+					$variant_fn_err:ident: $VariantFnErr:ty $( => $variant_fn_err_expr:expr )?
+				)
+
+				// Args
+				(
+					$(
+						$variant_fn_arg:ident: $VariantFnArg:ty $( => $variant_fn_arg_expr:expr )?
+					),*
+					$(,)?
+				)
+
+				// Return type lifetimes
+				$(
+					+ $VariantFnLifetime:lifetime
+				)?
+			)]
+		)?
+		$Variant:ident( $($variant_fmt:tt)* ) {
+			$(
+				$( #[$variant_field_meta:meta] )*
+				$variant_field:ident: $VariantField:ty
+			),*
+			$(,)?
+		},
+	)*
+) {
+	$( #[ $meta ] )*
+	#[derive(Debug, thiserror::Error)]
+	#[non_exhaustive]
+	pub enum $Name {
+		/// Shared
+		// TODO: Is this a good idea? Should we just use `Arc<AppError>` where relevant?
+		#[error(transparent)]
+		$Shared(Arc<Self>),
+
+		/// Other
+		// TODO: Removes usages of this, it's for quick prototyping
+		#[error(transparent)]
+		$Other(anyhow::Error),
+
+		$(
+			$( #[doc = $variant_doc] )*
+			#[error( $($variant_fmt)* )]
+			$Variant {
+				$(
+					$( #[$variant_field_meta] )*
+					$variant_field: $VariantField,
+				)*
+			},
+		)*
+	}
+
+	impl $Name {
+		$(
+			$(
+				#[doc = concat!("Returns a function to create a [`Self::", stringify!($Variant) ,"`] error from it's inner error.")]
+				$( #[$variant_fn_meta] )*
+				pub fn $variant_fn
+
+				// Generics
+				$( <
+					$( $VariantLifetimes, )*
+					$( $VariantGenerics $(: $VariantBound )?, )*
+				> )?
+
+				// Arguments
+				( $(
+					$variant_fn_arg: $VariantFnArg,
+				)* )
+
+				// Return type
+				-> impl FnOnce($VariantFnErr) -> Self $( + $VariantFnLifetime )?
+
+				{
+					move |$variant_fn_err| Self::$Variant {
+						$variant_fn_err $(: $variant_fn_err_expr )?,
+						$(
+							$variant_fn_arg $(: $variant_fn_arg_expr )?,
+						)*
+					}
+				}
+			)?
+		)*
+	}
+}
+
+decl_error! {
+	/// Test
+	AppError;
+	Shared;
+	Other;
 
 	/// Get current directory
-	#[error("Unable to get current directory")]
-	GetCurrentDir {
+	#[from_fn( fn get_current_dir(source: io::Error)() )]
+	GetCurrentDir("Unable to get current directory") {
 		/// Underlying error
-		#[source]
-		err: io::Error,
+		source: io::Error
 	},
 
 	/// Set current directory
-	#[error("Unable to set current directory to {dir_path:?}")]
-	SetCurrentDir {
-		/// Directory that we failed to set as current
-		dir_path: PathBuf,
-
+	#[from_fn(
+		fn set_current_dir<P: Into<PathBuf>>(source: io::Error)(
+			dir: P => dir.into()
+		)
+	)]
+	SetCurrentDir("Unable to set current directory to {dir:?}") {
 		/// Underlying error
-		#[source]
-		err: io::Error,
+		source: io::Error,
+
+		/// Path we tried to set as current directory
+		dir: PathBuf
 	},
 
 	/// Read file
-	#[error("Unable to read file {file_path:?}")]
-	ReadFile {
+	#[from_fn(
+		fn read_file<P: Into<PathBuf>>(source: io::Error)(
+			file_path: P => file_path.into()
+		)
+	)]
+	ReadFile("Unable to read file {file_path:?}") {
+		/// Underlying error
+		source: io::Error,
+
 		/// File we failed to read
 		file_path: PathBuf,
-
-		/// Underlying error
-		#[source]
-		err: io::Error,
 	},
 
 	/// Read file metadata
-	#[error("Unable to read file metadata {file_path:?}")]
-	ReadFileMetadata {
+	#[from_fn(
+		fn read_file_metadata<P: Into<PathBuf>>(source: io::Error)(
+			file_path: P => file_path.into()
+		)
+	)]
+	ReadFileMetadata("Unable to read file metadata {file_path:?}") {
+		/// Underlying error
+		source: io::Error,
+
 		/// File we failed to read metadata of
 		file_path: PathBuf,
-
-		/// Underlying error
-		#[source]
-		err: io::Error,
 	},
 
 	/// Get file modified time
-	#[error("Unable to get file modified time {file_path:?}")]
-	GetFileModifiedTime {
+	#[from_fn(
+		fn get_file_modified_time<P: Into<PathBuf>>(source: io::Error)(
+			file_path: P => file_path.into()
+		)
+	)]
+	GetFileModifiedTime("Unable to get file modified time {file_path:?}") {
+		/// Underlying error
+		source: io::Error,
+
 		/// File we failed to get the modified time of
 		file_path: PathBuf,
-
-		/// Underlying error
-		#[source]
-		err: io::Error,
 	},
 
 	/// Check if file exists
-	#[error("Unable to check if file exists {file_path:?}")]
-	CheckFileExists {
+	#[from_fn(
+		fn check_file_exists<P: Into<PathBuf>>(source: io::Error)(
+			file_path: P => file_path.into()
+		)
+	)]
+	CheckFileExists("Unable to check if file exists {file_path:?}") {
+		/// Underlying error
+		source: io::Error,
+
 		/// File we failed to check
 		file_path: PathBuf,
-
-		/// Underlying error
-		#[source]
-		err: io::Error,
 	},
 
 	/// Missing file
-	#[error("Missing file {file_path:?} and no rule to build it found")]
-	MissingFile {
+	#[from_fn(
+		#[expect(dead_code, reason = "Not used yet")]
+		fn missing_file<P: Into<PathBuf>>(source: io::Error)(
+			file_path: P => file_path.into()
+		)
+	)]
+	MissingFile("Missing file {file_path:?} and no rule to build it found") {
+		/// Underlying error
+		source: io::Error,
+
 		/// File that is missing
 		file_path: PathBuf,
-
-		/// Underlying error
-		#[source]
-		err: io::Error,
 	},
 
 	/// Parse yaml
-	#[error("Unable to parse yaml file {yaml_path:?}")]
-	ParseYaml {
+	#[from_fn(
+		fn parse_yaml<P: Into<PathBuf>>(source: serde_yaml::Error)(
+			yaml_path: P => yaml_path.into()
+		)
+	)]
+	ParseYaml("Unable to parse yaml file {yaml_path:?}") {
+		/// Underlying error
+		source: serde_yaml::Error,
+
 		/// Yaml path
 		yaml_path: PathBuf,
-
-		/// Underlying error
-		#[source]
-		err: serde_yaml::Error,
 	},
 
 	/// Spawn command
-	#[error("Unable to spawn {cmd_fmt}")]
-	SpawnCommand {
-		/// Command formatted
-		cmd_fmt: String,
-
+	#[from_fn(
+		fn spawn_command<T: fmt::Display>(source: io::Error)(
+			cmd: &Command<T> => self::cmd_to_string(cmd)
+		) + '_
+	)]
+	SpawnCommand("Unable to spawn {cmd}") {
 		/// Underlying error
-		#[source]
-		err: io::Error,
+		source: io::Error,
+
+		/// Command formatted
+		cmd: String,
 	},
 
 	/// Wait for command
-	#[error("Unable to wait for {cmd_fmt}")]
-	WaitCommand {
-		/// Command formatted
-		cmd_fmt: String,
-
+	#[from_fn(
+		fn wait_command<T: fmt::Display>(source: io::Error)(
+			cmd: &Command<T> => self::cmd_to_string(cmd)
+		) + '_
+	)]
+	WaitCommand("Unable to wait for {cmd}") {
 		/// Underlying error
-		#[source]
-		err: io::Error,
+		source: io::Error,
+
+		/// Command formatted
+		cmd: String,
 	},
 
 	/// Command failed
-	#[error("Command failed {cmd_fmt}")]
-	CommandFailed {
-		/// Command formatted
-		cmd_fmt: String,
-
+	#[from_fn(
+		fn command_failed<T: fmt::Display>(source: ExitStatusError)(
+			cmd: &Command<T> => self::cmd_to_string(cmd)
+		) + '_
+	)]
+	CommandFailed("Command failed {cmd}") {
 		/// Underlying error
-		#[source]
-		err: ExitStatusError,
+		source: ExitStatusError,
+
+		/// Command formatted
+		cmd: String,
 	},
 
 	/// Get default jobs
-	#[error("Unable to query system for available parallelism for default number of jobs")]
-	GetDefaultJobs {
+	#[from_fn( fn get_default_jobs(source: io::Error)() )]
+	GetDefaultJobs("Unable to query system for available parallelism for default number of jobs") {
 		/// Underlying error
-		#[source]
-		err: io::Error,
+		source: io::Error
 	},
 
 	/// Zbuild not found
-	#[error(
-		"No `zbuild.yaml` file found in current or parent directories.\nYou can use `--path {{zbuild-path}}` in order \
-		 to specify the manifest's path"
-	)]
-	ZBuildNotFound,
+	ZBuildNotFound(
+		"No `zbuild.yaml` file found in current or parent directories.\n\
+		You can use `--path {{zbuild-path}}` in order to specify the manifest's path"
+	) {
+
+	},
 
 	/// Path had no parent
-	#[error("Path had no parent directory {path:?}")]
-	PathParent {
+	PathParent("Path had no parent directory {path:?}") {
 		/// Path that had no parent
 		path: PathBuf,
 	},
 
 	/// Build target
-	#[error("Unable to build target {target_fmt}")]
-	BuildTarget {
-		/// Formatted target
-		target_fmt: String,
-
+	#[from_fn(
+		fn build_target<'target, T: fmt::Display>(source: Self => Box::new(source))(
+			target: &'target Target<'_, T> => target.to_string()
+		) + 'target
+	)]
+	BuildTarget("Unable to build target {target}") {
 		/// Underlying error
-		#[source]
-		err: Box<Self>,
+		source: Box<Self>,
+
+		/// Formatted target
+		target: String,
 	},
 
 	/// Build rule
-	#[error("Unable to build rule {rule_name}")]
-	BuildRule {
+	#[from_fn(
+		fn build_rule<S: Into<String>>(source: Self => Box::new(source))(
+			rule_name: S => rule_name.into()
+		)
+	)]
+	BuildRule("Unable to build rule {rule_name}") {
+		/// Underlying error
+		source: Box<Self>,
+
 		/// Rule name
 		rule_name: String,
-
-		/// Underlying error
-		#[source]
-		err: Box<Self>,
 	},
 
 	/// Build dependency file
-	#[error("Unable to build dependency file {dep_file:?}")]
-	BuildDepFile {
+	#[from_fn(
+		fn build_dep_file<P: Into<PathBuf>>(source: Self => Box::new(source))(
+			dep_file: P => dep_file.into()
+		)
+	)]
+	BuildDepFile("Unable to build dependency file {dep_file:?}") {
+		/// Underlying error
+		source: Box<Self>,
+
 		/// Dependency file
 		dep_file: PathBuf,
-
-		/// Underlying error
-		#[source]
-		err: Box<Self>,
 	},
 
 	/// Expand rule
-	#[error("Unable to expand rule {rule_name}")]
-	ExpandRule {
+	#[from_fn(
+		fn expand_rule<T: Into<String>>(source: Self => Box::new(source))(
+			rule_name: T => rule_name.into()
+		)
+	)]
+	ExpandRule("Unable to expand rule {rule_name}") {
+		/// Underlying error
+		source: Box<Self>,
+
 		/// Rule name
 		rule_name: String,
-
-		/// Underlying error
-		#[source]
-		err: Box<Self>,
 	},
 
 	/// Expand target
-	#[error("Unable to expand target {target_fmt}")]
-	ExpandTarget {
-		/// Formatted target
-		target_fmt: String,
-
+	#[from_fn(
+		fn expand_target<'target, T: fmt::Display>(source: Self => Box::new(source))(
+			target: &'target Target<'_, T> => target.to_string()
+		) + 'target
+	)]
+	ExpandTarget("Unable to expand target {target}") {
 		/// Underlying error
-		#[source]
-		err: Box<Self>,
+		source: Box<Self>,
+
+		/// Formatted target
+		target: String,
 	},
 
 	/// Expand expression
-	#[error("Unable to expand expression {expr_fmt}")]
-	ExpandExpr {
-		/// Formatted expression
-		expr_fmt: String,
-
+	#[from_fn(
+		fn expand_expr<'expr,>(source: Self => Box::new(source))(
+			expr: &'expr Expr<'_> => expr.to_string()
+		) + 'expr
+	)]
+	ExpandExpr("Unable to expand expression {expr}") {
 		/// Underlying error
-		#[source]
-		err: Box<Self>,
+		source: Box<Self>,
+
+		/// Formatted expression
+		expr: String,
 	},
 
 	/// Unknown rule
-	#[error("Unknown rule {rule_name}")]
-	UnknownRule {
+	UnknownRule("Unknown rule {rule_name}") {
 		/// Rule name
 		rule_name: String,
 	},
 
 	/// Unknown alias
-	#[error("Unknown alias {alias_name}")]
-	UnknownAlias {
+	UnknownAlias("Unknown alias {alias_name}") {
 		/// Alias name
 		alias_name: String,
 	},
 
 	/// Unknown pattern
-	#[error("Unknown pattern {pattern_name}")]
-	UnknownPattern {
+	UnknownPattern("Unknown pattern {pattern_name}") {
 		/// Pattern name
 		pattern_name: String,
 	},
 
 	/// Unresolved alias or patterns
-	#[error("Expression had unresolved alias or patterns: {expr_fmt} ({expr_cmpts_fmt:?})")]
-	UnresolvedAliasOrPats {
+	UnresolvedAliasOrPats("Expression had unresolved alias or patterns: {expr} ({expr_cmpts:?})") {
 		/// Formatted expression
-		expr_fmt: String,
+		expr: String,
 
 		/// Components
-		expr_cmpts_fmt: Vec<String>,
+		expr_cmpts: Vec<String>,
 	},
 
 	/// Match expression had 2 or moore patterns
-	#[error("Match expression had 2 or more patterns: {expr_fmt} ({expr_cmpts_fmt:?})")]
-	MatchExprTooManyPats {
+	MatchExprTooManyPats("Match expression had 2 or more patterns: {expr} ({expr_cmpts:?})") {
 		/// Formatted expression
-		expr_fmt: String,
+		expr: String,
 
 		/// Components
-		expr_cmpts_fmt: Vec<String>,
+		expr_cmpts: Vec<String>,
 	},
 
 	/// Alias operation
-	#[error("Unable to apply alias operation `{op}`")]
-	AliasOp {
+	#[from_fn( fn alias_op(source: Self => Box::new(source))(op: AliasOp) )]
+	AliasOp("Unable to apply alias operation `{op}`") {
+		/// Underlying error
+		source: Box<Self>,
+
 		/// Operation
 		op: AliasOp,
-
-		/// Underlying error
-		#[source]
-		err: Box<Self>,
 	},
 
 	/// Dependency file missing `:`
-	#[error("Dependency file {dep_file_path:?} was missing a `:`")]
-	DepFileMissingColon {
+	DepFileMissingColon("Dependency file {dep_file_path:?} was missing a `:`") {
 		/// Dep file path
 		dep_file_path: PathBuf,
 	},
 
 	/// Dependency file missing rule name
-	#[error("Dependency file {dep_file_path:?} is missing the rule name {rule_name}, found {dep_output}")]
-	DepFileMissingRuleName {
+	DepFileMissingRuleName("Dependency file {dep_file_path:?} is missing the rule name {rule_name}, found {dep_output}") {
 		/// Dep file path
 		dep_file_path: PathBuf,
 
@@ -303,8 +440,7 @@ pub enum AppError {
 	},
 
 	/// Dependency file missing rule name
-	#[error("Dependency file {dep_file_path:?} is missing any output of {rule_outputs:?}, found {dep_output}")]
-	DepFileMissingOutputs {
+	DepFileMissingOutputs("Dependency file {dep_file_path:?} is missing any output of {rule_outputs:?}, found {dep_output}") {
 		/// Dep file path
 		dep_file_path: PathBuf,
 
@@ -316,179 +452,21 @@ pub enum AppError {
 	},
 
 	/// Rule executable was empty
-	#[error("Rule {rule_name} executable as empty")]
-	RuleExecEmpty {
+	RuleExecEmpty("Rule {rule_name} executable as empty") {
 		/// Rule name
 		rule_name: String,
 	},
 }
 
-/// Error shortcuts
-///
-/// These are functions that return functions to pass to `.map_err` to
-/// specify a certain error.
-#[expect(dead_code, reason = "They're convenience functions we'll use in the future")]
-impl AppError {
-	/// Returns a function to create a [`Self::GetCurrentDir`] error from it's inner error.
-	pub fn get_current_dir() -> impl FnOnce(io::Error) -> Self {
-		move |err| Self::GetCurrentDir { err }
-	}
-
-	/// Returns a function to create a [`Self::SetCurrentDir`] error from it's inner error.
-	pub fn set_current_dir(dir_path: impl Into<PathBuf>) -> impl FnOnce(io::Error) -> Self {
-		move |err| Self::SetCurrentDir {
-			dir_path: dir_path.into(),
-			err,
-		}
-	}
-
-	/// Returns a function to create a [`Self::ReadFile`] error from it's inner error.
-	pub fn read_file(file_path: impl Into<PathBuf>) -> impl FnOnce(io::Error) -> Self {
-		move |err| Self::ReadFile {
-			file_path: file_path.into(),
-			err,
-		}
-	}
-
-	/// Returns a function to create a [`Self::ReadFileMetadata`] error from it's inner error.
-	pub fn read_file_metadata(file_path: impl Into<PathBuf>) -> impl FnOnce(io::Error) -> Self {
-		move |err| Self::ReadFileMetadata {
-			file_path: file_path.into(),
-			err,
-		}
-	}
-
-	/// Returns a function to create a [`Self::GetFileModifiedTime`] error from it's inner error.
-	pub fn get_file_modified_time(file_path: impl Into<PathBuf>) -> impl FnOnce(io::Error) -> Self {
-		move |err| Self::GetFileModifiedTime {
-			file_path: file_path.into(),
-			err,
-		}
-	}
-
-	/// Returns a function to create a [`Self::CheckFileExists`] error from it's inner error.
-	pub fn check_file_exists(file_path: impl Into<PathBuf>) -> impl FnOnce(io::Error) -> Self {
-		move |err| Self::CheckFileExists {
-			file_path: file_path.into(),
-			err,
-		}
-	}
-
-	/// Returns a function to create a [`Self::MissingFile`] error from it's inner error.
-	pub fn missing_file(file_path: impl Into<PathBuf>) -> impl FnOnce(io::Error) -> Self {
-		move |err| Self::MissingFile {
-			file_path: file_path.into(),
-			err,
-		}
-	}
-
-	/// Returns a function to create a [`Self::ParseYaml`] error from it's inner error.
-	pub fn parse_yaml(yaml_path: impl Into<PathBuf>) -> impl FnOnce(serde_yaml::Error) -> Self {
-		move |err| Self::ParseYaml {
-			yaml_path: yaml_path.into(),
-			err,
-		}
-	}
-
-	/// Returns a function to create a [`Self::SpawnCommand`] error from it's inner error.
-	pub fn spawn_command<T: fmt::Display>(cmd: &Command<T>) -> impl FnOnce(io::Error) -> Self + '_ {
-		move |err| Self::SpawnCommand {
-			cmd_fmt: Self::cmd_to_string(cmd),
-			err,
-		}
-	}
-
-	/// Returns a function to create a [`Self::WaitCommand`] error from it's inner error.
-	pub fn wait_command<T: fmt::Display>(cmd: &Command<T>) -> impl FnOnce(io::Error) -> Self + '_ {
-		move |err| Self::WaitCommand {
-			cmd_fmt: Self::cmd_to_string(cmd),
-			err,
-		}
-	}
-
-	/// Returns a function to create a [`Self::CommandFailed`] error from it's inner error.
-	pub fn command_failed<T: fmt::Display>(cmd: &Command<T>) -> impl FnOnce(ExitStatusError) -> Self + '_ {
-		move |err| Self::CommandFailed {
-			cmd_fmt: Self::cmd_to_string(cmd),
-			err,
-		}
-	}
-
-	/// Helper function to format a `Command` for errors
-	fn cmd_to_string<T: fmt::Display>(cmd: &Command<T>) -> String {
-		let inner = cmd
-			.args
-			.iter()
-			.map(|arg| match arg {
-				rules::CommandArg::Expr(expr) => format!("\"{expr}\""),
-				rules::CommandArg::Command { cmd, .. } => Self::cmd_to_string(cmd),
-			})
-			.join(" ");
-		format!("[{inner}]")
-	}
-
-	/// Returns a function to create a [`Self::GetDefaultJobs`] error from it's inner error.
-	pub fn get_default_jobs() -> impl FnOnce(io::Error) -> Self {
-		move |err| Self::GetDefaultJobs { err }
-	}
-
-	/// Returns a function to create a [`Self::AliasOp`] error from it's inner error.
-	pub fn alias_op(op: impl Into<AliasOp>) -> impl FnOnce(Self) -> Self {
-		move |err| Self::AliasOp {
-			op:  op.into(),
-			err: Box::new(err),
-		}
-	}
-
-	/// Returns a function to create a [`Self::BuildTarget`] error from it's inner error.
-	pub fn build_target<'target, T: fmt::Display>(
-		target: &'target Target<'_, T>,
-	) -> impl FnOnce(Self) -> Self + 'target {
-		move |err| Self::BuildTarget {
-			target_fmt: target.to_string(),
-			err:        Box::new(err),
-		}
-	}
-
-	/// Returns a function to create a [`Self::BuildRule`] error from it's inner error.
-	pub fn build_rule(rule_name: impl Into<String>) -> impl FnOnce(Self) -> Self {
-		move |err| Self::BuildRule {
-			rule_name: rule_name.into(),
-			err:       Box::new(err),
-		}
-	}
-
-	/// Returns a function to create a [`Self::BuildDepFile`] error from it's inner error.
-	pub fn build_dep_file(dep_file: impl Into<PathBuf>) -> impl FnOnce(Self) -> Self {
-		move |err| Self::BuildDepFile {
-			dep_file: dep_file.into(),
-			err:      Box::new(err),
-		}
-	}
-
-	/// Returns a function to create a [`Self::ExpandRule`] error from it's inner error.
-	pub fn expand_rule(rule_name: impl Into<String>) -> impl FnOnce(Self) -> Self {
-		move |err| Self::ExpandRule {
-			rule_name: rule_name.into(),
-			err:       Box::new(err),
-		}
-	}
-
-	/// Returns a function to create a [`Self::ExpandTarget`] error from it's inner error.
-	pub fn expand_target<'target, T: fmt::Display>(
-		target: &'target Target<'_, T>,
-	) -> impl FnOnce(Self) -> Self + 'target {
-		move |err| Self::ExpandTarget {
-			target_fmt: target.to_string(),
-			err:        Box::new(err),
-		}
-	}
-
-	/// Returns a function to create a [`Self::ExpandExpr`] error from it's inner error.
-	pub fn expand_expr<'expr>(expr: &'expr Expr<'_>) -> impl FnOnce(Self) -> Self + 'expr {
-		move |err| Self::ExpandExpr {
-			expr_fmt: expr.to_string(),
-			err:      Box::new(err),
-		}
-	}
+/// Helper function to format a `Command` for errors
+fn cmd_to_string<T: fmt::Display>(cmd: &Command<T>) -> String {
+	let inner = cmd
+		.args
+		.iter()
+		.map(|arg| match arg {
+			rules::CommandArg::Expr(expr) => format!("\"{expr}\""),
+			rules::CommandArg::Command { cmd, .. } => self::cmd_to_string(cmd),
+		})
+		.join(" ");
+	format!("[{inner}]")
 }

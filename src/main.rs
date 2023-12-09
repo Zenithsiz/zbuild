@@ -195,7 +195,7 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 			true => return Ok(zbuild_path),
 			false => match cur_path.parent() {
 				Some(parent) => cur_path = parent,
-				None => return Err(AppError::ZBuildNotFound),
+				None => return Err(AppError::ZBuildNotFound {}),
 			},
 		}
 	}

@@ -254,7 +254,7 @@ impl<'s> Builder<'s> {
 					Err(err) =>
 						do yeet AppError::MissingFile {
 							file_path: (**file).into(),
-							err,
+							source:    err,
 						},
 				},
 				// Note: If `target_rule` returns `Err` if this was a rule, so we can never reach here

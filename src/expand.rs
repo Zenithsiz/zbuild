@@ -122,8 +122,8 @@ impl<'s> Expander<'s> {
 		};
 
 		res.map_err(|cmpts| AppError::UnresolvedAliasOrPats {
-			expr_fmt:       expr.to_string(),
-			expr_cmpts_fmt: cmpts.into_iter().map(|cmpt| cmpt.to_string()).collect(),
+			expr:       expr.to_string(),
+			expr_cmpts: cmpts.into_iter().map(|cmpt| cmpt.to_string()).collect(),
 		})
 	}
 
