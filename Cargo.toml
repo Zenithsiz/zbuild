@@ -117,9 +117,6 @@ clippy.pub_without_shorthand = "warn"
 # Too many false positives
 # TODO: Turn these on once they don't have as many false positives
 clippy.significant_drop_in_scrutinee = "allow"
-clippy.significant_drop_tightening = "allow"
-clippy.tests_outside_test_module = "allow"     # Triggers for benches
-clippy.multiple_unsafe_ops_per_block = "allow" # Triggers for async?
 
 # Style
 clippy.implicit_return = "allow"

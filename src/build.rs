@@ -296,8 +296,9 @@ impl<'s> Builder<'s> {
 					// Else build
 					None => {
 						let res = self.build_unchecked(&target, &rule, rules, ignore_missing).await;
-						let res = build_guard.finish(&target, res);
-						res.map(|res| (res, Some(build_guard.into_dep())))
+						build_guard
+							.finish(&target, res)
+							.map(|res| (res, Some(build_guard.into_dep())))
 					},
 				}
 			},
