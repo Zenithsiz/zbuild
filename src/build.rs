@@ -23,6 +23,7 @@ use {
 		Rules,
 	},
 	dashmap::DashMap,
+	futures::TryFutureExt,
 	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
 	itertools::Itertools,
 	std::{
@@ -654,7 +655,7 @@ impl<'s> Builder<'s> {
 				},
 			})
 			.enumerate()
-			.map(async move |(idx, fut)| fut.await.map(|arg| (idx, arg)))
+			.map(|(idx, fut)| fut.map_ok(move |arg| (idx, arg)))
 			.collect::<FuturesUnordered<_>>()
 			.try_collect::<Vec<_>>()
 			.await?
