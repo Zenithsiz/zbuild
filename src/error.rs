@@ -8,111 +8,113 @@ use {
 };
 
 /// Generates the error enum
-macro decl_error(
-	$(#[$meta:meta])*
-	$Name:ident;
-	$Shared:ident($SharedTy:ty);
-	$Other:ident($OtherTy:ty);
+macro_rules! decl_error {
+	(
+		$(#[$meta:meta])*
+		$Name:ident;
+		$Shared:ident($SharedTy:ty);
+		$Other:ident($OtherTy:ty);
 
-	$(
-		$( #[doc = $variant_doc:expr] )*
 		$(
-			#[from_fn(
-				// Function definition
-				$(#[$variant_fn_meta:meta])*
-				fn $variant_fn:ident
-
-				// Generics
-				$( <
-					$( $VariantLifetimes:lifetime, )*
-					$( $VariantGenerics:ident $(: $VariantBound:path )? ),* $(,)?
-				> )?
-
-				// Error
-				(
-					$variant_fn_err:ident: $VariantFnErr:ty $( => $variant_fn_err_expr:expr )?
-				)
-
-				// Args
-				(
-					$(
-						$variant_fn_arg:ident: $VariantFnArg:ty $( => $variant_fn_arg_expr:expr )?
-					),*
-					$(,)?
-				)
-
-				// Return type lifetimes
-				$(
-					+ $VariantFnLifetime:lifetime
-				)?
-			)]
-		)?
-		$Variant:ident( $($variant_fmt:tt)* ) {
+			$( #[doc = $variant_doc:expr] )*
 			$(
-				$( #[$variant_field_meta:meta] )*
-				$variant_field:ident: $VariantField:ty
-			),*
-			$(,)?
-		},
-	)*
-) {
-	$( #[ $meta ] )*
-	#[derive(Debug, thiserror::Error)]
-	#[non_exhaustive]
-	pub enum $Name {
-		/// Shared
-		// TODO: Is this a good idea? Should we just use `Arc<AppError>` where relevant?
-		#[error(transparent)]
-		$Shared($SharedTy),
+				#[from_fn(
+					// Function definition
+					$(#[$variant_fn_meta:meta])*
+					fn $variant_fn:ident
 
-		/// Other
-		// TODO: Removes usages of this, it's for quick prototyping
-		#[error(transparent)]
-		$Other($OtherTy),
+					// Generics
+					$( <
+						$( $VariantLifetimes:lifetime, )*
+						$( $VariantGenerics:ident $(: $VariantBound:path )? ),* $(,)?
+					> )?
 
-		$(
-			$( #[doc = $variant_doc] )*
-			#[error( $($variant_fmt)* )]
-			$Variant {
+					// Error
+					(
+						$variant_fn_err:ident: $VariantFnErr:ty $( => $variant_fn_err_expr:expr )?
+					)
+
+					// Args
+					(
+						$(
+							$variant_fn_arg:ident: $VariantFnArg:ty $( => $variant_fn_arg_expr:expr )?
+						),*
+						$(,)?
+					)
+
+					// Return type lifetimes
+					$(
+						+ $VariantFnLifetime:lifetime
+					)?
+				)]
+			)?
+			$Variant:ident( $($variant_fmt:tt)* ) {
 				$(
-					$( #[$variant_field_meta] )*
-					$variant_field: $VariantField,
-				)*
+					$( #[$variant_field_meta:meta] )*
+					$variant_field:ident: $VariantField:ty
+				),*
+				$(,)?
 			},
 		)*
-	}
+	) => {
+		$( #[ $meta ] )*
+		#[derive(Debug, thiserror::Error)]
+		#[non_exhaustive]
+		pub enum $Name {
+			/// Shared
+			// TODO: Is this a good idea? Should we just use `Arc<AppError>` where relevant?
+			#[error(transparent)]
+			$Shared($SharedTy),
 
-	impl $Name {
-		$(
+			/// Other
+			// TODO: Removes usages of this, it's for quick prototyping
+			#[error(transparent)]
+			$Other($OtherTy),
+
 			$(
-				#[doc = concat!("Returns a function to create a [`Self::", stringify!($Variant) ,"`] error from it's inner error.")]
-				$( #[$variant_fn_meta] )*
-				pub fn $variant_fn
+				$( #[doc = $variant_doc] )*
+				#[error( $($variant_fmt)* )]
+				$Variant {
+					$(
+						$( #[$variant_field_meta] )*
+						$variant_field: $VariantField,
+					)*
+				},
+			)*
+		}
 
-				// Generics
-				$( <
-					$( $VariantLifetimes, )*
-					$( $VariantGenerics $(: $VariantBound )?, )*
-				> )?
+		impl $Name {
+			$(
+				$(
+					#[doc = concat!("Returns a function to create a [`Self::", stringify!($Variant) ,"`] error from it's inner error.")]
+					$( #[$variant_fn_meta] )*
+					pub fn $variant_fn
 
-				// Arguments
-				( $(
-					$variant_fn_arg: $VariantFnArg,
-				)* )
+					// Generics
+					$( <
+						$( $VariantLifetimes, )*
+						$( $VariantGenerics $(: $VariantBound )?, )*
+					> )?
 
-				// Return type
-				-> impl FnOnce($VariantFnErr) -> Self $( + $VariantFnLifetime )?
+					// Arguments
+					( $(
+						$variant_fn_arg: $VariantFnArg,
+					)* )
 
-				{
-					move |$variant_fn_err| Self::$Variant {
-						$variant_fn_err $(: $variant_fn_err_expr )?,
-						$(
-							$variant_fn_arg $(: $variant_fn_arg_expr )?,
-						)*
+					// Return type
+					-> impl FnOnce($VariantFnErr) -> Self $( + $VariantFnLifetime )?
+
+					{
+						move |$variant_fn_err| Self::$Variant {
+							$variant_fn_err $(: $variant_fn_err_expr )?,
+							$(
+								$variant_fn_arg $(: $variant_fn_arg_expr )?,
+							)*
+						}
 					}
-				}
-			)?
-		)*
+				)?
+			)*
+		}
 	}
 }
 
