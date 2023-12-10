@@ -24,16 +24,12 @@ use {
 		Rules,
 	},
 	dashmap::DashMap,
-	futures::TryFutureExt,
-	futures::{stream::FuturesUnordered, StreamExt},
+	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
 	itertools::Itertools,
 	std::{
 		borrow::Cow,
 		collections::HashMap,
 		ffi::{OsStr, OsString},
-		// TODO: This locks us in to unix, but our path parsing already
-		//       essentially locks us in, so it might be fine?
-		os::unix::ffi::OsStringExt,
 		time::SystemTime,
 	},
 	tokio::{fs, process, sync::Semaphore},
@@ -647,7 +643,11 @@ impl<'s> Builder<'s> {
 				CommandArg::Command { strip_on_fail, cmd } => {
 					let res = self.exec_cmd(rule_name, cmd, true).await;
 					match (res, strip_on_fail) {
-						(Ok(arg), _) => Ok(Some(Cow::Owned(OsString::from_vec(arg)))),
+						(Ok(arg), _) => {
+							let arg = String::from_utf8(arg).map_err(AppError::command_output_non_utf8(cmd))?;
+							let arg = OsString::from(arg);
+							Ok(Some(Cow::Owned(arg)))
+						},
 						(Err(err), true) => {
 							tracing::debug!(?arg, err=%err.pretty(), "Stripping argument from failure");
 							Ok(None)

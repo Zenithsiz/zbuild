@@ -12,6 +12,7 @@ use {
 		ops::{ControlFlow, FromResidual, Try},
 		path::PathBuf,
 		process::{self, ExitStatusError, Termination},
+		string::FromUtf8Error,
 		sync::Arc,
 		vec,
 	},
@@ -344,6 +345,22 @@ decl_error! {
 	CommandFailed {
 		/// Underlying error
 		source: ExitStatusError,
+
+		/// Command formatted
+		cmd: String,
+	},
+
+	/// Command output was non-utf8
+	#[from_fn(
+		fn command_output_non_utf8<T: fmt::Display>(source: FromUtf8Error)(
+			cmd: &Command<T> => self::cmd_to_string(cmd)
+		) + '_
+	)]
+	#[source(Some(source))]
+	#[fmt("Command output was non-utf8 {cmd}")]
+	CommandOutputNonUtf8 {
+		/// Underlying error
+		source: FromUtf8Error,
 
 		/// Command formatted
 		cmd: String,
