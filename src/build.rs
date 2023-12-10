@@ -306,6 +306,14 @@ impl<'s> Builder<'s> {
 				Ok((res, Some(build_guard.into_dep())))
 			},
 			Err(err) => {
+				// Note: This check is racy, but it's fine to print this warning multiple times. We just don't want
+				//       to spam the user, since all further errors will likely caused by `AppError::ExecSemaphoreClosed`,
+				//       while the first few are the useful ones with the reason why the execution semaphore is being closed.
+				if !self.exec_semaphore.is_closed() {
+					tracing::debug!(err=%err.pretty(), "Stopping all future builds due to failure of target {target}");
+					self.exec_semaphore.close();
+				}
+
 				build_guard.finish_failed(target);
 				Err(err)
 			},
@@ -614,12 +622,16 @@ impl<'s> Builder<'s> {
 	/// Rebuilds a rule
 	pub async fn rebuild_rule(&self, rule: &Rule<'s, CowStr<'s>>) -> Result<(), AppError> {
 		// Lock the semaphore
-		// Note: It should never be closed
-		let _permit = self
-			.exec_semaphore
-			.acquire()
-			.await
-			.expect("Executable semaphore was closed");
+		// Note: If we locked it per-command, we could exit earlier
+		//       when closed, but that would break some executions.
+		//       For example, some executions emit an output file and
+		//       then need to treat it. If we stopped in the middle,
+		//       when trying again the file would already exist, but
+		//       be in a "bad state", and since all the modification dates
+		//       match it wouldn't be rebuilt.
+		let Ok(_permit) = self.exec_semaphore.acquire().await else {
+			do yeet AppError::ExecSemaphoreClosed {};
+		};
 
 		for cmd in &rule.exec.cmds {
 			// Note: We don't care about the stdout here and don't capture it anyway.

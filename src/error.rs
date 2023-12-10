@@ -582,6 +582,11 @@ decl_error! {
 	#[source(None)]
 	#[fmt("Exiting with non-0 due to failed builds")]
 	ExitDueToFailedBuilds {},
+
+	/// Execution semaphore was closed
+	#[source(None)]
+	#[fmt("Execution semaphore was closed")]
+	ExecSemaphoreClosed {},
 }
 
 /// Helper function to format a `Command` for errors
@@ -868,6 +873,7 @@ impl fmt::Display for PrettyDisplay<'_> {
 ///
 /// In our case, the following cases are considered *irrelevant*:
 /// - Is an [`AppError::BuildTarget`] with no source.
+/// - Is an [`AppError::ExecSemaphoreClosed`].
 fn err_contains_relevant(err: &AppError) -> bool {
 	// If we're multiple errors, return if any of them are relevant
 	if let AppError::Multiple(errs) = err {
@@ -875,7 +881,10 @@ fn err_contains_relevant(err: &AppError) -> bool {
 	}
 
 	// Else if the error itself is irrelevant, return
-	if matches!(err, AppError::BuildTarget { source: None, .. }) {
+	if matches!(
+		err,
+		AppError::BuildTarget { source: None, .. } | AppError::ExecSemaphoreClosed {}
+	) {
 		return false;
 	}
 
