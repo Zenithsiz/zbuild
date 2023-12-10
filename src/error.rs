@@ -6,6 +6,7 @@ use {
 	itertools::{Itertools, Position as ItertoolsPos},
 	std::{
 		convert::Infallible,
+		env,
 		error::Error as StdError,
 		fmt,
 		io,
@@ -124,8 +125,8 @@ macro_rules! decl_error {
 			)*
 
 			/// Returns an object that can be used for a pretty display of this error
-			pub const fn pretty(&self) -> PrettyDisplay<'_> {
-				PrettyDisplay(self)
+			pub fn pretty(&self) -> PrettyDisplay<'_> {
+				PrettyDisplay::new(self)
 			}
 		}
 
@@ -689,7 +690,13 @@ impl FromResidual<Result<Infallible, AppError>> for ExitResult {
 
 /// Pretty display for [`AppError`]
 #[derive(Debug)]
-pub struct PrettyDisplay<'a>(&'a AppError);
+pub struct PrettyDisplay<'a> {
+	/// Root error
+	root: &'a AppError,
+
+	/// Whether we should show irrelevant errors.
+	show_irrelevant: bool,
+}
 
 #[derive(PartialEq, Clone, Copy, Debug)]
 enum Column {
@@ -707,12 +714,41 @@ impl Column {
 	}
 }
 
-impl PrettyDisplay<'_> {
+impl<'a> PrettyDisplay<'a> {
+	/// Creates a new pretty display
+	pub(crate) fn new(root: &'a AppError) -> Self {
+		// Get whether to show irrelevant errors from the environment
+		let var = env::var("ZBUILD_SHOW_IRRELEVANT_ERRS");
+		let show_irrelevant = match var {
+			Ok(mut s) => {
+				s.make_ascii_lowercase();
+				matches!(s.as_str(), "1" | "y" | "yes" | "true")
+			},
+			Err(_) => false,
+		};
+
+		Self { root, show_irrelevant }
+	}
+
+	/// Sets if we should show irrelevant errors during formatting
+	pub fn with_show_irrelevant(&mut self, show_irrelevant: bool) -> &mut Self {
+		self.show_irrelevant = show_irrelevant;
+		self
+	}
+
 	/// Formats a single error
-	fn fmt_single(f: &mut fmt::Formatter<'_>, err: &AppError, columns: &mut Vec<Column>) -> fmt::Result {
+	// Note: Always prints, even if irrelevant. Only `fmt_multiple` actually filters
+	//       any of it's entries for being irrelevant.
+	fn fmt_single(
+		&self,
+		f: &mut fmt::Formatter<'_>,
+		err: &AppError,
+		columns: &mut Vec<Column>,
+		total_ignored_errs: &mut usize,
+	) -> fmt::Result {
 		// If it's multiple, display it as multiple
 		if let AppError::Multiple(errs) = err {
-			return Self::fmt_multiple(f, errs, columns);
+			return self.fmt_multiple(f, errs, columns, total_ignored_errs);
 		}
 
 		// Else write the top-level error
@@ -733,7 +769,7 @@ impl PrettyDisplay<'_> {
 				// Then check if we got to a multiple.
 				match cur_source.downcast_ref::<AppError>() {
 					Some(AppError::Multiple(errs)) => {
-						Self::fmt_multiple(f, errs, columns)?;
+						self.fmt_multiple(f, errs, columns, total_ignored_errs)?;
 						break;
 					},
 					_ => write!(f, "{cur_source}",)?,
@@ -752,18 +788,33 @@ impl PrettyDisplay<'_> {
 	}
 
 	/// Formats multiple errors
-	fn fmt_multiple(f: &mut fmt::Formatter<'_>, errs: &[AppError], columns: &mut Vec<Column>) -> fmt::Result {
+	fn fmt_multiple(
+		&self,
+		f: &mut fmt::Formatter<'_>,
+		errs: &[AppError],
+		columns: &mut Vec<Column>,
+		total_ignored_errs: &mut usize,
+	) -> fmt::Result {
 		// Write the top-level error
 		write!(f, "Multiple errors:")?;
 
 		// For each error, write it
+		let mut ignored_errs = 0;
 		for (pos, err) in errs.iter().with_position() {
+			// If this error is irrelevant, continue
+			if !self.show_irrelevant && !self::err_contains_relevant(err) {
+				ignored_errs += 1;
+				continue;
+			}
+
 			f.pad("\n")?;
 			for c in &*columns {
 				f.pad(c.as_str())?;
 			}
 
-			match matches!(pos, ItertoolsPos::Last | ItertoolsPos::Only) {
+			// Note: We'll only print `└─` if we have no ignored errors, since if we do,
+			//       we need that to print the final line showcasing how many we ignored
+			match ignored_errs == 0 && matches!(pos, ItertoolsPos::Last | ItertoolsPos::Only) {
 				true => {
 					f.pad("└─")?;
 					columns.push(Column::Empty);
@@ -774,10 +825,20 @@ impl PrettyDisplay<'_> {
 				},
 			}
 
-			Self::fmt_single(f, err, columns)?;
+			self.fmt_single(f, err, columns, total_ignored_errs)?;
 			let _: Option<_> = columns.pop();
 		}
 
+		if ignored_errs != 0 {
+			*total_ignored_errs += ignored_errs;
+
+			f.pad("\n")?;
+			for c in &*columns {
+				f.pad(c.as_str())?;
+			}
+			f.pad("└─")?;
+			write!(f, "({ignored_errs} irrelevant errors)")?;
+		}
 
 		Ok(())
 	}
@@ -786,9 +847,45 @@ impl PrettyDisplay<'_> {
 impl fmt::Display for PrettyDisplay<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let mut columns = vec![];
-		Self::fmt_single(f, self.0, &mut columns)?;
+		let mut total_ignored_errs = 0;
+		self.fmt_single(f, self.root, &mut columns, &mut total_ignored_errs)?;
 		assert_eq!(columns.len(), 0, "There should be no columns after formatting");
+
+		if total_ignored_errs != 0 {
+			f.pad("\n")?;
+			write!(
+				f,
+				"Note: {total_ignored_errs} irrelevant errors were hidden, set `ZBUILD_SHOW_IRRELEVANT_ERRS=1` to \
+				 show them"
+			)?;
+		}
 
 		Ok(())
 	}
+}
+
+/// Returns if this error contains any "relevant" errors.
+///
+/// In our case, the following cases are considered *irrelevant*:
+/// - Is an [`AppError::BuildTarget`] with no source.
+fn err_contains_relevant(err: &AppError) -> bool {
+	// If we're multiple errors, return if any of them are relevant
+	if let AppError::Multiple(errs) = err {
+		return errs.iter().any(self::err_contains_relevant);
+	}
+
+	// Else if the error itself is irrelevant, return
+	if matches!(err, AppError::BuildTarget { source: None, .. }) {
+		return false;
+	}
+
+	// Else check the inner error, if any
+	if let Some(source) = err.source() &&
+		let Some(err) = source.downcast_ref::<AppError>()
+	{
+		return self::err_contains_relevant(err);
+	}
+
+	// Else, we're relevant
+	true
 }

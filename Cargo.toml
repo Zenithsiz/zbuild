@@ -72,6 +72,10 @@ rust.unused_crate_dependencies = "warn"
 # False positives
 clippy.significant_drop_tightening = "allow"
 
+# Can't easily `allow` / `expect` it.
+# TODO: Issue seems to be with the feature `stmt_expr_attributes`?
+clippy.arithmetic_side_effects = "allow"
+
 # We don't need this kind of control over this application
 clippy.pub_use = "allow"
 clippy.question_mark_used = "allow"
