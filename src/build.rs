@@ -62,6 +62,8 @@ pub struct TargetRule<'s> {
 }
 
 /// Builder
+// TODO: Close the semaphore when any build fails? This would stop any new
+//       builds from being executed, while still finishing the existing ones.
 #[derive(Debug)]
 pub struct Builder<'s> {
 	/// Event sender
@@ -325,8 +327,6 @@ impl<'s> Builder<'s> {
 		}
 
 		// Gather all normal dependencies
-		// Note: It's fine to fail early here, we don't need to check all files
-		//       if one fails
 		let normal_deps = rule
 			.deps
 			.iter()
@@ -358,7 +358,6 @@ impl<'s> Builder<'s> {
 			.collect::<ResultMultiple<Vec<_>>>()?;
 
 		// And all output dependencies
-		// Note: Fine to fail early here, see note above for `normal_deps`
 		#[expect(
 			clippy::match_wildcard_for_single_variants,
 			reason = "We only care about dependency file variants"
@@ -390,9 +389,6 @@ impl<'s> Builder<'s> {
 			.collect::<ResultMultiple<Vec<_>>>()?;
 
 		// Then build all dependencies, as well as any dependency files
-		// Note: We don't want to fail early here, since commands might still be
-		//       running, so we first collect all results, and then fail
-		// TODO: Cancel dependencies that haven't even started building yet before failing?
 		// TODO: Don't collect like 3 times during this
 		let deps = util::chain!(normal_deps, out_deps)
 			.map(|dep| {
@@ -764,7 +760,6 @@ async fn parse_deps_file(file: &str) -> Result<(String, Vec<String>), AppError> 
 async fn rule_last_build_time<'s>(rule: &Rule<'s, CowStr<'s>>) -> Result<Option<SystemTime>, AppError> {
 	// Note: We get the time of the oldest file in order to ensure all
 	//       files are at-least that old
-	// Note: It's fine to fail early here, see the note on `normal_deps` in `build_unchecked`.
 	let built_time = rule
 		.output
 		.iter()
