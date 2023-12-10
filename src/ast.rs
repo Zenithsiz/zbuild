@@ -166,6 +166,10 @@ pub struct Pattern<'a> {
 
 /// Pattern operator
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
+#[expect(
+	missing_copy_implementations,
+	reason = "We might add non-`Copy` fields in the future"
+)]
 pub enum PatternOp {
 	/// Non-empty
 	NonEmpty,
@@ -173,7 +177,6 @@ pub enum PatternOp {
 
 /// Alias
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
-/// Alias
 pub struct Alias<'a> {
 	/// Alias name
 	pub name: &'a str,
@@ -184,6 +187,10 @@ pub struct Alias<'a> {
 
 /// Alias operator
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
+#[expect(
+	missing_copy_implementations,
+	reason = "We might add non-`Copy` fields in the future"
+)]
 pub enum AliasOp {
 	/// Directory name
 	DirName,
