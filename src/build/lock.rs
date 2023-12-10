@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	crate::{rules::Target, util::CowStr, AppError},
+	crate::{rules::Target, util::CowStr},
 	std::{assert_matches::assert_matches, collections::HashMap, sync::Arc, time::SystemTime},
 	tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock},
 };
@@ -21,7 +21,7 @@ pub struct BuildResult {
 #[derive(Clone, Debug)]
 pub struct BuildState<'s> {
 	/// Targets' result
-	targets_res: HashMap<Target<'s, CowStr<'s>>, Result<BuildResult, Arc<AppError>>>,
+	targets_res: HashMap<Target<'s, CowStr<'s>>, Result<BuildResult, ()>>,
 }
 
 /// Build lock
@@ -56,14 +56,13 @@ impl<'s> BuildLock<'s> {
 	}
 
 	/// Retrieves all targets' result by consuming the lock
-	pub fn into_res(self) -> Vec<(Target<'s, CowStr<'s>>, Result<BuildResult, AppError>)> {
+	pub fn into_res(self) -> Vec<(Target<'s, CowStr<'s>>, Result<BuildResult, ()>)> {
 		// TODO: Not panic here
 		Arc::try_unwrap(self.state)
 			.expect("Leftover references when unwrapping build lock")
 			.into_inner()
 			.targets_res
 			.into_iter()
-			.map(|(target, build)| (target, build.map_err(AppError::Shared)))
 			.collect()
 	}
 }
@@ -79,12 +78,8 @@ impl<'s> BuildLockBuildGuard<'s> {
 	/// Retrieves a target's result
 	///
 	/// Waits for any builders to finish
-	pub fn res(&self, target: &Target<'s, CowStr<'s>>) -> Option<Result<BuildResult, AppError>> {
-		self.state
-			.targets_res
-			.get(target)
-			.cloned()
-			.map(|res| res.map_err(AppError::Shared))
+	pub fn res(&self, target: &Target<'s, CowStr<'s>>) -> Option<Result<BuildResult, ()>> {
+		self.state.targets_res.get(target).copied()
 	}
 
 	/// Downgrades this build lock into a dependency lock
@@ -101,15 +96,15 @@ impl<'s> BuildLockBuildGuard<'s> {
 	}
 
 	/// Finishes a build
-	pub fn finish(
-		&mut self,
-		target: &Target<'s, CowStr<'s>>,
-		res: Result<BuildResult, AppError>,
-	) -> Result<BuildResult, AppError> {
-		let res = res.map_err(Arc::new);
-		let prev_res = self.state.targets_res.insert(target.clone(), res.clone());
+	pub fn finish(&mut self, target: Target<'s, CowStr<'s>>, res: BuildResult) {
+		let prev_res = self.state.targets_res.insert(target, Ok(res));
 		assert_matches!(prev_res, None, "Build was already finished");
-		res.map_err(AppError::Shared)
+	}
+
+	/// Finishes a build as failed
+	pub fn finish_failed(&mut self, target: Target<'s, CowStr<'s>>) {
+		let prev_res = self.state.targets_res.insert(target, Err(()));
+		assert_matches!(prev_res, None, "Build was already finished");
 	}
 }
 
@@ -124,11 +119,7 @@ impl<'s> BuildLockDepGuard<'s> {
 	/// Retrieves a target's result
 	///
 	/// Waits for any builders to finish
-	pub fn res(&self, target: &Target<'s, CowStr<'s>>) -> Option<Result<BuildResult, AppError>> {
-		self.state
-			.targets_res
-			.get(target)
-			.cloned()
-			.map(|res| res.map_err(AppError::Shared))
+	pub fn res(&self, target: &Target<'s, CowStr<'s>>) -> Option<Result<BuildResult, ()>> {
+		self.state.targets_res.get(target).copied()
 	}
 }

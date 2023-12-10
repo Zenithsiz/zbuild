@@ -101,7 +101,7 @@ impl<'s> Builder<'s> {
 	}
 
 	/// Returns all build results
-	pub fn into_build_results(self) -> HashMap<Target<'s, CowStr<'s>>, Result<BuildResult, AppError>> {
+	pub fn into_build_results(self) -> HashMap<Target<'s, CowStr<'s>>, Result<BuildResult, ()>> {
 		self.rules_lock
 			.into_iter()
 			.flat_map(|(_, lock)| lock.into_res())
@@ -280,20 +280,36 @@ impl<'s> Builder<'s> {
 		if let build_guard = build_lock.lock_dep().await &&
 			let Some(res) = build_guard.res(&target)
 		{
-			return res.map(|res| (res, Some(build_guard)));
+			return res
+				.map(|res| (res, Some(build_guard)))
+				.map_err(|()| AppError::BuildTarget {
+					source: None,
+					target: target.to_string(),
+				});
 		}
 
 		// Else lock it for building and re-check
 		let mut build_guard = build_lock.lock_build().await;
 		if let Some(res) = build_guard.res(&target) {
-			return res.map(|res| (res, Some(build_guard.into_dep())));
+			return res
+				.map(|res| (res, Some(build_guard.into_dep())))
+				.map_err(|()| AppError::BuildTarget {
+					source: None,
+					target: target.to_string(),
+				});
 		}
 
 		// Else build
-		let res = self.build_unchecked(&target, &rule, rules, ignore_missing).await;
-		build_guard
-			.finish(&target, res)
-			.map(|res| (res, Some(build_guard.into_dep())))
+		match self.build_unchecked(&target, &rule, rules, ignore_missing).await {
+			Ok(res) => {
+				build_guard.finish(target, res);
+				Ok((res, Some(build_guard.into_dep())))
+			},
+			Err(err) => {
+				build_guard.finish_failed(target);
+				Err(err)
+			},
+		}
 	}
 
 	/// Builds a target without checking if the target is already being built.

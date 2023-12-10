@@ -69,6 +69,9 @@ rust.unused_tuple_struct_fields = "warn"
 rust.variant_size_differences = "warn"
 rust.unused_crate_dependencies = "warn"
 
+# False positives
+clippy.significant_drop_tightening = "allow"
+
 # We don't need this kind of control over this application
 clippy.pub_use = "allow"
 clippy.question_mark_used = "allow"

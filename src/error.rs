@@ -13,7 +13,6 @@ use {
 		path::PathBuf,
 		process::{self, ExitStatusError, Termination},
 		string::FromUtf8Error,
-		sync::Arc,
 		vec,
 	},
 };
@@ -24,7 +23,6 @@ macro_rules! decl_error {
 		$(#[$meta:meta])*
 		$Name:ident;
 		$Multiple:ident($MultipleTy:ty);
-		$Shared:ident($SharedTy:ty);
 		$Other:ident($OtherTy:ty);
 
 		$(
@@ -77,10 +75,6 @@ macro_rules! decl_error {
 		pub enum $Name {
 			/// Multiple
 			$Multiple($MultipleTy),
-
-			/// Shared
-			// TODO: Is this a good idea? Should we just use `Arc<AppError>` where relevant?
-			$Shared($SharedTy),
 
 			/// Other
 			// TODO: Removes usages of this, it's for quick prototyping
@@ -141,7 +135,6 @@ macro_rules! decl_error {
 					// Note: We don't return any of the errors here, so that we can format
 					//       it properly without duplicating errors.
 					Self::$Multiple(_) => None,
-					Self::$Shared(source) => source.source(),
 					Self::$Other(source) => AsRef::<dyn StdError>::as_ref(source).source(),
 					$(
 						#[expect(clippy::allow_attributes, reason = "Auto-generated code")]
@@ -157,7 +150,6 @@ macro_rules! decl_error {
 				// Display the main message
 				match self {
 					Self::$Multiple(errs) => write!(f, "Multiple errors ({})", errs.len()),
-					Self::$Shared(source) => source.fmt(f),
 					Self::$Other(source) => source.fmt(f),
 					$(
 						#[expect(clippy::allow_attributes, reason = "Auto-generated code")]
@@ -175,7 +167,6 @@ decl_error! {
 	/// Test
 	AppError;
 	Multiple(Vec<Self>);
-	Shared(Arc<Self>);
 	Other(anyhow::Error);
 
 	/// Get current directory
@@ -390,15 +381,15 @@ decl_error! {
 
 	/// Build target
 	#[from_fn(
-		fn build_target<'target, T: fmt::Display>(source: Self => Box::new(source))(
+		fn build_target<'target, T: fmt::Display>(source: Self => Some(Box::new(source)))(
 			target: &'target Target<'_, T> => target.to_string()
 		) + 'target
 	)]
-	#[source(Some(&**source))]
+	#[source(source.as_deref().map(|err: &AppError| <&dyn StdError>::from(err)))]
 	#[fmt("Unable to build target {target}")]
 	BuildTarget {
 		/// Underlying error
-		source: Box<Self>,
+		source: Option<Box<Self>>,
 
 		/// Formatted target
 		target: String,
@@ -719,11 +710,6 @@ impl Column {
 impl PrettyDisplay<'_> {
 	/// Formats a single error
 	fn fmt_single(f: &mut fmt::Formatter<'_>, err: &AppError, columns: &mut Vec<Column>) -> fmt::Result {
-		// If the inner value is shared, display the inner
-		if let AppError::Shared(inner) = err {
-			return Self::fmt_single(f, inner, columns);
-		}
-
 		// If it's multiple, display it as multiple
 		if let AppError::Multiple(errs) = err {
 			return Self::fmt_multiple(f, errs, columns);
@@ -743,13 +729,6 @@ impl PrettyDisplay<'_> {
 				}
 				f.pad("└─")?;
 				columns.push(Column::Empty);
-
-				// While `cur_source` is `Shared`, downcast it
-				while let Some(source) = cur_source.downcast_ref::<AppError>() &&
-					let AppError::Shared(source) = source
-				{
-					cur_source = &**source;
-				}
 
 				// Then check if we got to a multiple.
 				match cur_source.downcast_ref::<AppError>() {
