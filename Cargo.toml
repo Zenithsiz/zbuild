@@ -6,28 +6,28 @@ version = "0.1.2"
 [dependencies]
 
 # Futures
-tokio = { version = "1.32.0", features = ["full"] }
+tokio = { version = "1.35.0", features = ["full"] }
 tokio-stream = "0.1.14"
-async-broadcast = "0.5.1"
+async-broadcast = "0.6.0"
 async-recursion = "1.0.5"
-futures = "0.3.28"
+futures = "0.3.29"
 
 # Concurrency
 dashmap = "5.5.3"
 
 # Cmd
-clap = { version = "4.4.3", features = ["derive"] }
+clap = { version = "4.4.11", features = ["derive"] }
 
 # Logging
-tracing = "0.1.37"
-tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 # Error handling
 anyhow = "1.0.75"
 
 # Serde
-serde = { version = "1.0.188", features = ["derive"] }
-serde_yaml = "0.9.25"
+serde = { version = "1.0.193", features = ["derive"] }
+serde_yaml = "0.9.27"
 
 # File system
 notify = "6.1.1"
@@ -35,7 +35,7 @@ notify-debouncer-full = "0.3.1"
 
 
 # Util
-itertools = "0.11.0"
+itertools = "0.12.0"
 npath = { git = "https://github.com/gdzx/npath", rev = "00acdd2974bb1682b6d1dcc6f0ea7cd54da42381" }
 pin-project = "1.1.3"
 
