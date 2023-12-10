@@ -164,12 +164,10 @@ impl<'s> Expander<'s> {
 		let output = rule
 			.output
 			.iter()
-			.map(|item: &OutItem<Expr<'_>>| match item {
-				OutItem::File { file } => Ok::<_, AppError>(OutItem::File {
+			.map(|item: &OutItem<Expr<'_>>| match *item {
+				OutItem::File { ref file, is_deps_file } => Ok::<_, AppError>(OutItem::File {
 					file: self.expand_expr_string(file, visitor)?,
-				}),
-				OutItem::DepsFile { file } => Ok::<_, AppError>(OutItem::DepsFile {
-					file: self.expand_expr_string(file, visitor)?,
+					is_deps_file,
 				}),
 			})
 			.collect::<ResultMultiple<_>>()?;
@@ -182,19 +180,12 @@ impl<'s> Expander<'s> {
 					ref file,
 					is_optional,
 					is_static,
+					is_deps_file,
 				} => Ok::<_, AppError>(DepItem::File {
 					file: self.expand_expr_string(file, visitor)?,
 					is_optional,
 					is_static,
-				}),
-				DepItem::DepsFile {
-					ref file,
-					is_optional,
-					is_static,
-				} => Ok::<_, AppError>(DepItem::DepsFile {
-					file: self.expand_expr_string(file, visitor)?,
-					is_optional,
-					is_static,
+					is_deps_file,
 				}),
 				DepItem::Rule { ref name, ref pats } => Ok::<_, AppError>(DepItem::Rule {
 					name: self.expand_expr_string(name, visitor)?,

@@ -309,12 +309,12 @@ impl<'s> Builder<'s> {
 		enum Dep<'s, 'a> {
 			/// File
 			File {
-				file:        CowStr<'s>,
-				is_static:   bool,
-				is_dep_file: bool,
-				is_output:   bool,
-				is_optional: bool,
-				exists:      bool,
+				file:         CowStr<'s>,
+				is_static:    bool,
+				is_deps_file: bool,
+				is_output:    bool,
+				is_optional:  bool,
+				exists:       bool,
 			},
 
 			/// Rule
@@ -335,24 +335,11 @@ impl<'s> Builder<'s> {
 					ref file,
 					is_optional,
 					is_static,
+					is_deps_file,
 				} => Ok(Dep::File {
 					file: file.clone(),
 					is_static,
-					is_dep_file: false,
-					is_output: false,
-					is_optional,
-					exists: util::fs_try_exists(&**file)
-						.await
-						.map_err(AppError::check_file_exists(&**file))?,
-				}),
-				DepItem::DepsFile {
-					ref file,
-					is_optional,
-					is_static,
-				} => Ok(Dep::File {
-					file: file.clone(),
-					is_static,
-					is_dep_file: true,
+					is_deps_file,
 					is_output: false,
 					is_optional,
 					exists: util::fs_try_exists(&**file)
@@ -372,21 +359,28 @@ impl<'s> Builder<'s> {
 
 		// And all output dependencies
 		// Note: Fine to fail early here, see note above for `normal_deps`
+		#[expect(
+			clippy::match_wildcard_for_single_variants,
+			reason = "We only care about dependency file variants"
+		)]
 		let out_deps = rule
 			.output
 			.iter()
 			.map(async move |out| match out {
-				OutItem::File { .. } => Ok(None),
-				OutItem::DepsFile { file } => Ok(Some(Dep::File {
-					file:        file.clone(),
-					is_static:   false,
-					is_dep_file: true,
-					is_output:   true,
-					is_optional: false,
-					exists:      util::fs_try_exists(&**file)
+				OutItem::File {
+					file,
+					is_deps_file: true,
+				} => Ok(Some(Dep::File {
+					file:         file.clone(),
+					is_static:    false,
+					is_deps_file: true,
+					is_output:    true,
+					is_optional:  false,
+					exists:       util::fs_try_exists(&**file)
 						.await
 						.map_err(AppError::check_file_exists(&**file))?,
 				})),
+				_ => Ok(None),
 			})
 			.collect::<FuturesUnordered<_>>()
 			.filter_map(async move |res| res.transpose())
@@ -457,20 +451,20 @@ impl<'s> Builder<'s> {
 					let dep_deps = match &dep {
 						Dep::File {
 							file,
-							is_dep_file: true,
+							is_deps_file: true,
 							is_output: false,
 							..
 						} |
 						Dep::File {
 							file,
-							is_dep_file: true,
+							is_deps_file: true,
 							is_output: true,
 							exists: true,
 							..
 						} => self
 							.build_deps_file(target, file, rule, rules, ignore_missing)
 							.await
-							.map_err(AppError::build_dep_file(&**file))?,
+							.map_err(AppError::build_deps_file(&**file))?,
 						_ => vec![],
 					};
 
@@ -535,13 +529,13 @@ impl<'s> Builder<'s> {
 	async fn build_deps_file(
 		&self,
 		parent_target: &Target<'s, CowStr<'s>>,
-		dep_file: &str,
+		deps_file: &str,
 		rule: &Rule<'s, CowStr<'s>>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,
 	) -> Result<Vec<(Target<'s, CowStr<'s>>, BuildResult, Option<BuildLockDepGuard<'s>>)>, AppError> {
-		tracing::trace!(target=?parent_target, ?rule.name, ?dep_file, "Building dependencies of target rule dependency-file");
-		let (output, deps) = self::parse_deps_file(dep_file).await?;
+		tracing::trace!(target=?parent_target, ?rule.name, ?deps_file, "Building dependencies of target rule dependency-file");
+		let (output, deps) = self::parse_deps_file(deps_file).await?;
 
 		match rule.output.is_empty() {
 			// If there were no outputs, make sure it matches the rule name
@@ -549,22 +543,22 @@ impl<'s> Builder<'s> {
 			true =>
 				if output != rule.name {
 					return Err(AppError::DepFileMissingRuleName {
-						dep_file_path: dep_file.into(),
-						rule_name:     rule.name.to_owned(),
-						dep_output:    output,
+						deps_file_path: deps_file.into(),
+						rule_name:      rule.name.to_owned(),
+						dep_output:     output,
 					});
 				},
 
 			// If there were any output, make sure the dependency file applies to one of them
 			false => {
 				let any_matches = rule.output.iter().any(|out| match out {
-					OutItem::File { file } | OutItem::DepsFile { file } => file == &output,
+					OutItem::File { file, .. } => file == &output,
 				});
 				if !any_matches {
 					return Err(AppError::DepFileMissingOutputs {
-						dep_file_path: dep_file.into(),
-						rule_outputs:  rule.output.iter().map(OutItem::to_string).collect(),
-						dep_output:    output,
+						deps_file_path: deps_file.into(),
+						rule_outputs:   rule.output.iter().map(OutItem::to_string).collect(),
+						dep_output:     output,
 					});
 				}
 			},
@@ -725,7 +719,7 @@ impl<'s> Builder<'s> {
 				// Expand all expressions in the output file
 				// Note: This doesn't expand patterns, so we can match those later
 				let output_file = match output {
-					OutItem::File { file: output_file } | OutItem::DepsFile { file: output_file } => output_file,
+					OutItem::File { file: output_file, .. } => output_file,
 				};
 				let output_file = self
 					.expander
@@ -755,7 +749,7 @@ async fn parse_deps_file(file: &str) -> Result<(String, Vec<String>), AppError> 
 
 	// Parse it
 	let (output, deps) = contents.split_once(':').ok_or_else(|| AppError::DepFileMissingColon {
-		dep_file_path: file.into(),
+		deps_file_path: file.into(),
 	})?;
 	let output = output.trim().to_owned();
 	let deps = deps.split_whitespace().map(str::to_owned).collect();
@@ -776,7 +770,7 @@ async fn rule_last_build_time<'s>(rule: &Rule<'s, CowStr<'s>>) -> Result<Option<
 		.iter()
 		.map(async move |item| {
 			let file = match item {
-				OutItem::File { file } | OutItem::DepsFile { file } => file,
+				OutItem::File { file, .. } => file,
 			};
 			let metadata = fs::metadata(&**file)
 				.await

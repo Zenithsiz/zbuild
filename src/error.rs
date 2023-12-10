@@ -420,20 +420,20 @@ decl_error! {
 		rule_name: String,
 	},
 
-	/// Build dependency file
+	/// Build dependencies file
 	#[from_fn(
-		fn build_dep_file<P: Into<PathBuf>>(source: Self => Box::new(source))(
-			dep_file: P => dep_file.into()
+		fn build_deps_file<P: Into<PathBuf>>(source: Self => Box::new(source))(
+			deps_file: P => deps_file.into()
 		)
 	)]
 	#[source(Some(&**source))]
-	#[fmt("Unable to build dependency file {dep_file:?}")]
+	#[fmt("Unable to build dependencies file {deps_file:?}")]
 	BuildDepFile {
 		/// Underlying error
 		source: Box<Self>,
 
-		/// Dependency file
-		dep_file: PathBuf,
+		/// Dependencies file
+		deps_file: PathBuf,
 	},
 
 	/// Expand rule
@@ -542,34 +542,34 @@ decl_error! {
 		op: AliasOp,
 	},
 
-	/// Dependency file missing `:`
+	/// Dependencies file missing `:`
 	#[source(None)]
-	#[fmt("Dependency file {dep_file_path:?} was missing a `:`")]
+	#[fmt("Dependencies file {deps_file_path:?} was missing a `:`")]
 	DepFileMissingColon {
 		/// Dep file path
-		dep_file_path: PathBuf,
+		deps_file_path: PathBuf,
 	},
 
-	/// Dependency file missing rule name
+	/// Dependencies file missing rule name
 	#[source(None)]
-	#[fmt("Dependency file {dep_file_path:?} is missing the rule name {rule_name}, found {dep_output}")]
+	#[fmt("Dependencies file {deps_file_path:?} is missing the rule name {rule_name}, found {dep_output}")]
 	DepFileMissingRuleName {
 		/// Dep file path
-		dep_file_path: PathBuf,
+		deps_file_path: PathBuf,
 
 		/// Rule name
 		rule_name: String,
 
-		/// Dependency file output
+		/// Dependencies file output
 		dep_output: String,
 	},
 
-	/// Dependency file missing rule name
+	/// Dependencies file missing rule name
 	#[source(None)]
-	#[fmt("Dependency file {dep_file_path:?} is missing any output of {rule_outputs:?}, found {dep_output}")]
+	#[fmt("Dependencies file {deps_file_path:?} is missing any output of {rule_outputs:?}, found {dep_output}")]
 	DepFileMissingOutputs {
 		/// Dep file path
-		dep_file_path: PathBuf,
+		deps_file_path: PathBuf,
 
 		/// Rule outputs
 		rule_outputs: Vec<String>,
