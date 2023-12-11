@@ -62,8 +62,6 @@ pub struct TargetRule<'s> {
 }
 
 /// Builder
-// TODO: Close the semaphore when any build fails? This would stop any new
-//       builds from being executed, while still finishing the existing ones.
 #[derive(Debug)]
 pub struct Builder<'s> {
 	/// Event sender
