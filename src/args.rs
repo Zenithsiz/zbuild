@@ -43,7 +43,12 @@ pub struct Args {
 	#[clap(long = "ignore-missing", short = 'i')]
 	pub ignore_missing: bool,
 
-	/// Watch for file changes and rebuild any necessary targets
+	/// Watch for file changes and rebuild any necessary targets.
+	///
+	/// WARNING: If the log file is situated in the same directory as any watched
+	///          file, and you're logging at level trace, the log file will grow
+	///          immensely fast, as each logged line will result in another after
+	///          the watcher debouncer.
 	#[clap(long = "watch", short = 'w')]
 	pub watch: bool,
 
@@ -53,7 +58,7 @@ pub struct Args {
 
 	/// Logs output to a file.
 	///
-	/// You can use `RUST_LOG_FILE` to set filtering options
+	/// You can use `RUST_FILE_LOG` to set filtering options
 	#[clap(long = "log-file")]
 	pub log_file: Option<PathBuf>,
 }

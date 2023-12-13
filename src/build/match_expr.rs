@@ -74,8 +74,8 @@ pub fn match_expr<'s>(
 			// If we have patterns on both sides, reject
 			[ExprCmpt::Pattern(_), .., ExprCmpt::Pattern(_)] =>
 				return Err(AppError::MatchExprTooManyPats {
-					expr_fmt:       expr.to_string(),
-					expr_cmpts_fmt: cmpts.iter().map(ExprCmpt::to_string).collect(),
+					expr:       expr.to_string(),
+					expr_cmpts: cmpts.iter().map(ExprCmpt::to_string).collect(),
 				}),
 			// If we have aliases on any side, reject
 			[ExprCmpt::Alias(alias), ..] | [.., ExprCmpt::Alias(alias)] =>

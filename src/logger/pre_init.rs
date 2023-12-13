@@ -21,7 +21,8 @@ macro pre_init_fns(
 		static $NAME: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 		/// Emits a log
-		#[allow(dead_code)]
+		#[expect(clippy::allow_attributes, reason = "This is auto-generated, and only applies sometimes")]
+		#[allow(dead_code, reason = "All levels are auto-generated, but some may not be logged")]
 		pub fn $log(message: impl Into<String>) {
 			let message = message.into();
 			match IS_INIT.load(atomic::Ordering::Acquire) {

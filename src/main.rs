@@ -8,14 +8,18 @@
 	async_closure,
 	let_chains,
 	lint_reasons,
-	async_fn_in_trait,
 	yeet_expr,
 	must_not_suspend,
 	strict_provenance,
-	assert_matches
+	assert_matches,
+	try_trait_v2
 )]
 // Lints
-#![allow(clippy::print_stdout, reason = "We're a binary that should talk to the user")]
+#![allow(
+	clippy::print_stdout,
+	clippy::print_stderr,
+	reason = "We're a binary that should talk to the user"
+)]
 
 // Modules
 mod args;
@@ -30,10 +34,16 @@ mod watcher;
 
 // Imports
 use {
-	self::{ast::Ast, build::Builder, error::AppError, expand::Expander, rules::Rules},
+	self::{
+		ast::Ast,
+		build::Builder,
+		error::{AppError, ExitResult},
+		expand::Expander,
+		rules::Rules,
+	},
 	args::Args,
 	clap::Parser,
-	futures::{stream::FuturesUnordered, StreamExt},
+	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
 	std::{
 		borrow::Cow,
 		collections::HashMap,
@@ -48,11 +58,8 @@ use {
 	watcher::Watcher,
 };
 
-
-// Note: We return an `anyhow::Error` because it has good formatting
-// TODO: Return our own error once we improve formatting?
 #[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+async fn main() -> ExitResult {
 	// Get all args
 	let args = Args::parse();
 
@@ -130,14 +137,15 @@ async fn main() -> Result<(), anyhow::Error> {
 	tracing::trace!(?targets_to_build, "Found targets to build");
 
 	// Create the builder
-	let builder = Builder::new(jobs);
+	// Note: We should stop builds on the first error if we're *not* watching.
+	let builder = Builder::new(jobs, !args.watch);
 
 	// Then create the watcher, if we're watching
 	let watcher = args
 		.watch
 		.then(|| {
 			// TODO: Better default?
-			let debouncer_timeout_ms = args.watcher_debouncer_timeout_ms.unwrap_or(0.0);
+			let debouncer_timeout_ms = args.watcher_debouncer_timeout_ms.unwrap_or(0.0_f64);
 			let debouncer_timeout = { Duration::from_secs_f64(debouncer_timeout_ms / 1000.0) };
 
 			Watcher::new(builder.subscribe_events(), debouncer_timeout)
@@ -145,12 +153,21 @@ async fn main() -> Result<(), anyhow::Error> {
 		.transpose()?;
 
 	// Finally build all targets and start watching
-	futures::join!(
-		targets_to_build
-			.iter()
-			.map(|target| self::build_target(&builder, target, &rules, args.ignore_missing))
-			.collect::<FuturesUnordered<_>>()
-			.collect::<()>(),
+	let (failed_targets, ()) = futures::join!(
+		async {
+			targets_to_build
+				.iter()
+				.map(|target| {
+					self::build_target(&builder, target, &rules, args.ignore_missing)
+						.map_err(|err| (target.clone(), err))
+				})
+				.collect::<FuturesUnordered<_>>()
+				.collect::<Vec<Result<(), _>>>()
+				.await
+				.into_iter()
+				.filter_map(Result::err)
+				.collect::<Vec<_>>()
+		},
 		async {
 			if let Some(watcher) = watcher {
 				tracing::info!("Starting to watch for all targets");
@@ -169,7 +186,17 @@ async fn main() -> Result<(), anyhow::Error> {
 	tracing::info!("Built {built_targets} targets");
 	tracing::info!("Checked {total_targets} targets");
 
-	Ok(())
+	match failed_targets.is_empty() {
+		true => ExitResult::Ok,
+		false => {
+			tracing::error!("One or more builds failed:");
+			for (target, err) in failed_targets {
+				tracing::error!(err=%err.pretty(), "Failed to build target {target}");
+			}
+
+			ExitResult::Err(AppError::ExitDueToFailedBuilds {})
+		},
+	}
 }
 
 /// Finds the nearest zbuild file
@@ -186,7 +213,7 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 			true => return Ok(zbuild_path),
 			false => match cur_path.parent() {
 				Some(parent) => cur_path = parent,
-				None => return Err(AppError::ZBuildNotFound),
+				None => return Err(AppError::ZBuildNotFound {}),
 			},
 		}
 	}
@@ -198,26 +225,32 @@ async fn build_target<'s, T: BuildableTargetInner<'s> + fmt::Display + fmt::Debu
 	target: &rules::Target<'s, T>,
 	rules: &Rules<'s>,
 	ignore_missing: bool,
-) {
+) -> Result<(), AppError> {
 	tracing::debug!(%target, "Building target");
 
 	// Try to build the target
 	let build_start_time = SystemTime::now();
 	let res = T::build(target, builder, rules, ignore_missing).await;
 
-	// Then check if we did it
+	// Then check the status
 	match res {
 		Ok(build_res) => {
-			if build_res.built_here {
+			// If we actually built the rule, and it didn't just exist, log it
+			if build_res.built {
 				let build_duration = build_res
 					.build_time
 					.duration_since(build_start_time)
 					.unwrap_or(Duration::ZERO);
 				tracing::debug!("Built target {target} in {build_duration:.2?}");
 				println!("{target}");
-			};
+			}
+
+			Ok(())
 		},
-		Err(err) => tracing::error!(%target, err=?anyhow::Error::new(err), "Unable to build target"),
+		Err(err) => {
+			tracing::error!(%target, err=%err.pretty(), "Unable to build target");
+			Err(err)
+		},
 	}
 }
 

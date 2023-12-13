@@ -16,22 +16,21 @@ use {
 		match_expr::match_expr,
 	},
 	crate::{
+		error::ResultMultiple,
 		rules::{Command, CommandArg, DepItem, Expr, OutItem, Rule, Target},
 		util::{self, CowStr},
 		AppError,
 		Expander,
 		Rules,
 	},
-	anyhow::Context,
 	dashmap::DashMap,
-	filetime::FileTime,
-	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
+	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
 	itertools::Itertools,
 	std::{
 		borrow::Cow,
 		collections::HashMap,
-		mem,
-		time::{Duration, SystemTime},
+		ffi::{OsStr, OsString},
+		time::SystemTime,
 	},
 	tokio::{fs, process, sync::Semaphore},
 };
@@ -82,11 +81,14 @@ pub struct Builder<'s> {
 
 	/// Execution semaphore
 	exec_semaphore: Semaphore,
+
+	/// If the execution semaphore should be closed on the first error
+	stop_builds_on_first_err: bool,
 }
 
 impl<'s> Builder<'s> {
 	/// Creates a new builder
-	pub fn new(jobs: usize) -> Self {
+	pub fn new(jobs: usize, stop_builds_on_first_err: bool) -> Self {
 		let (event_tx, event_rx) = async_broadcast::broadcast(jobs);
 		let event_rx = event_rx.deactivate();
 
@@ -96,11 +98,12 @@ impl<'s> Builder<'s> {
 			expander: Expander::new(),
 			rules_lock: DashMap::new(),
 			exec_semaphore: Semaphore::new(jobs),
+			stop_builds_on_first_err,
 		}
 	}
 
 	/// Returns all build results
-	pub fn into_build_results(self) -> HashMap<Target<'s, CowStr<'s>>, Result<BuildResult, AppError>> {
+	pub fn into_build_results(self) -> HashMap<Target<'s, CowStr<'s>>, Result<BuildResult, ()>> {
 		self.rules_lock
 			.into_iter()
 			.flat_map(|(_, lock)| lock.into_res())
@@ -233,12 +236,11 @@ impl<'s> Builder<'s> {
 			match target {
 				Target::File { ref file, .. } => match fs::metadata(&**file).await {
 					Ok(metadata) => {
-						let build_time = self::file_modified_time(metadata);
+						let build_time = metadata.modified().map_err(AppError::get_file_modified_time(&**file))?;
 						tracing::trace!(?target, ?build_time, "Found target file");
 						return Ok((
 							BuildResult {
 								build_time,
-								built_here: false,
 								built: false,
 							},
 							None,
@@ -251,7 +253,6 @@ impl<'s> Builder<'s> {
 								// Note: We simply pretend the file was built right now
 								// TODO: Check if we should instead use a really old time?
 								build_time: SystemTime::now(),
-								built_here: false,
 								built:      false,
 							},
 							None,
@@ -260,7 +261,7 @@ impl<'s> Builder<'s> {
 					Err(err) =>
 						do yeet AppError::MissingFile {
 							file_path: (**file).into(),
-							err,
+							source:    err,
 						},
 				},
 				// Note: If `target_rule` returns `Err` if this was a rule, so we can never reach here
@@ -275,37 +276,55 @@ impl<'s> Builder<'s> {
 			.or_insert_with(BuildLock::new)
 			.clone();
 
-		// Then check if built
-		let build_guard = build_lock.lock_dep().await;
-		match build_guard.res(&target) {
-			// If we got it, we were built, so just return the guard
-			Some(res) => res.map(|res| (res, Some(build_guard))),
+		// Then check if we're already built
+		// Note: Tokio doesn't support lock upgrading, so we perform a double-checked lock
+		#[expect(irrefutable_let_patterns, reason = "We want to scope it to the `if` block")]
+		if let build_guard = build_lock.lock_dep().await &&
+			let Some(res) = build_guard.res(&target)
+		{
+			return res
+				.map(|res| (res, Some(build_guard)))
+				.map_err(|()| AppError::BuildTarget {
+					source: None,
+					target: target.to_string(),
+				});
+		}
 
-			// Else build first
-			// Note: Tokio read lock don't support upgrading, so we do a double-checked
-			//       lock here.
-			None => {
-				mem::drop(build_guard);
-				#[expect(clippy::shadow_unrelated)] // They are the same even if redeclared
-				let mut build_guard = build_lock.lock_build().await;
+		// Else lock it for building and re-check
+		let mut build_guard = build_lock.lock_build().await;
+		if let Some(res) = build_guard.res(&target) {
+			return res
+				.map(|res| (res, Some(build_guard.into_dep())))
+				.map_err(|()| AppError::BuildTarget {
+					source: None,
+					target: target.to_string(),
+				});
+		}
 
-				match build_guard.res(&target) {
-					// If we got it in the meantime, return it
-					Some(res) => res.map(|res| (res, Some(build_guard.into_dep()))),
-
-					// Else build
-					None => {
-						let res = self.build_unchecked(&target, &rule, rules, ignore_missing).await;
-						let res = build_guard.finish(&target, res);
-						res.map(|res| (res, Some(build_guard.into_dep())))
-					},
+		// Else build
+		match self.build_unchecked(&target, &rule, rules, ignore_missing).await {
+			Ok(res) => {
+				build_guard.finish(target, res);
+				Ok((res, Some(build_guard.into_dep())))
+			},
+			Err(err) => {
+				// If we should, close the exec semaphore to ensure we exit as early as possible
+				// Note: This check is racy, but it's fine to print this warning multiple times. We just don't want
+				//       to spam the user, since all further errors will likely caused by `AppError::ExecSemaphoreClosed`,
+				//       while the first few are the useful ones with the reason why the execution semaphore is being closed.
+				if self.stop_builds_on_first_err && !self.exec_semaphore.is_closed() {
+					tracing::debug!(err=%err.pretty(), "Stopping all future builds due to failure of target {target}");
+					self.exec_semaphore.close();
 				}
+
+				build_guard.finish_failed(target);
+				Err(err)
 			},
 		}
 	}
 
 	/// Builds a target without checking if the target is already being built.
-	#[expect(clippy::too_many_lines)] // TODO: Split this function onto smaller ones
+	#[expect(clippy::too_many_lines, reason = "TODO: Split this function onto smaller ones")]
 	#[async_recursion::async_recursion]
 	async fn build_unchecked(
 		&self,
@@ -319,12 +338,12 @@ impl<'s> Builder<'s> {
 		enum Dep<'s, 'a> {
 			/// File
 			File {
-				file:        CowStr<'s>,
-				is_static:   bool,
-				is_dep_file: bool,
-				is_output:   bool,
-				is_optional: bool,
-				exists:      bool,
+				file:         CowStr<'s>,
+				is_static:    bool,
+				is_deps_file: bool,
+				is_output:    bool,
+				is_optional:  bool,
+				exists:       bool,
 			},
 
 			/// Rule
@@ -335,8 +354,6 @@ impl<'s> Builder<'s> {
 		}
 
 		// Gather all normal dependencies
-		// Note: It's fine to fail early here, we don't need to check all files
-		//       if one fails
 		let normal_deps = rule
 			.deps
 			.iter()
@@ -345,24 +362,11 @@ impl<'s> Builder<'s> {
 					ref file,
 					is_optional,
 					is_static,
+					is_deps_file,
 				} => Ok(Dep::File {
 					file: file.clone(),
 					is_static,
-					is_dep_file: false,
-					is_output: false,
-					is_optional,
-					exists: util::fs_try_exists(&**file)
-						.await
-						.map_err(AppError::check_file_exists(&**file))?,
-				}),
-				DepItem::DepsFile {
-					ref file,
-					is_optional,
-					is_static,
-				} => Ok(Dep::File {
-					file: file.clone(),
-					is_static,
-					is_dep_file: true,
+					is_deps_file,
 					is_output: false,
 					is_optional,
 					exists: util::fs_try_exists(&**file)
@@ -375,36 +379,43 @@ impl<'s> Builder<'s> {
 				}),
 			})
 			.collect::<FuturesUnordered<_>>()
-			.try_collect::<Vec<_>>()
-			.await?;
+			.collect::<Vec<_>>()
+			.await
+			.into_iter()
+			.collect::<ResultMultiple<Vec<_>>>()?;
 
 		// And all output dependencies
-		// Note: Fine to fail early here, see note above for `normal_deps`
+		#[expect(
+			clippy::match_wildcard_for_single_variants,
+			reason = "We only care about dependency file variants"
+		)]
 		let out_deps = rule
 			.output
 			.iter()
 			.map(async move |out| match out {
-				OutItem::File { .. } => Ok(None),
-				OutItem::DepsFile { file } => Ok(Some(Dep::File {
-					file:        file.clone(),
-					is_static:   false,
-					is_dep_file: true,
-					is_output:   true,
-					is_optional: false,
-					exists:      util::fs_try_exists(&**file)
+				OutItem::File {
+					file,
+					is_deps_file: true,
+				} => Ok(Some(Dep::File {
+					file:         file.clone(),
+					is_static:    false,
+					is_deps_file: true,
+					is_output:    true,
+					is_optional:  false,
+					exists:       util::fs_try_exists(&**file)
 						.await
 						.map_err(AppError::check_file_exists(&**file))?,
 				})),
+				_ => Ok(None),
 			})
 			.collect::<FuturesUnordered<_>>()
 			.filter_map(async move |res| res.transpose())
-			.try_collect::<Vec<_>>()
-			.await?;
+			.collect::<Vec<_>>()
+			.await
+			.into_iter()
+			.collect::<ResultMultiple<Vec<_>>>()?;
 
 		// Then build all dependencies, as well as any dependency files
-		// Note: We don't want to fail early here, since commands might still be
-		//       running, so we first collect all results, and then fail
-		// TODO: Cancel dependencies that haven't even started building yet before failing?
 		// TODO: Don't collect like 3 times during this
 		let deps = util::chain!(normal_deps, out_deps)
 			.map(|dep| {
@@ -434,16 +445,16 @@ impl<'s> Builder<'s> {
 					};
 
 					// Then build it, if we should
-					let (dep_res, dep_guard) = match &dep_target {
+					let dep_res = match dep_target {
 						Some(dep_target) => {
 							let (res, dep_guard) = self
 								.build(
-									dep_target,
+									&dep_target,
 									rules,
 									ignore_missing | matches!(dep, Dep::File { is_optional: true, .. }),
 								)
 								.await
-								.map_err(AppError::build_target(dep_target))?;
+								.map_err(AppError::build_target(&dep_target))?;
 							tracing::trace!(?target, ?rule.name, ?dep, ?res, "Built target rule dependency");
 
 							self.send_event(|| Event::TargetDepBuilt {
@@ -452,44 +463,35 @@ impl<'s> Builder<'s> {
 							})
 							.await;
 
-							(Some(res), Some(dep_guard))
+							Some((dep_target, res, dep_guard))
 						},
 
-						None => (None, None),
+						None => None,
 					};
 
 					// If the dependency if a dependency deps file or an output deps file (and exists), build it's dependencies too
-					#[allow(clippy::wildcard_enum_match_arm, reason = "We only care about some variants")]
+					#[expect(clippy::wildcard_enum_match_arm, reason = "We only care about some variants")]
 					let dep_deps = match &dep {
 						Dep::File {
 							file,
-							is_dep_file: true,
+							is_deps_file: true,
 							is_output: false,
 							..
 						} |
 						Dep::File {
 							file,
-							is_dep_file: true,
+							is_deps_file: true,
 							is_output: true,
 							exists: true,
 							..
 						} => self
 							.build_deps_file(target, file, rule, rules, ignore_missing)
 							.await
-							.map_err(AppError::build_dep_file(&**file))?,
+							.map_err(AppError::build_deps_file(&**file))?,
 						_ => vec![],
 					};
 
-					let deps = util::chain!(
-						match (dep_target, dep_res, dep_guard) {
-							(Some(dep_target), Some(dep_res), Some(dep_guard)) =>
-								Some((dep_target, dep_res, dep_guard)),
-							(None, None, None) => None,
-							_ => unreachable!(),
-						},
-						dep_deps.into_iter()
-					)
-					.collect::<Vec<_>>();
+					let deps = util::chain!(dep_res, dep_deps.into_iter()).collect::<Vec<_>>();
 					tracing::trace!(?target, ?rule.name, ?dep, ?deps, "Built target rule dependency dependencies");
 
 					Ok(deps)
@@ -499,7 +501,7 @@ impl<'s> Builder<'s> {
 			.collect::<Vec<_>>()
 			.await
 			.into_iter()
-			.collect::<Result<Vec<_>, _>>()?
+			.collect::<ResultMultiple<Vec<_>>>()?
 			.into_iter()
 			.flatten()
 			.collect::<Vec<_>>();
@@ -538,7 +540,6 @@ impl<'s> Builder<'s> {
 		let cur_build_time = self::rule_last_build_time(rule).await?.unwrap_or_else(SystemTime::now);
 		let res = BuildResult {
 			build_time: cur_build_time,
-			built_here: needs_rebuilt,
 			built:      needs_rebuilt,
 		};
 
@@ -551,13 +552,13 @@ impl<'s> Builder<'s> {
 	async fn build_deps_file(
 		&self,
 		parent_target: &Target<'s, CowStr<'s>>,
-		dep_file: &str,
+		deps_file: &str,
 		rule: &Rule<'s, CowStr<'s>>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,
 	) -> Result<Vec<(Target<'s, CowStr<'s>>, BuildResult, Option<BuildLockDepGuard<'s>>)>, AppError> {
-		tracing::trace!(target=?parent_target, ?rule.name, ?dep_file, "Building dependencies of target rule dependency-file");
-		let (output, deps) = self::parse_deps_file(dep_file).await?;
+		tracing::trace!(target=?parent_target, ?rule.name, ?deps_file, "Building dependencies of target rule dependency-file");
+		let (output, deps) = self::parse_deps_file(deps_file).await?;
 
 		match rule.output.is_empty() {
 			// If there were no outputs, make sure it matches the rule name
@@ -565,22 +566,22 @@ impl<'s> Builder<'s> {
 			true =>
 				if output != rule.name {
 					return Err(AppError::DepFileMissingRuleName {
-						dep_file_path: dep_file.into(),
-						rule_name:     rule.name.to_owned(),
-						dep_output:    output,
+						deps_file_path: deps_file.into(),
+						rule_name:      rule.name.to_owned(),
+						dep_output:     output,
 					});
 				},
 
 			// If there were any output, make sure the dependency file applies to one of them
 			false => {
 				let any_matches = rule.output.iter().any(|out| match out {
-					OutItem::File { file } | OutItem::DepsFile { file } => file == &output,
+					OutItem::File { file, .. } => file == &output,
 				});
 				if !any_matches {
 					return Err(AppError::DepFileMissingOutputs {
-						dep_file_path: dep_file.into(),
-						rule_outputs:  rule.output.iter().map(OutItem::to_string).collect(),
-						dep_output:    output,
+						deps_file_path: deps_file.into(),
+						rule_outputs:   rule.output.iter().map(OutItem::to_string).collect(),
+						dep_output:     output,
 					});
 				}
 			},
@@ -616,7 +617,7 @@ impl<'s> Builder<'s> {
 			.collect::<Vec<_>>()
 			.await
 			.into_iter()
-			.collect::<Result<Vec<_>, _>>()?;
+			.collect::<ResultMultiple<_>>()?;
 
 		Ok(deps_res)
 	}
@@ -624,16 +625,20 @@ impl<'s> Builder<'s> {
 	/// Rebuilds a rule
 	pub async fn rebuild_rule(&self, rule: &Rule<'s, CowStr<'s>>) -> Result<(), AppError> {
 		// Lock the semaphore
-		let _permit = self
-			.exec_semaphore
-			.acquire()
-			.await
-			.context("Executable semaphore was closed")
-			.map_err(AppError::Other)?;
+		// Note: If we locked it per-command, we could exit earlier
+		//       when closed, but that would break some executions.
+		//       For example, some executions emit an output file and
+		//       then need to treat it. If we stopped in the middle,
+		//       when trying again the file would already exist, but
+		//       be in a "bad state", and since all the modification dates
+		//       match it wouldn't be rebuilt.
+		let Ok(_permit) = self.exec_semaphore.acquire().await else {
+			do yeet AppError::ExecSemaphoreClosed {};
+		};
 
 		for cmd in &rule.exec.cmds {
 			// Note: We don't care about the stdout here and don't capture it anyway.
-			let _: String = self.exec_cmd(rule.name, cmd, false).await?;
+			let _: Vec<u8> = self.exec_cmd(rule.name, cmd, false).await?;
 		}
 
 		Ok(())
@@ -648,20 +653,24 @@ impl<'s> Builder<'s> {
 		rule_name: &str,
 		cmd: &Command<CowStr<'s>>,
 		capture_stdout: bool,
-	) -> Result<String, AppError> {
+	) -> Result<Vec<u8>, AppError> {
 		// Process all arguments
 		// Note: When recursing, always capture stdout
 		let args = cmd
 			.args
 			.iter()
 			.map(async move |arg| match arg {
-				CommandArg::Expr(arg) => Ok(Some(Cow::Borrowed(&**arg))),
+				CommandArg::Expr(arg) => Ok(Some(Cow::Borrowed(OsStr::new(&**arg)))),
 				CommandArg::Command { strip_on_fail, cmd } => {
 					let res = self.exec_cmd(rule_name, cmd, true).await;
 					match (res, strip_on_fail) {
-						(Ok(arg), _) => Ok(Some(Cow::Owned(arg))),
+						(Ok(arg), _) => {
+							let arg = String::from_utf8(arg).map_err(AppError::command_output_non_utf8(cmd))?;
+							let arg = OsString::from(arg);
+							Ok(Some(Cow::Owned(arg)))
+						},
 						(Err(err), true) => {
-							tracing::debug!(?arg, ?err, "Stripping argument from failure");
+							tracing::debug!(?arg, err=%err.pretty(), "Stripping argument from failure");
 							Ok(None)
 						},
 						(Err(err), false) => Err(err),
@@ -669,10 +678,12 @@ impl<'s> Builder<'s> {
 				},
 			})
 			.enumerate()
-			.map(async move |(idx, fut)| fut.await.map(|arg| (idx, arg)))
+			.map(|(idx, fut)| fut.map_ok(move |arg| (idx, arg)))
 			.collect::<FuturesUnordered<_>>()
-			.try_collect::<Vec<_>>()
-			.await?
+			.collect::<Vec<_>>()
+			.await
+			.into_iter()
+			.collect::<ResultMultiple<Vec<_>>>()?
 			.into_iter()
 			.sorted_by_key(|&(idx, _)| idx)
 			.filter_map(|(_, arg)| arg)
@@ -701,7 +712,10 @@ impl<'s> Builder<'s> {
 		}
 
 		// Then spawn it and measure
-		tracing::debug!(target: "zbuild_exec", "{} {}", program, args.join(" "));
+		tracing::debug!(target: "zbuild_exec", "{} {}",
+			program.to_string_lossy(),
+			args.iter().map(|arg| arg.to_string_lossy()).join(" ")
+		);
 		let (duration, stdout) = util::try_measure_async(async {
 			let output = os_cmd
 				.spawn()
@@ -716,18 +730,12 @@ impl<'s> Builder<'s> {
 		.await?;
 		tracing::trace!(target: "zbuild_exec", ?rule_name, ?program, ?args, ?duration, "Execution duration");
 
-		// Finally parse stdout
-		// TODO: Not require utf8?
-		let stdout = String::from_utf8(stdout)
-			.context("Stdout was non-utf8")
-			.map_err(AppError::Other)?;
-
 		Ok(stdout)
 	}
 
 	/// Finds a rule for `file`
 	// TODO: Not make this `O(N)` for the number of rules.
-	#[expect(clippy::type_complexity)] // TODO: Add some type aliases / struct
+	#[expect(clippy::type_complexity, reason = "TODO: Add some type aliases / struct")]
 	pub fn find_rule_for_file(
 		&self,
 		file: &str,
@@ -738,7 +746,7 @@ impl<'s> Builder<'s> {
 				// Expand all expressions in the output file
 				// Note: This doesn't expand patterns, so we can match those later
 				let output_file = match output {
-					OutItem::File { file: output_file } | OutItem::DepsFile { file: output_file } => output_file,
+					OutItem::File { file: output_file, .. } => output_file,
 				};
 				let output_file = self
 					.expander
@@ -768,7 +776,7 @@ async fn parse_deps_file(file: &str) -> Result<(String, Vec<String>), AppError> 
 
 	// Parse it
 	let (output, deps) = contents.split_once(':').ok_or_else(|| AppError::DepFileMissingColon {
-		dep_file_path: file.into(),
+		deps_file_path: file.into(),
 	})?;
 	let output = output.trim().to_owned();
 	let deps = deps.split_whitespace().map(str::to_owned).collect();
@@ -783,42 +791,26 @@ async fn parse_deps_file(file: &str) -> Result<(String, Vec<String>), AppError> 
 async fn rule_last_build_time<'s>(rule: &Rule<'s, CowStr<'s>>) -> Result<Option<SystemTime>, AppError> {
 	// Note: We get the time of the oldest file in order to ensure all
 	//       files are at-least that old
-	// Note: It's fine to fail early here, see the note on `normal_deps` in `build_unchecked`.
 	let built_time = rule
 		.output
 		.iter()
 		.map(async move |item| {
 			let file = match item {
-				OutItem::File { file } | OutItem::DepsFile { file } => file,
+				OutItem::File { file, .. } => file,
 			};
-			fs::metadata(&**file)
+			let metadata = fs::metadata(&**file)
 				.await
-				.map(self::file_modified_time)
-				.map_err(AppError::read_file_metadata(&**file))
+				.map_err(AppError::read_file_metadata(&**file))?;
+			let modified_time = metadata.modified().map_err(AppError::get_file_modified_time(&**file))?;
+
+			Ok(modified_time)
 		})
 		.collect::<FuturesUnordered<_>>()
-		.try_collect::<Vec<_>>()
-		.await?
+		.collect::<Vec<_>>()
+		.await
+		.into_iter()
+		.collect::<ResultMultiple<Vec<_>>>()?
 		.into_iter()
 		.min();
 	Ok(built_time)
-}
-
-/// Returns the file modified time
-#[expect(
-	clippy::needless_pass_by_value,
-	reason = "We use it in `.map`, which makes it convenient to receive by value"
-)]
-#[expect(clippy::absolute_paths, reason = "We're already using a `fs` (`tokio::fs`)")]
-fn file_modified_time(metadata: std::fs::Metadata) -> SystemTime {
-	let file_time = FileTime::from_last_modification_time(&metadata);
-	let unix_offset = Duration::new(
-		file_time
-			.unix_seconds()
-			.try_into()
-			.expect("File time was before unix epoch"),
-		file_time.nanoseconds(),
-	);
-
-	SystemTime::UNIX_EPOCH + unix_offset
 }

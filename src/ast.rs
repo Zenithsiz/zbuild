@@ -166,6 +166,10 @@ pub struct Pattern<'a> {
 
 /// Pattern operator
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
+#[expect(
+	missing_copy_implementations,
+	reason = "We might add non-`Copy` fields in the future"
+)]
 pub enum PatternOp {
 	/// Non-empty
 	NonEmpty,
@@ -173,7 +177,6 @@ pub enum PatternOp {
 
 /// Alias
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
-/// Alias
 pub struct Alias<'a> {
 	/// Alias name
 	pub name: &'a str,
@@ -184,6 +187,10 @@ pub struct Alias<'a> {
 
 /// Alias operator
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
+#[expect(
+	missing_copy_implementations,
+	reason = "We might add non-`Copy` fields in the future"
+)]
 pub enum AliasOp {
 	/// Directory name
 	DirName,
@@ -222,7 +229,11 @@ impl serde::Serialize for Expr<'_> {
 }
 
 impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
-	#[expect(clippy::indexing_slicing, clippy::string_slice)] // We verify the indexes are correct
+	#[expect(
+		clippy::indexing_slicing,
+		clippy::string_slice,
+		reason = "We verify the indexes are correct"
+	)]
 	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
 	where
 		D: serde::Deserializer<'de>,

@@ -3,7 +3,7 @@
 // Imports
 use {
 	crate::{
-		error::AppError,
+		error::{AppError, ResultMultiple},
 		rules::{AliasOp, Command, CommandArg, DepItem, Exec, Expr, ExprCmpt, OutItem, Rule, Target},
 		util::CowStr,
 	},
@@ -18,7 +18,7 @@ pub struct Expander<'s> {
 	_phantom: PhantomData<&'s ()>,
 }
 
-#[expect(clippy::unused_self)] // Currently expander doesn't do anything
+#[expect(clippy::unused_self, reason = "Currently expander doesn't do anything")]
 impl<'s> Expander<'s> {
 	/// Creates a new expander
 	pub const fn new() -> Self {
@@ -66,7 +66,6 @@ impl<'s> Expander<'s> {
 								let value = self.expand_expr_string(&alias_expr, visitor)?;
 
 								// Then apply all
-								#[expect(clippy::shadow_unrelated)] // They are the same value
 								let value = alias.ops.iter().try_fold(value, |value, &op| {
 									let s = CowStr::into_owned(value);
 									self.expand_alias_op(op, s)
@@ -96,6 +95,10 @@ impl<'s> Expander<'s> {
 			.into_iter()
 			.coalesce(|prev, next| match (prev, next) {
 				// Merge strings
+				#[expect(
+					clippy::arithmetic_side_effects,
+					reason = "String arithmetic doesn't have any side effects we care about"
+				)]
 				(ExprCmpt::String(prev), ExprCmpt::String(next)) => Ok(ExprCmpt::String(prev + next)),
 
 				// Everything else leave
@@ -119,8 +122,8 @@ impl<'s> Expander<'s> {
 		};
 
 		res.map_err(|cmpts| AppError::UnresolvedAliasOrPats {
-			expr_fmt:       expr.to_string(),
-			expr_cmpts_fmt: cmpts.into_iter().map(|cmpt| cmpt.to_string()).collect(),
+			expr:       expr.to_string(),
+			expr_cmpts: cmpts.into_iter().map(|cmpt| cmpt.to_string()).collect(),
 		})
 	}
 
@@ -156,20 +159,18 @@ impl<'s> Expander<'s> {
 			.aliases
 			.iter()
 			.map(|(&name, expr)| Ok((name, self.expand_expr_string(expr, visitor)?)))
-			.collect::<Result<_, AppError>>()?;
+			.collect::<ResultMultiple<_>>()?;
 
 		let output = rule
 			.output
 			.iter()
-			.map(|item: &OutItem<Expr<'_>>| match item {
-				OutItem::File { file } => Ok::<_, AppError>(OutItem::File {
+			.map(|item: &OutItem<Expr<'_>>| match *item {
+				OutItem::File { ref file, is_deps_file } => Ok::<_, AppError>(OutItem::File {
 					file: self.expand_expr_string(file, visitor)?,
-				}),
-				OutItem::DepsFile { file } => Ok::<_, AppError>(OutItem::DepsFile {
-					file: self.expand_expr_string(file, visitor)?,
+					is_deps_file,
 				}),
 			})
-			.collect::<Result<_, _>>()?;
+			.collect::<ResultMultiple<_>>()?;
 
 		let deps = rule
 			.deps
@@ -179,19 +180,12 @@ impl<'s> Expander<'s> {
 					ref file,
 					is_optional,
 					is_static,
+					is_deps_file,
 				} => Ok::<_, AppError>(DepItem::File {
 					file: self.expand_expr_string(file, visitor)?,
 					is_optional,
 					is_static,
-				}),
-				DepItem::DepsFile {
-					ref file,
-					is_optional,
-					is_static,
-				} => Ok::<_, AppError>(DepItem::DepsFile {
-					file: self.expand_expr_string(file, visitor)?,
-					is_optional,
-					is_static,
+					is_deps_file,
 				}),
 				DepItem::Rule { ref name, ref pats } => Ok::<_, AppError>(DepItem::Rule {
 					name: self.expand_expr_string(name, visitor)?,
@@ -203,10 +197,10 @@ impl<'s> Expander<'s> {
 								self.expand_expr_string(expr, visitor)?,
 							))
 						})
-						.collect::<Result<_, AppError>>()?,
+						.collect::<ResultMultiple<_>>()?,
 				}),
 			})
-			.collect::<Result<_, _>>()?;
+			.collect::<ResultMultiple<_>>()?;
 
 		let exec = Exec {
 			cmds: rule
@@ -214,7 +208,7 @@ impl<'s> Expander<'s> {
 				.cmds
 				.iter()
 				.map(|cmd| self.expand_cmd(cmd, visitor))
-				.collect::<Result<_, _>>()?,
+				.collect::<ResultMultiple<_>>()?,
 		};
 
 		Ok(Rule {
@@ -251,7 +245,7 @@ impl<'s> Expander<'s> {
 					};
 					Ok(arg)
 				})
-				.collect::<Result<_, _>>()?,
+				.collect::<ResultMultiple<_>>()?,
 		})
 	}
 
@@ -282,7 +276,7 @@ impl<'s> Expander<'s> {
 								.map_err(AppError::expand_expr(expr))?,
 						))
 					})
-					.collect::<Result<_, AppError>>()?,
+					.collect::<ResultMultiple<_>>()?,
 			},
 		};
 
