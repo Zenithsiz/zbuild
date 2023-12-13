@@ -81,11 +81,14 @@ pub struct Builder<'s> {
 
 	/// Execution semaphore
 	exec_semaphore: Semaphore,
+
+	/// If the execution semaphore should be closed on the first error
+	stop_builds_on_first_err: bool,
 }
 
 impl<'s> Builder<'s> {
 	/// Creates a new builder
-	pub fn new(jobs: usize) -> Self {
+	pub fn new(jobs: usize, stop_builds_on_first_err: bool) -> Self {
 		let (event_tx, event_rx) = async_broadcast::broadcast(jobs);
 		let event_rx = event_rx.deactivate();
 
@@ -95,6 +98,7 @@ impl<'s> Builder<'s> {
 			expander: Expander::new(),
 			rules_lock: DashMap::new(),
 			exec_semaphore: Semaphore::new(jobs),
+			stop_builds_on_first_err,
 		}
 	}
 
@@ -304,10 +308,11 @@ impl<'s> Builder<'s> {
 				Ok((res, Some(build_guard.into_dep())))
 			},
 			Err(err) => {
+				// If we should, close the exec semaphore to ensure we exit as early as possible
 				// Note: This check is racy, but it's fine to print this warning multiple times. We just don't want
 				//       to spam the user, since all further errors will likely caused by `AppError::ExecSemaphoreClosed`,
 				//       while the first few are the useful ones with the reason why the execution semaphore is being closed.
-				if !self.exec_semaphore.is_closed() {
+				if self.stop_builds_on_first_err && !self.exec_semaphore.is_closed() {
 					tracing::debug!(err=%err.pretty(), "Stopping all future builds due to failure of target {target}");
 					self.exec_semaphore.close();
 				}

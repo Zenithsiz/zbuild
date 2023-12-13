@@ -137,7 +137,8 @@ async fn main() -> ExitResult {
 	tracing::trace!(?targets_to_build, "Found targets to build");
 
 	// Create the builder
-	let builder = Builder::new(jobs);
+	// Note: We should stop builds on the first error if we're *not* watching.
+	let builder = Builder::new(jobs, !args.watch);
 
 	// Then create the watcher, if we're watching
 	let watcher = args
