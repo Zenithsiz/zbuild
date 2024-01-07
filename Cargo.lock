@@ -584,7 +584,8 @@ dependencies = [
 [[package]]
 name = "npath"
 version = "0.1.0"
-source = "git+https://github.com/gdzx/npath?rev=00acdd2974bb1682b6d1dcc6f0ea7cd54da42381#00acdd2974bb1682b6d1dcc6f0ea7cd54da42381"
+source = "sparse+https://gitea.filipejr.com/api/packages/zenithsiz/cargo/"
+checksum = "07880f4197c50d48e4cd0e4a8f2d6807023d3297b6b9efd0d6335e31c21c88f5"
 
 [[package]]
 name = "nu-ansi-term"
