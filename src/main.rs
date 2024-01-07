@@ -145,7 +145,7 @@ async fn main() -> ExitResult {
 		.watch
 		.then(|| {
 			// TODO: Better default?
-			let debouncer_timeout_ms = args.watcher_debouncer_timeout_ms.unwrap_or(0.0_f64);
+			let debouncer_timeout_ms = args.watcher_debouncer_timeout_ms.unwrap_or(10.0_f64);
 			let debouncer_timeout = { Duration::from_secs_f64(debouncer_timeout_ms / 1000.0) };
 
 			Watcher::new(builder.subscribe_events(), debouncer_timeout)
