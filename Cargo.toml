@@ -70,7 +70,6 @@ rust.single_use_lifetimes = "warn"
 rust.trivial_numeric_casts = "warn"
 rust.unused_lifetimes = "warn"
 rust.unused_macro_rules = "warn"
-rust.unused_tuple_struct_fields = "warn"
 rust.variant_size_differences = "warn"
 rust.unused_crate_dependencies = "warn"
 
