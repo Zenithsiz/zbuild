@@ -357,26 +357,28 @@ impl<'s> Builder<'s> {
 		let normal_deps = rule
 			.deps
 			.iter()
-			.map(async move |dep| match *dep {
-				DepItem::File {
-					ref file,
-					is_optional,
-					is_static,
-					is_deps_file,
-				} => Ok(Dep::File {
-					file: file.clone(),
-					is_static,
-					is_deps_file,
-					is_output: false,
-					is_optional,
-					exists: util::fs_try_exists(&**file)
-						.await
-						.map_err(AppError::check_file_exists(&**file))?,
-				}),
-				DepItem::Rule { ref name, ref pats } => Ok(Dep::Rule {
-					name: name.clone(),
-					pats,
-				}),
+			.map(move |dep| async move {
+				match *dep {
+					DepItem::File {
+						ref file,
+						is_optional,
+						is_static,
+						is_deps_file,
+					} => Ok(Dep::File {
+						file: file.clone(),
+						is_static,
+						is_deps_file,
+						is_output: false,
+						is_optional,
+						exists: util::fs_try_exists(&**file)
+							.await
+							.map_err(AppError::check_file_exists(&**file))?,
+					}),
+					DepItem::Rule { ref name, ref pats } => Ok(Dep::Rule {
+						name: name.clone(),
+						pats,
+					}),
+				}
 			})
 			.collect::<FuturesUnordered<_>>()
 			.collect::<Vec<_>>()
@@ -392,24 +394,26 @@ impl<'s> Builder<'s> {
 		let out_deps = rule
 			.output
 			.iter()
-			.map(async move |out| match out {
-				OutItem::File {
-					file,
-					is_deps_file: true,
-				} => Ok(Some(Dep::File {
-					file:         file.clone(),
-					is_static:    false,
-					is_deps_file: true,
-					is_output:    true,
-					is_optional:  false,
-					exists:       util::fs_try_exists(&**file)
-						.await
-						.map_err(AppError::check_file_exists(&**file))?,
-				})),
-				_ => Ok(None),
+			.map(move |out| async move {
+				match out {
+					OutItem::File {
+						file,
+						is_deps_file: true,
+					} => Ok(Some(Dep::File {
+						file:         file.clone(),
+						is_static:    false,
+						is_deps_file: true,
+						is_output:    true,
+						is_optional:  false,
+						exists:       util::fs_try_exists(&**file)
+							.await
+							.map_err(AppError::check_file_exists(&**file))?,
+					})),
+					_ => Ok(None),
+				}
 			})
 			.collect::<FuturesUnordered<_>>()
-			.filter_map(async move |res| res.transpose())
+			.filter_map(move |res| async move { res.transpose() })
 			.collect::<Vec<_>>()
 			.await
 			.into_iter()
@@ -659,23 +663,25 @@ impl<'s> Builder<'s> {
 		let args = cmd
 			.args
 			.iter()
-			.map(async move |arg| match arg {
-				CommandArg::Expr(arg) => Ok(Some(Cow::Borrowed(OsStr::new(&**arg)))),
-				CommandArg::Command { strip_on_fail, cmd } => {
-					let res = self.exec_cmd(rule_name, cmd, true).await;
-					match (res, strip_on_fail) {
-						(Ok(arg), _) => {
-							let arg = String::from_utf8(arg).map_err(AppError::command_output_non_utf8(cmd))?;
-							let arg = OsString::from(arg);
-							Ok(Some(Cow::Owned(arg)))
-						},
-						(Err(err), true) => {
-							tracing::debug!(?arg, err=%err.pretty(), "Stripping argument from failure");
-							Ok(None)
-						},
-						(Err(err), false) => Err(err),
-					}
-				},
+			.map(move |arg| async move {
+				match arg {
+					CommandArg::Expr(arg) => Ok(Some(Cow::Borrowed(OsStr::new(&**arg)))),
+					CommandArg::Command { strip_on_fail, cmd } => {
+						let res = self.exec_cmd(rule_name, cmd, true).await;
+						match (res, strip_on_fail) {
+							(Ok(arg), _) => {
+								let arg = String::from_utf8(arg).map_err(AppError::command_output_non_utf8(cmd))?;
+								let arg = OsString::from(arg);
+								Ok(Some(Cow::Owned(arg)))
+							},
+							(Err(err), true) => {
+								tracing::debug!(?arg, err=%err.pretty(), "Stripping argument from failure");
+								Ok(None)
+							},
+							(Err(err), false) => Err(err),
+						}
+					},
+				}
 			})
 			.enumerate()
 			.map(|(idx, fut)| fut.map_ok(move |arg| (idx, arg)))
@@ -794,7 +800,7 @@ async fn rule_last_build_time<'s>(rule: &Rule<'s, CowStr<'s>>) -> Result<Option<
 	let built_time = rule
 		.output
 		.iter()
-		.map(async move |item| {
+		.map(move |item| async move {
 			let file = match item {
 				OutItem::File { file, .. } => file,
 			};

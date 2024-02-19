@@ -86,6 +86,7 @@ impl<'s> Watcher<'s> {
 	}
 
 	/// Watches over all files and rebuilds any changed files
+	#[expect(clippy::too_many_lines, reason = "TODO: Refactor")]
 	pub async fn watch_rebuild(mut self, builder: &Builder<'s>, rules: &Rules<'s>, ignore_missing: bool) {
 		let rev_deps = &self.rev_deps;
 		futures::join!(
@@ -148,7 +149,7 @@ impl<'s> Watcher<'s> {
 			},
 			self.fs_event_stream
 				.flat_map(|event| futures::stream::iter(event.event.paths))
-				.then(async move |path| {
+				.then(move |path| async move {
 					// Canonicalize the path
 					let path = match path.canonicalize() {
 						Ok(path) => path,
@@ -188,10 +189,12 @@ impl<'s> Watcher<'s> {
 						},
 						dep_parents
 							.iter()
-							.map(async move |target| builder
-								.reset_build(target, rules)
-								.await
-								.expect("Unable to reset existing build"))
+							.map(move |target| async move {
+								builder
+									.reset_build(target, rules)
+									.await
+									.expect("Unable to reset existing build");
+							})
 							.collect::<FuturesUnordered<_>>()
 							.collect::<()>()
 					);
