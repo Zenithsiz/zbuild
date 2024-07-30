@@ -30,9 +30,9 @@ pub macro chain {
 	},
 }
 
-/// Async `std::fs_try_exists`
-pub async fn fs_try_exists(path: impl AsRef<Path> + Send) -> Result<bool, io::Error> {
-	match fs::metadata(path).await {
+/// Async `std::fs_try_exists` using [`symlink_metadata`](fs::symlink_metadata).
+pub async fn fs_try_exists_symlink(path: impl AsRef<Path> + Send) -> Result<bool, io::Error> {
+	match fs::symlink_metadata(path).await {
 		Ok(_) => Ok(true),
 		Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
 		Err(err) => Err(err),

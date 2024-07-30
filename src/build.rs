@@ -234,7 +234,7 @@ impl<'s> Builder<'s> {
 		// Get the rule for the target
 		let Some((rule, target_rule)) = self.target_rule(&target, rules)? else {
 			match target {
-				Target::File { ref file, .. } => match fs::metadata(&**file).await {
+				Target::File { ref file, .. } => match fs::symlink_metadata(&**file).await {
 					Ok(metadata) => {
 						let build_time = metadata.modified().map_err(AppError::get_file_modified_time(&**file))?;
 						tracing::trace!(?target, ?build_time, "Found target file");
@@ -370,7 +370,7 @@ impl<'s> Builder<'s> {
 						is_deps_file,
 						is_output: false,
 						is_optional,
-						exists: util::fs_try_exists(&**file)
+						exists: util::fs_try_exists_symlink(&**file)
 							.await
 							.map_err(AppError::check_file_exists(&**file))?,
 					}),
@@ -405,7 +405,7 @@ impl<'s> Builder<'s> {
 						is_deps_file: true,
 						is_output:    true,
 						is_optional:  false,
-						exists:       util::fs_try_exists(&**file)
+						exists:       util::fs_try_exists_symlink(&**file)
 							.await
 							.map_err(AppError::check_file_exists(&**file))?,
 					})),
@@ -804,7 +804,7 @@ async fn rule_last_build_time<'s>(rule: &Rule<'s, CowStr<'s>>) -> Result<Option<
 			let file = match item {
 				OutItem::File { file, .. } => file,
 			};
-			let metadata = fs::metadata(&**file)
+			let metadata = fs::symlink_metadata(&**file)
 				.await
 				.map_err(AppError::read_file_metadata(&**file))?;
 			let modified_time = metadata.modified().map_err(AppError::get_file_modified_time(&**file))?;
