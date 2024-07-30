@@ -218,7 +218,7 @@ decl_error! {
 		)
 	)]
 	#[source(Some(source))]
-	#[fmt("Unable to read file metadata {file_path:?}")]
+	#[fmt("Unable to read file metadata (not following symlinks) {file_path:?}")]
 	ReadFileMetadata {
 		/// Underlying error
 		source: io::Error,

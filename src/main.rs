@@ -7,7 +7,6 @@
 	box_patterns,
 	async_closure,
 	let_chains,
-	lint_reasons,
 	yeet_expr,
 	must_not_suspend,
 	strict_provenance,
@@ -206,7 +205,7 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 
 	loop {
 		let zbuild_path = cur_path.join("zbuild.yaml");
-		match util::fs_try_exists(&zbuild_path)
+		match util::fs_try_exists_symlink(&zbuild_path)
 			.await
 			.map_err(AppError::check_file_exists(&zbuild_path))?
 		{
