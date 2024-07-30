@@ -1,3 +1,9 @@
+# 0.1.5
+
+# Major
+
+- Symlinks are no longer dereferenced when checking for files.
+
 # 0.1.4
 
 ## Major

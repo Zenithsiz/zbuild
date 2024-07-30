@@ -4,7 +4,7 @@ edition = "2021"
 name = "zbuild"
 description = "Make-like build system"
 license-file = "LICENSE-MIT"
-version = "0.1.4"
+version = "0.1.5"
 repository = "https://github.com/zenithsiz/zbuild"
 publish = ["filipejr"]
 
