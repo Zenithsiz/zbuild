@@ -229,11 +229,7 @@ impl serde::Serialize for Expr<'_> {
 }
 
 impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
-	#[expect(
-		clippy::indexing_slicing,
-		clippy::string_slice,
-		reason = "We verify the indexes are correct"
-	)]
+	#[expect(clippy::string_slice, reason = "We verify the indexes are correct")]
 	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
 	where
 		D: serde::Deserializer<'de>,
