@@ -89,7 +89,7 @@ impl<'s> Watcher<'s> {
 	#[expect(clippy::too_many_lines, reason = "TODO: Refactor")]
 	pub async fn watch_rebuild(mut self, builder: &Builder<'s>, rules: &Rules<'s>, ignore_missing: bool) {
 		let rev_deps = &self.rev_deps;
-		futures::join!(
+		futures::future::join(
 			async move {
 				self.builder_event_rx
 					.map(move |event| {
@@ -148,6 +148,40 @@ impl<'s> Watcher<'s> {
 				tracing::trace!("Watcher task exited");
 			},
 			self.fs_event_stream
+				.filter(|event| {
+					#[expect(
+						clippy::match_same_arms,
+						reason = "It reads and is more easily modify-able like this"
+					)]
+					let allow = match event.event.kind {
+						notify::EventKind::Any => true,
+						notify::EventKind::Access(kind) => match kind {
+							notify::event::AccessKind::Any => true,
+							notify::event::AccessKind::Read => false,
+							notify::event::AccessKind::Open(_) => false,
+							notify::event::AccessKind::Close(mode) => match mode {
+								notify::event::AccessMode::Any => true,
+								notify::event::AccessMode::Execute => false,
+								notify::event::AccessMode::Read => false,
+								notify::event::AccessMode::Write => true,
+								notify::event::AccessMode::Other => true,
+							},
+							notify::event::AccessKind::Other => true,
+						},
+						notify::EventKind::Create(_) => true,
+						notify::EventKind::Modify(kind) => match kind {
+							notify::event::ModifyKind::Any => true,
+							notify::event::ModifyKind::Data(_) => false,
+							notify::event::ModifyKind::Metadata(_) => true,
+							notify::event::ModifyKind::Name(_) => true,
+							notify::event::ModifyKind::Other => true,
+						},
+						notify::EventKind::Remove(_) => true,
+						notify::EventKind::Other => true,
+					};
+
+					async move { allow }
+				})
 				.flat_map(|event| futures::stream::iter(event.event.paths))
 				.then(move |path| async move {
 					// Canonicalize the path
@@ -218,7 +252,8 @@ impl<'s> Watcher<'s> {
 
 					tracing::trace!(?path, "Rebuilt all reverse dependencies");
 				})
-				.collect::<()>()
-		);
+				.collect::<()>(),
+		)
+		.await;
 	}
 }
