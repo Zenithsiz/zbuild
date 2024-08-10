@@ -23,6 +23,8 @@ See `zbuild --help` for more details.
 
 You may download the latest release from the [releases page](https://github.com/Zenithsiz/zbuild/releases).
 
+On arch-based systems, you can install it using the `PKGBUILD` included in this repo.
+
 You may also compile it yourself, with a nightly rust compiled (>= rustc 1.68.0-nightly (9c07efe84 2022-12-16), may work with older) and install it by:
 
 1. Clone the repo
