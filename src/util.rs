@@ -3,12 +3,11 @@
 // Imports
 use {
 	futures::Future,
-	npath::NormPathExt,
 	pin_project::pin_project,
 	std::{
 		borrow::Cow,
 		io,
-		path::{self, Path},
+		path::{self, Path, PathBuf},
 		pin::Pin,
 		task,
 		time::{Duration, Instant},
@@ -74,18 +73,63 @@ pub async fn try_measure_async<F: Future<Output = Result<T, E>>, T, E>(fut: F) -
 pub fn normalize_path(path: &str) -> String {
 	let ends_with_sep = path.ends_with(path::MAIN_SEPARATOR_STR);
 
-	let mut path = Path::new(&path)
-		.normalized()
+	let mut path_cmpts = vec![];
+	for cmpt in Path::new(path).components() {
+		match cmpt {
+			// For "normal" components, just push them
+			path::Component::Prefix(_) | path::Component::RootDir | path::Component::Normal(_) => path_cmpts.push(cmpt),
+
+			// Ignore current directory components unless this is the very first one
+			path::Component::CurDir =>
+				if path_cmpts.is_empty() {
+					path_cmpts.push(path::Component::CurDir);
+				},
+
+			// For each parent directory component, pop the last component unless it's
+			// also a parent directory
+			path::Component::ParentDir => match path_cmpts.last() {
+				Some(path::Component::ParentDir) | None => path_cmpts.push(path::Component::ParentDir),
+				Some(_) => _ = path_cmpts.pop(),
+			},
+		}
+	}
+
+	let mut path = path_cmpts
+		.into_iter()
+		.collect::<PathBuf>()
 		.into_os_string()
 		.into_string()
 		.expect("utf-8 path was no longer utf-8 after normalizing");
 
-	// Note: `npath` doesn't keep `/` at the end, so we have to do it manually
-	match ends_with_sep {
-		true => {
-			path.push_str(path::MAIN_SEPARATOR_STR);
-			path
-		},
-		false => path,
+	// If the path is empty, add a `.` to symbolize the current directory
+	if path.is_empty() {
+		path.push('.');
+	}
+
+	// If we had a `/` at the end, add it back since `normalize` removes it
+	if ends_with_sep {
+		path.push_str(path::MAIN_SEPARATOR_STR);
+	}
+
+	path
+}
+
+#[cfg(test)]
+mod tests {
+	#[test]
+	fn normalize_path() {
+		let tests = [
+			("a/", "a/"),
+			("a/../", "./"),
+			("a/../b", "b"),
+			("a/./b", "a/b"),
+			("a/./b/", "a/b/"),
+			("../b", "../b"),
+			("a/b/../../c", "c"),
+		];
+
+		for (orig, norm) in tests {
+			assert_eq!(super::normalize_path(orig), norm, "Case {orig:?} failed");
+		}
 	}
 }
