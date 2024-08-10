@@ -584,8 +584,7 @@ dependencies = [
 [[package]]
 name = "npath"
 version = "0.1.0"
-source = "sparse+https://gitea.filipejr.com/api/packages/zenithsiz/cargo/"
-checksum = "07880f4197c50d48e4cd0e4a8f2d6807023d3297b6b9efd0d6335e31c21c88f5"
+source = "git+https://github.com/gdzx/npath?rev=00acdd2974bb1682b6d1dcc6f0ea7cd54da42381#00acdd2974bb1682b6d1dcc6f0ea7cd54da42381"
 
 [[package]]
 name = "nu-ansi-term"
@@ -1206,7 +1205,7 @@ checksum = "dff9641d1cd4be8d1a070daf9e3773c5f67e78b4d9d42263020c057706765c04"
 
 [[package]]
 name = "zbuild"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "async-broadcast",
