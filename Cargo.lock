@@ -582,11 +582,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "npath"
-version = "0.1.0"
-source = "git+https://github.com/gdzx/npath?rev=00acdd2974bb1682b6d1dcc6f0ea7cd54da42381#00acdd2974bb1682b6d1dcc6f0ea7cd54da42381"
-
-[[package]]
 name = "nu-ansi-term"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1216,7 +1211,6 @@ dependencies = [
  "itertools",
  "notify",
  "notify-debouncer-full",
- "npath",
  "pin-project",
  "serde",
  "serde_yaml",
