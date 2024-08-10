@@ -89,3 +89,23 @@ pub fn normalize_path(path: &str) -> String {
 		false => path,
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	#[test]
+	fn normalize_path() {
+		let tests = [
+			("a/", "a/"),
+			("a/../", "./"),
+			("a/../b", "b"),
+			("a/./b", "a/b"),
+			("a/./b/", "a/b/"),
+			("../b", "../b"),
+			("a/b/../../c", "c"),
+		];
+
+		for (orig, norm) in tests {
+			assert_eq!(super::normalize_path(orig), norm);
+		}
+	}
+}
