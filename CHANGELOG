@@ -1,3 +1,11 @@
+# 0.1.6
+
+# Minor
+
+- `--watch` now ignores write events to files, and only updates once they are closed by the process.
+
+  This fixes half-written files being read by rules.
+
 # 0.1.5
 
 # Major
