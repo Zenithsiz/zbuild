@@ -476,10 +476,21 @@ impl<'s> Builder<'s> {
 					// If the dependency if a dependency deps file or an output deps file (and exists), build it's dependencies too
 					#[expect(clippy::wildcard_enum_match_arm, reason = "We only care about some variants")]
 					let dep_deps = match &dep {
+						// Non-optional we don't check if they exist, so that an error
+						// pops up if they don't.
 						Dep::File {
 							file,
 							is_deps_file: true,
 							is_output: false,
+							is_optional: false,
+							..
+						} |
+						// For optional or output, we only include them if they exist
+						Dep::File {
+							file,
+							is_deps_file: true,
+							is_optional: true,
+							exists: true,
 							..
 						} |
 						Dep::File {
