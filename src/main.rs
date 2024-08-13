@@ -35,7 +35,7 @@ mod watcher;
 use {
 	self::{
 		ast::Ast,
-		build::Builder,
+		build::{BuildReason, Builder},
 		error::{AppError, ExitResult},
 		expand::Expander,
 		rules::Rules,
@@ -229,7 +229,7 @@ async fn build_target<'s, T: BuildableTargetInner<'s> + fmt::Display + fmt::Debu
 
 	// Try to build the target
 	let build_start_time = SystemTime::now();
-	let res = T::build(target, builder, rules, ignore_missing).await;
+	let res = T::build(target, builder, rules, ignore_missing, BuildReason::empty()).await;
 
 	// Then check the status
 	match res {
@@ -261,6 +261,7 @@ trait BuildableTargetInner<'s>: Sized {
 		builder: &Builder<'s>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,
+		reason: BuildReason<'_, 's>,
 	) -> Result<build::BuildResult, AppError>;
 }
 
@@ -270,9 +271,10 @@ impl<'s> BuildableTargetInner<'s> for rules::Expr<'s> {
 		builder: &Builder<'s>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,
+		reason: BuildReason<'_, 's>,
 	) -> Result<build::BuildResult, AppError> {
 		builder
-			.build_expr(target, rules, ignore_missing)
+			.build_expr(target, rules, ignore_missing, reason)
 			.await
 			.map(|(build_res, _)| build_res)
 	}
@@ -284,9 +286,10 @@ impl<'s> BuildableTargetInner<'s> for CowStr<'s> {
 		builder: &Builder<'s>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,
+		reason: BuildReason<'_, 's>,
 	) -> Result<build::BuildResult, AppError> {
 		builder
-			.build(target, rules, ignore_missing)
+			.build(target, rules, ignore_missing, reason)
 			.await
 			.map(|(build_res, _)| build_res)
 	}

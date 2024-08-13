@@ -587,6 +587,17 @@ decl_error! {
 	#[source(None)]
 	#[fmt("Execution semaphore was closed")]
 	ExecSemaphoreClosed {},
+
+	/// Found recursive rule
+	#[source(None)]
+	#[fmt("Found recursive rule: {target} (Parent rules: {})", parent_targets.iter().join(", "))]
+	FoundRecursiveRule {
+		/// Formatted recursive target
+		target: String,
+
+		/// Formatted parent targets
+		parent_targets: Vec<String>,
+	},
 }
 
 /// Helper function to format a `Command` for errors

@@ -1,0 +1,14 @@
+default: [a.out]
+
+rules:
+  a:
+    out: [a.out]
+    deps: [b.out]
+    exec:
+      - [touch, a.out]
+
+  b:
+    out: [b.out]
+    deps: [a.out]
+    exec:
+      - [touch, b.out]
