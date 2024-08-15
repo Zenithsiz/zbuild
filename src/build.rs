@@ -566,7 +566,7 @@ impl<'s> Builder<'s> {
 
 		// Then rebuild, if needed
 		if needs_rebuilt {
-			tracing::trace!(?target, ?rule.name, "Rebuilding target rule");
+			tracing::trace!(?target, ?rule.name, ?deps_last_build_time, ?rule_last_build_time, "Rebuilding target rule");
 			self.rebuild_rule(rule).await.map_err(AppError::build_rule(rule.name))?;
 		}
 
