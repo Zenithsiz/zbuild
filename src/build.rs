@@ -223,7 +223,7 @@ impl<'s> Builder<'s> {
 		ignore_missing: bool,
 		reason: BuildReason<'_, 's>,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard<'s>>), AppError> {
-		tracing::trace!(?target, "Building target");
+		tracing::trace!(?target, reason=?reason.0.as_ref().map(|reason| reason.target), "Building target");
 
 		// Normalize file paths
 		let target = match *target {
@@ -233,6 +233,15 @@ impl<'s> Builder<'s> {
 			},
 			ref target @ Target::Rule { .. } => target.clone(),
 		};
+
+		// Check if we're being built recursively, and if so, return error
+		reason.for_each(|parent_target| match &target == parent_target {
+			true => Err(AppError::FoundRecursiveRule {
+				target:         target.to_string(),
+				parent_targets: reason.collect_all().into_iter().map(Target::to_string).collect(),
+			}),
+			false => Ok(()),
+		})?;
 
 		// Get the rule for the target
 		let Some((rule, target_rule)) = self.target_rule(&target, rules)? else {
@@ -271,15 +280,6 @@ impl<'s> Builder<'s> {
 				Target::Rule { .. } => unreachable!(),
 			}
 		};
-
-		// Check if we're being built recursively, and if so, return error
-		reason.for_each(|parent_target| match &target == parent_target {
-			true => Err(AppError::FoundRecursiveRule {
-				target:         target.to_string(),
-				parent_targets: reason.collect_all().into_iter().map(Target::to_string).collect(),
-			}),
-			false => Ok(()),
-		})?;
 
 		// Get the built lock, or create it
 		let build_lock = self
