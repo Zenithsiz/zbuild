@@ -140,7 +140,7 @@ impl<'s> Builder<'s> {
 			// If we got a file, check which rule can make it
 			Target::File { ref file, .. } => match self.find_rule_for_file(file, rules)? {
 				Some((rule, pats)) => {
-					tracing::trace!(?target, ?rule.name, "Found target rule");
+					tracing::trace!(%target, %rule.name, "Found target rule");
 					let target_rule = TargetRule {
 						name: rule.name,
 						pats: pats.into_iter().sorted().collect(),
@@ -223,7 +223,7 @@ impl<'s> Builder<'s> {
 		ignore_missing: bool,
 		reason: BuildReason<'_, 's>,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard<'s>>), AppError> {
-		tracing::trace!(?target, reason=?reason.0.as_ref().map(|reason| reason.target), "Building target");
+		tracing::trace!(%target, reason=?reason.0.as_ref().map(|reason| reason.target), "Building target");
 
 		// Normalize file paths
 		let target = match *target {
@@ -249,7 +249,7 @@ impl<'s> Builder<'s> {
 				Target::File { ref file, .. } => match fs::symlink_metadata(&**file).await {
 					Ok(metadata) => {
 						let build_time = metadata.modified().map_err(AppError::get_file_modified_time(&**file))?;
-						tracing::trace!(?target, ?build_time, "Found target file");
+						tracing::trace!(%target, ?build_time, "Found target file");
 						return Ok((
 							BuildResult {
 								build_time,
@@ -442,10 +442,10 @@ impl<'s> Builder<'s> {
 		// TODO: Don't collect like 3 times during this
 		let deps = util::chain!(normal_deps, out_deps)
 			.map(|dep| {
-				tracing::trace!(?target, ?rule.name, ?dep, "Found target rule dependency");
+				tracing::trace!(%target, ?rule.name, ?dep, "Found target rule dependency");
 				let rule = &rule;
 				async move {
-					tracing::trace!(?target, ?rule.name, ?dep, "Building target rule dependency");
+					tracing::trace!(%target, ?rule.name, ?dep, "Building target rule dependency");
 
 					// Get the target to build
 					let dep_target = match dep {
@@ -479,7 +479,7 @@ impl<'s> Builder<'s> {
 								)
 								.await
 								.map_err(AppError::build_target(&dep_target))?;
-							tracing::trace!(?target, ?rule.name, ?dep, ?res, "Built target rule dependency");
+							tracing::trace!(%target, ?rule.name, ?dep, ?res, "Built target rule dependency");
 
 							self.send_event(|| Event::TargetDepBuilt {
 								target: target.clone(),
@@ -527,7 +527,7 @@ impl<'s> Builder<'s> {
 					};
 
 					let deps = util::chain!(dep_res, dep_deps.into_iter()).collect::<Vec<_>>();
-					tracing::trace!(?target, ?rule.name, ?dep, ?deps, "Built target rule dependency dependencies");
+					tracing::trace!(%target, ?rule.name, ?dep, ?deps, "Built target rule dependency dependencies");
 
 					Ok(deps)
 				}
@@ -546,7 +546,7 @@ impl<'s> Builder<'s> {
 			.filter(|(dep_target, ..)| !dep_target.is_static())
 			.map(|(_, dep_res, _)| dep_res.build_time)
 			.max();
-		tracing::trace!(?target, ?rule.name, ?deps_last_build_time, ?deps, "Built target rule dependencies");
+		tracing::trace!(%target, ?rule.name, ?deps_last_build_time, ?deps, "Built target rule dependencies");
 
 		// Afterwards check the last time we've built the rule and compare it with
 		// the dependency build times.
@@ -566,7 +566,7 @@ impl<'s> Builder<'s> {
 
 		// Then rebuild, if needed
 		if needs_rebuilt {
-			tracing::trace!(?target, ?rule.name, ?deps_last_build_time, ?rule_last_build_time, "Rebuilding target rule");
+			tracing::trace!(%target, ?rule.name, ?deps_last_build_time, ?rule_last_build_time, "Rebuilding target rule");
 			self.rebuild_rule(rule).await.map_err(AppError::build_rule(rule.name))?;
 		}
 

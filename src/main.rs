@@ -58,6 +58,7 @@ use {
 };
 
 #[tokio::main]
+#[expect(clippy::too_many_lines, reason = "TODO: Split it up more")]
 async fn main() -> ExitResult {
 	// Get all args
 	let args = Args::parse();
@@ -133,7 +134,10 @@ async fn main() -> ExitResult {
 			})
 			.collect(),
 	};
-	tracing::trace!(?targets_to_build, "Found targets to build");
+	tracing::trace!(
+		targets_to_build = ?targets_to_build.iter().map(<_>::to_string).collect::<Vec<_>>(),
+		"Found targets to build"
+	);
 
 	// Create the builder
 	// Note: We should stop builds on the first error if we're *not* watching.
