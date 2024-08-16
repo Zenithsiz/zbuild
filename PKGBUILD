@@ -1,6 +1,6 @@
 # Maintainer: Filipe Rodrigues <filipejacintorodrigues1@gmail.com>
 pkgname=zbuild
-pkgver=0.1.7
+pkgver=0.1.8
 pkgrel=1
 pkgdesc="A make-like generic build system "
 arch=('x86_64')
@@ -9,7 +9,7 @@ license=('MIT' 'APACHE-2')
 depends=('gcc-libs')
 makedepends=('cargo-nightly')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/zenithsiz/$pkgname/archive/$pkgver.tar.gz")
-sha512sums=('2287b5f23afe56148a82a4149ebec5e9c966eeb5f21fb6211fe3af57e849ae85b7867fb92f3d9d1dff81d7a59313f1a1cfc14b7ce7ade42c1817c65062a5fb49')
+sha512sums=('d01178dd9a7ba82c844db0f18dd6474d5a658655051be3cd7b77ef714800bff79c1daf5775cb14b7611797285274fa50def8dd1f67d7e2c98a5ae60318c0b864')
 
 prepare() {
 	cd "$pkgname-$pkgver"
