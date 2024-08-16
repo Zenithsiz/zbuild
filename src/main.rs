@@ -35,7 +35,7 @@ mod watcher;
 use {
 	self::{
 		ast::Ast,
-		build::Builder,
+		build::{BuildReason, Builder},
 		error::{AppError, ExitResult},
 		expand::Expander,
 		rules::Rules,
@@ -58,6 +58,7 @@ use {
 };
 
 #[tokio::main]
+#[expect(clippy::too_many_lines, reason = "TODO: Split it up more")]
 async fn main() -> ExitResult {
 	// Get all args
 	let args = Args::parse();
@@ -133,7 +134,10 @@ async fn main() -> ExitResult {
 			})
 			.collect(),
 	};
-	tracing::trace!(?targets_to_build, "Found targets to build");
+	tracing::trace!(
+		targets_to_build = ?targets_to_build.iter().map(<_>::to_string).collect::<Vec<_>>(),
+		"Found targets to build"
+	);
 
 	// Create the builder
 	// Note: We should stop builds on the first error if we're *not* watching.
@@ -180,7 +184,8 @@ async fn main() -> ExitResult {
 	let total_targets = targets.len();
 	let built_targets = targets
 		.iter()
-		.filter(|(_, res)| res.as_ref().map_or(false, |res| res.built))
+		.filter_map(|(_, res)| res.as_ref())
+		.filter(|res| res.as_ref().map_or(false, |res| res.built))
 		.count();
 	tracing::info!("Built {built_targets} targets");
 	tracing::info!("Checked {total_targets} targets");
@@ -229,7 +234,7 @@ async fn build_target<'s, T: BuildableTargetInner<'s> + fmt::Display + fmt::Debu
 
 	// Try to build the target
 	let build_start_time = SystemTime::now();
-	let res = T::build(target, builder, rules, ignore_missing).await;
+	let res = T::build(target, builder, rules, ignore_missing, BuildReason::empty()).await;
 
 	// Then check the status
 	match res {
@@ -261,6 +266,7 @@ trait BuildableTargetInner<'s>: Sized {
 		builder: &Builder<'s>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,
+		reason: BuildReason<'_, 's>,
 	) -> Result<build::BuildResult, AppError>;
 }
 
@@ -270,9 +276,10 @@ impl<'s> BuildableTargetInner<'s> for rules::Expr<'s> {
 		builder: &Builder<'s>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,
+		reason: BuildReason<'_, 's>,
 	) -> Result<build::BuildResult, AppError> {
 		builder
-			.build_expr(target, rules, ignore_missing)
+			.build_expr(target, rules, ignore_missing, reason)
 			.await
 			.map(|(build_res, _)| build_res)
 	}
@@ -284,9 +291,10 @@ impl<'s> BuildableTargetInner<'s> for CowStr<'s> {
 		builder: &Builder<'s>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,
+		reason: BuildReason<'_, 's>,
 	) -> Result<build::BuildResult, AppError> {
 		builder
-			.build(target, rules, ignore_missing)
+			.build(target, rules, ignore_missing, reason)
 			.await
 			.map(|(build_res, _)| build_res)
 	}

@@ -30,6 +30,7 @@ use {
 		borrow::Cow,
 		collections::HashMap,
 		ffi::{OsStr, OsString},
+		ops::Try,
 		time::SystemTime,
 	},
 	tokio::{fs, process, sync::Semaphore},
@@ -77,7 +78,7 @@ pub struct Builder<'s> {
 	expander: Expander<'s>,
 
 	/// All rules' build lock
-	rules_lock: DashMap<TargetRule<'s>, BuildLock<'s>>,
+	rules_lock: DashMap<TargetRule<'s>, BuildLock>,
 
 	/// Execution semaphore
 	exec_semaphore: Semaphore,
@@ -103,10 +104,10 @@ impl<'s> Builder<'s> {
 	}
 
 	/// Returns all build results
-	pub fn into_build_results(self) -> HashMap<Target<'s, CowStr<'s>>, Result<BuildResult, ()>> {
+	pub fn into_build_results(self) -> HashMap<&'s str, Option<Result<BuildResult, ()>>> {
 		self.rules_lock
 			.into_iter()
-			.flat_map(|(_, lock)| lock.into_res())
+			.map(|(rule, lock)| (rule.name, lock.into_res()))
 			.collect()
 	}
 
@@ -139,7 +140,7 @@ impl<'s> Builder<'s> {
 			// If we got a file, check which rule can make it
 			Target::File { ref file, .. } => match self.find_rule_for_file(file, rules)? {
 				Some((rule, pats)) => {
-					tracing::trace!(?target, ?rule.name, "Found target rule");
+					tracing::trace!(%target, %rule.name, "Found target rule");
 					let target_rule = TargetRule {
 						name: rule.name,
 						pats: pats.into_iter().sorted().collect(),
@@ -191,7 +192,7 @@ impl<'s> Builder<'s> {
 			.clone();
 
 		// Then remove it's state
-		build_lock.lock_build().await.reset(target);
+		build_lock.lock_build().await.reset();
 
 		Ok(())
 	}
@@ -202,7 +203,8 @@ impl<'s> Builder<'s> {
 		target: &Target<'s, Expr<'s>>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,
-	) -> Result<(BuildResult, Option<BuildLockDepGuard<'s>>), AppError> {
+		reason: BuildReason<'_, 's>,
+	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
 		// Expand the target
 		let target = self
 			.expander
@@ -210,7 +212,7 @@ impl<'s> Builder<'s> {
 			.map_err(AppError::expand_target(target))?;
 
 		// Then build
-		self.build(&target, rules, ignore_missing).await
+		self.build(&target, rules, ignore_missing, reason).await
 	}
 
 	/// Builds a target
@@ -219,8 +221,9 @@ impl<'s> Builder<'s> {
 		target: &Target<'s, CowStr<'s>>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,
-	) -> Result<(BuildResult, Option<BuildLockDepGuard<'s>>), AppError> {
-		tracing::trace!(?target, "Building target");
+		reason: BuildReason<'_, 's>,
+	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
+		tracing::trace!(%target, reason=?reason.0.as_ref().map(|reason| reason.target), "Building target");
 
 		// Normalize file paths
 		let target = match *target {
@@ -231,13 +234,22 @@ impl<'s> Builder<'s> {
 			ref target @ Target::Rule { .. } => target.clone(),
 		};
 
+		// Check if we're being built recursively, and if so, return error
+		reason.for_each(|parent_target| match &target == parent_target {
+			true => Err(AppError::FoundRecursiveRule {
+				target:         target.to_string(),
+				parent_targets: reason.collect_all().into_iter().map(Target::to_string).collect(),
+			}),
+			false => Ok(()),
+		})?;
+
 		// Get the rule for the target
 		let Some((rule, target_rule)) = self.target_rule(&target, rules)? else {
 			match target {
 				Target::File { ref file, .. } => match fs::symlink_metadata(&**file).await {
 					Ok(metadata) => {
 						let build_time = metadata.modified().map_err(AppError::get_file_modified_time(&**file))?;
-						tracing::trace!(?target, ?build_time, "Found target file");
+						tracing::trace!(%target, ?build_time, "Found target file");
 						return Ok((
 							BuildResult {
 								build_time,
@@ -280,7 +292,7 @@ impl<'s> Builder<'s> {
 		// Note: Tokio doesn't support lock upgrading, so we perform a double-checked lock
 		#[expect(irrefutable_let_patterns, reason = "We want to scope it to the `if` block")]
 		if let build_guard = build_lock.lock_dep().await &&
-			let Some(res) = build_guard.res(&target)
+			let Some(res) = build_guard.res()
 		{
 			return res
 				.map(|res| (res, Some(build_guard)))
@@ -292,7 +304,7 @@ impl<'s> Builder<'s> {
 
 		// Else lock it for building and re-check
 		let mut build_guard = build_lock.lock_build().await;
-		if let Some(res) = build_guard.res(&target) {
+		if let Some(res) = build_guard.res() {
 			return res
 				.map(|res| (res, Some(build_guard.into_dep())))
 				.map_err(|()| AppError::BuildTarget {
@@ -302,9 +314,13 @@ impl<'s> Builder<'s> {
 		}
 
 		// Else build
-		match self.build_unchecked(&target, &rule, rules, ignore_missing).await {
+		match self
+			.build_unchecked(&target, &rule, rules, ignore_missing, reason)
+			.await
+		{
 			Ok(res) => {
-				build_guard.finish(target, res);
+				build_guard.finish(res);
+
 				Ok((res, Some(build_guard.into_dep())))
 			},
 			Err(err) => {
@@ -317,7 +333,7 @@ impl<'s> Builder<'s> {
 					self.exec_semaphore.close();
 				}
 
-				build_guard.finish_failed(target);
+				build_guard.finish_failed();
 				Err(err)
 			},
 		}
@@ -326,13 +342,17 @@ impl<'s> Builder<'s> {
 	/// Builds a target without checking if the target is already being built.
 	#[expect(clippy::too_many_lines, reason = "TODO: Split this function onto smaller ones")]
 	#[async_recursion::async_recursion]
-	async fn build_unchecked(
+	async fn build_unchecked<'reason>(
 		&self,
 		target: &Target<'s, CowStr<'s>>,
 		rule: &Rule<'s, CowStr<'s>>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,
-	) -> Result<BuildResult, AppError> {
+		reason: BuildReason<'reason, 's>,
+	) -> Result<BuildResult, AppError>
+	where
+		'reason: 'async_recursion,
+	{
 		/// Dependency
 		#[derive(Clone, Debug)]
 		enum Dep<'s, 'a> {
@@ -423,10 +443,10 @@ impl<'s> Builder<'s> {
 		// TODO: Don't collect like 3 times during this
 		let deps = util::chain!(normal_deps, out_deps)
 			.map(|dep| {
-				tracing::trace!(?target, ?rule.name, ?dep, "Found target rule dependency");
+				tracing::trace!(%target, ?rule.name, ?dep, "Found target rule dependency");
 				let rule = &rule;
 				async move {
-					tracing::trace!(?target, ?rule.name, ?dep, "Building target rule dependency");
+					tracing::trace!(%target, ?rule.name, ?dep, "Building target rule dependency");
 
 					// Get the target to build
 					let dep_target = match dep {
@@ -456,10 +476,11 @@ impl<'s> Builder<'s> {
 									&dep_target,
 									rules,
 									ignore_missing | matches!(dep, Dep::File { is_optional: true, .. }),
+									reason.with_target(target),
 								)
 								.await
 								.map_err(AppError::build_target(&dep_target))?;
-							tracing::trace!(?target, ?rule.name, ?dep, ?res, "Built target rule dependency");
+							tracing::trace!(%target, ?rule.name, ?dep, ?res, "Built target rule dependency");
 
 							self.send_event(|| Event::TargetDepBuilt {
 								target: target.clone(),
@@ -476,10 +497,21 @@ impl<'s> Builder<'s> {
 					// If the dependency if a dependency deps file or an output deps file (and exists), build it's dependencies too
 					#[expect(clippy::wildcard_enum_match_arm, reason = "We only care about some variants")]
 					let dep_deps = match &dep {
+						// Non-optional we don't check if they exist, so that an error
+						// pops up if they don't.
 						Dep::File {
 							file,
 							is_deps_file: true,
 							is_output: false,
+							is_optional: false,
+							..
+						} |
+						// For optional or output, we only include them if they exist
+						Dep::File {
+							file,
+							is_deps_file: true,
+							is_optional: true,
+							exists: true,
 							..
 						} |
 						Dep::File {
@@ -489,14 +521,14 @@ impl<'s> Builder<'s> {
 							exists: true,
 							..
 						} => self
-							.build_deps_file(target, file, rule, rules, ignore_missing)
+							.build_deps_file(target, file, rule, rules, ignore_missing, reason)
 							.await
 							.map_err(AppError::build_deps_file(&**file))?,
 						_ => vec![],
 					};
 
 					let deps = util::chain!(dep_res, dep_deps.into_iter()).collect::<Vec<_>>();
-					tracing::trace!(?target, ?rule.name, ?dep, ?deps, "Built target rule dependency dependencies");
+					tracing::trace!(%target, ?rule.name, ?dep, ?deps, "Built target rule dependency dependencies");
 
 					Ok(deps)
 				}
@@ -515,7 +547,7 @@ impl<'s> Builder<'s> {
 			.filter(|(dep_target, ..)| !dep_target.is_static())
 			.map(|(_, dep_res, _)| dep_res.build_time)
 			.max();
-		tracing::trace!(?target, ?rule.name, ?deps_last_build_time, ?deps, "Built target rule dependencies");
+		tracing::trace!(%target, ?rule.name, ?deps_last_build_time, ?deps, "Built target rule dependencies");
 
 		// Afterwards check the last time we've built the rule and compare it with
 		// the dependency build times.
@@ -535,7 +567,7 @@ impl<'s> Builder<'s> {
 
 		// Then rebuild, if needed
 		if needs_rebuilt {
-			tracing::trace!(?target, ?rule.name, "Rebuilding target rule");
+			tracing::trace!(%target, ?rule.name, ?deps_last_build_time, ?rule_last_build_time, "Rebuilding target rule");
 			self.rebuild_rule(rule).await.map_err(AppError::build_rule(rule.name))?;
 		}
 
@@ -560,7 +592,8 @@ impl<'s> Builder<'s> {
 		rule: &Rule<'s, CowStr<'s>>,
 		rules: &Rules<'s>,
 		ignore_missing: bool,
-	) -> Result<Vec<(Target<'s, CowStr<'s>>, BuildResult, Option<BuildLockDepGuard<'s>>)>, AppError> {
+		reason: BuildReason<'_, 's>,
+	) -> Result<Vec<(Target<'s, CowStr<'s>>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {
 		tracing::trace!(target=?parent_target, ?rule.name, ?deps_file, "Building dependencies of target rule dependency-file");
 		let (output, deps) = self::parse_deps_file(deps_file).await?;
 
@@ -604,7 +637,7 @@ impl<'s> Builder<'s> {
 				};
 				async move {
 					let (res, dep_guard) = self
-						.build(&dep_target, rules, ignore_missing)
+						.build(&dep_target, rules, ignore_missing, reason.with_target(parent_target))
 						.await
 						.map_err(AppError::build_target(&dep_target))?;
 
@@ -819,4 +852,58 @@ async fn rule_last_build_time<'s>(rule: &Rule<'s, CowStr<'s>>) -> Result<Option<
 		.into_iter()
 		.min();
 	Ok(built_time)
+}
+
+/// Build reason inner
+#[derive(Clone, Copy, Debug)]
+pub struct BuildReasonInner<'a, 's> {
+	/// Target
+	target: &'a Target<'s, CowStr<'s>>,
+
+	/// Previous reason
+	prev: &'a BuildReason<'a, 's>,
+}
+
+/// Build reason
+#[derive(Clone, Copy, Debug)]
+pub struct BuildReason<'a, 's>(Option<BuildReasonInner<'a, 's>>);
+
+impl<'s> BuildReason<'_, 's> {
+	/// Creates an empty build reason
+	pub const fn empty() -> Self {
+		Self(None)
+	}
+
+	/// Adds a target to this build reason
+	pub const fn with_target<'a>(&'a self, target: &'a Target<'s, CowStr<'s>>) -> BuildReason<'a, 's> {
+		BuildReason(Some(BuildReasonInner { target, prev: self }))
+	}
+
+	/// Iterates over all reasons
+	pub fn for_each<F, R>(&self, mut f: F) -> R
+	where
+		F: FnMut(&Target<'s, CowStr<'s>>) -> R,
+		R: Try<Output = ()>,
+	{
+		let mut reason = &self.0;
+		while let Some(inner) = reason {
+			f(inner.target)?;
+			reason = &inner.prev.0;
+		}
+
+		R::from_output(())
+	}
+
+	/// Collects all reasons
+	pub fn collect_all(&self) -> Vec<&Target<'s, CowStr<'s>>> {
+		let mut targets = vec![];
+
+		let mut reason = &self.0;
+		while let Some(inner) = reason {
+			targets.push(inner.target);
+			reason = &inner.prev.0;
+		}
+
+		targets
+	}
 }
