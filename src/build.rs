@@ -78,7 +78,7 @@ pub struct Builder<'s> {
 	expander: Expander<'s>,
 
 	/// All rules' build lock
-	rules_lock: DashMap<TargetRule<'s>, BuildLock<'s>>,
+	rules_lock: DashMap<TargetRule<'s>, BuildLock>,
 
 	/// Execution semaphore
 	exec_semaphore: Semaphore,
@@ -104,10 +104,10 @@ impl<'s> Builder<'s> {
 	}
 
 	/// Returns all build results
-	pub fn into_build_results(self) -> HashMap<Target<'s, CowStr<'s>>, Result<BuildResult, ()>> {
+	pub fn into_build_results(self) -> HashMap<&'s str, Option<Result<BuildResult, ()>>> {
 		self.rules_lock
 			.into_iter()
-			.flat_map(|(_, lock)| lock.into_res())
+			.map(|(rule, lock)| (rule.name, lock.into_res()))
 			.collect()
 	}
 
@@ -192,7 +192,7 @@ impl<'s> Builder<'s> {
 			.clone();
 
 		// Then remove it's state
-		build_lock.lock_build().await.reset(target);
+		build_lock.lock_build().await.reset();
 
 		Ok(())
 	}
@@ -204,7 +204,7 @@ impl<'s> Builder<'s> {
 		rules: &Rules<'s>,
 		ignore_missing: bool,
 		reason: BuildReason<'_, 's>,
-	) -> Result<(BuildResult, Option<BuildLockDepGuard<'s>>), AppError> {
+	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
 		// Expand the target
 		let target = self
 			.expander
@@ -222,7 +222,7 @@ impl<'s> Builder<'s> {
 		rules: &Rules<'s>,
 		ignore_missing: bool,
 		reason: BuildReason<'_, 's>,
-	) -> Result<(BuildResult, Option<BuildLockDepGuard<'s>>), AppError> {
+	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
 		tracing::trace!(%target, reason=?reason.0.as_ref().map(|reason| reason.target), "Building target");
 
 		// Normalize file paths
@@ -292,7 +292,7 @@ impl<'s> Builder<'s> {
 		// Note: Tokio doesn't support lock upgrading, so we perform a double-checked lock
 		#[expect(irrefutable_let_patterns, reason = "We want to scope it to the `if` block")]
 		if let build_guard = build_lock.lock_dep().await &&
-			let Some(res) = build_guard.res(&target)
+			let Some(res) = build_guard.res()
 		{
 			return res
 				.map(|res| (res, Some(build_guard)))
@@ -304,7 +304,7 @@ impl<'s> Builder<'s> {
 
 		// Else lock it for building and re-check
 		let mut build_guard = build_lock.lock_build().await;
-		if let Some(res) = build_guard.res(&target) {
+		if let Some(res) = build_guard.res() {
 			return res
 				.map(|res| (res, Some(build_guard.into_dep())))
 				.map_err(|()| AppError::BuildTarget {
@@ -319,7 +319,8 @@ impl<'s> Builder<'s> {
 			.await
 		{
 			Ok(res) => {
-				build_guard.finish(target, res);
+				build_guard.finish(res);
+
 				Ok((res, Some(build_guard.into_dep())))
 			},
 			Err(err) => {
@@ -332,7 +333,7 @@ impl<'s> Builder<'s> {
 					self.exec_semaphore.close();
 				}
 
-				build_guard.finish_failed(target);
+				build_guard.finish_failed();
 				Err(err)
 			},
 		}
@@ -592,7 +593,7 @@ impl<'s> Builder<'s> {
 		rules: &Rules<'s>,
 		ignore_missing: bool,
 		reason: BuildReason<'_, 's>,
-	) -> Result<Vec<(Target<'s, CowStr<'s>>, BuildResult, Option<BuildLockDepGuard<'s>>)>, AppError> {
+	) -> Result<Vec<(Target<'s, CowStr<'s>>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {
 		tracing::trace!(target=?parent_target, ?rule.name, ?deps_file, "Building dependencies of target rule dependency-file");
 		let (output, deps) = self::parse_deps_file(deps_file).await?;
 

@@ -2,8 +2,7 @@
 
 // Imports
 use {
-	crate::{rules::Target, util::CowStr},
-	std::{assert_matches::assert_matches, collections::HashMap, sync::Arc, time::SystemTime},
+	std::{assert_matches::assert_matches, sync::Arc, time::SystemTime},
 	tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock},
 };
 
@@ -19,107 +18,102 @@ pub struct BuildResult {
 
 /// Build state
 #[derive(Clone, Debug)]
-pub struct BuildState<'s> {
-	/// Targets' result
-	targets_res: HashMap<Target<'s, CowStr<'s>>, Result<BuildResult, ()>>,
+pub struct BuildState {
+	/// Result
+	res: Option<Result<BuildResult, ()>>,
 }
 
 /// Build lock
 #[derive(Clone, Debug)]
-pub struct BuildLock<'s> {
+pub struct BuildLock {
 	/// State
-	state: Arc<RwLock<BuildState<'s>>>,
+	state: Arc<RwLock<BuildState>>,
 }
 
-impl<'s> BuildLock<'s> {
+impl BuildLock {
 	/// Creates a new build lock
 	pub fn new() -> Self {
 		Self {
-			state: Arc::new(RwLock::new(BuildState {
-				targets_res: HashMap::new(),
-			})),
+			state: Arc::new(RwLock::new(BuildState { res: None })),
 		}
 	}
 
 	/// Locks the build lock for building
-	pub async fn lock_build(&self) -> BuildLockBuildGuard<'s> {
+	pub async fn lock_build(&self) -> BuildLockBuildGuard {
 		BuildLockBuildGuard {
 			state: Arc::clone(&self.state).write_owned().await,
 		}
 	}
 
 	/// Locks the build lock as a dependency
-	pub async fn lock_dep(&self) -> BuildLockDepGuard<'s> {
+	pub async fn lock_dep(&self) -> BuildLockDepGuard {
 		BuildLockDepGuard {
 			state: Arc::clone(&self.state).read_owned().await,
 		}
 	}
 
-	/// Retrieves all targets' result by consuming the lock
-	pub fn into_res(self) -> Vec<(Target<'s, CowStr<'s>>, Result<BuildResult, ()>)> {
+	/// Retrieves this lock's result by consuming the lock
+	pub fn into_res(self) -> Option<Result<BuildResult, ()>> {
 		// TODO: Not panic here
 		Arc::try_unwrap(self.state)
 			.expect("Leftover references when unwrapping build lock")
 			.into_inner()
-			.targets_res
-			.into_iter()
-			.collect()
+			.res
 	}
 }
 
 /// Build lock build guard
 #[derive(Debug)]
-pub struct BuildLockBuildGuard<'s> {
+pub struct BuildLockBuildGuard {
 	/// State
-	state: OwnedRwLockWriteGuard<BuildState<'s>>,
+	state: OwnedRwLockWriteGuard<BuildState>,
 }
 
-impl<'s> BuildLockBuildGuard<'s> {
+impl BuildLockBuildGuard {
 	/// Retrieves a target's result
 	///
 	/// Waits for any builders to finish
-	pub fn res(&self, target: &Target<'s, CowStr<'s>>) -> Option<Result<BuildResult, ()>> {
-		self.state.targets_res.get(target).copied()
+	pub fn res(&self) -> Option<Result<BuildResult, ()>> {
+		self.state.res
 	}
 
 	/// Downgrades this build lock into a dependency lock
-	pub fn into_dep(self) -> BuildLockDepGuard<'s> {
+	pub fn into_dep(self) -> BuildLockDepGuard {
 		BuildLockDepGuard {
 			state: self.state.downgrade(),
 		}
 	}
 
 	/// Resets this build.
-	pub fn reset(&mut self, target: &Target<'s, CowStr<'s>>) {
-		// Note: We don't care about the previous build result
-		let _: Option<Result<BuildResult, _>> = self.state.targets_res.remove(target);
+	pub fn reset(&mut self) {
+		self.state.res = None;
 	}
 
 	/// Finishes a build
-	pub fn finish(&mut self, target: Target<'s, CowStr<'s>>, res: BuildResult) {
-		let prev_res = self.state.targets_res.insert(target, Ok(res));
-		assert_matches!(prev_res, None, "Build was already finished");
+	pub fn finish(&mut self, res: BuildResult) {
+		assert_matches!(self.state.res, None, "Build was already finished");
+		self.state.res = Some(Ok(res));
 	}
 
 	/// Finishes a build as failed
-	pub fn finish_failed(&mut self, target: Target<'s, CowStr<'s>>) {
-		let prev_res = self.state.targets_res.insert(target, Err(()));
-		assert_matches!(prev_res, None, "Build was already finished");
+	pub fn finish_failed(&mut self) {
+		assert_matches!(self.state.res, None, "Build was already finished");
+		self.state.res = Some(Err(()));
 	}
 }
 
 /// Build lock dependency guard
 #[derive(Debug)]
-pub struct BuildLockDepGuard<'s> {
+pub struct BuildLockDepGuard {
 	/// State
-	state: OwnedRwLockReadGuard<BuildState<'s>>,
+	state: OwnedRwLockReadGuard<BuildState>,
 }
 
-impl<'s> BuildLockDepGuard<'s> {
+impl BuildLockDepGuard {
 	/// Retrieves a target's result
 	///
 	/// Waits for any builders to finish
-	pub fn res(&self, target: &Target<'s, CowStr<'s>>) -> Option<Result<BuildResult, ()>> {
-		self.state.targets_res.get(target).copied()
+	pub fn res(&self) -> Option<Result<BuildResult, ()>> {
+		self.state.res
 	}
 }

@@ -184,7 +184,8 @@ async fn main() -> ExitResult {
 	let total_targets = targets.len();
 	let built_targets = targets
 		.iter()
-		.filter(|(_, res)| res.as_ref().map_or(false, |res| res.built))
+		.filter_map(|(_, res)| res.as_ref())
+		.filter(|res| res.as_ref().map_or(false, |res| res.built))
 		.count();
 	tracing::info!("Built {built_targets} targets");
 	tracing::info!("Checked {total_targets} targets");
