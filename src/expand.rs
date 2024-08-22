@@ -7,7 +7,9 @@ use {
 		rules::{AliasOp, Command, CommandArg, DepItem, Exec, Expr, ExprCmpt, OutItem, Rule, Target},
 		util::CowStr,
 	},
+	indexmap::IndexMap,
 	itertools::Itertools,
+	smallvec::SmallVec,
 	std::{marker::PhantomData, path::PathBuf},
 };
 
@@ -26,7 +28,7 @@ impl<'s> Expander<'s> {
 	}
 
 	/// Expands an expression to it's components
-	pub fn expand_expr(&self, expr: &Expr<'s>, visitor: &mut impl Visitor<'s>) -> Result<Expr<'s>, AppError> {
+	pub fn expand_expr(&self, expr: &Expr<'s>, visitor: &Visitor<'_, 's>) -> Result<Expr<'s>, AppError> {
 		// Go through all components
 		let cmpts = expr
 			.cmpts
@@ -40,7 +42,7 @@ impl<'s> Expander<'s> {
 					// Note: We don't care about the operations on patterns, those are for matching
 					ExprCmpt::Pattern(pat) => match visitor.visit_pat(pat.name) {
 						// If expanded, just replace it with a string
-						FlowControl::ExpandTo(value) => cmpts.push(ExprCmpt::String(value)),
+						FlowControl::ExpandTo(value) => cmpts.push(ExprCmpt::String(value.clone())),
 
 						// Else keep on Keep and error on Error
 						FlowControl::Keep => cmpts.push(cmpt.clone()),
@@ -55,7 +57,7 @@ impl<'s> Expander<'s> {
 						// If expanded, check if we need to apply any operations
 						FlowControl::ExpandTo(alias_expr) => match alias.ops.is_empty() {
 							// If not, just recursively expand it
-							true => cmpts.extend(self.expand_expr(&alias_expr, visitor)?.cmpts),
+							true => cmpts.extend(self.expand_expr(alias_expr, visitor)?.cmpts),
 
 							// Else expand it to a string, then apply all operations
 							// Note: We expand to string even if we don't *need* to to ensure the user doesn't
@@ -63,7 +65,7 @@ impl<'s> Expander<'s> {
 							//       we can't resolve the operations.
 							false => {
 								// Expand
-								let value = self.expand_expr_string(&alias_expr, visitor)?;
+								let value = self.expand_expr_string(alias_expr, visitor)?;
 
 								// Then apply all
 								let value = alias.ops.iter().try_fold(value, |value, &op| {
@@ -110,7 +112,7 @@ impl<'s> Expander<'s> {
 	}
 
 	/// Expands an expression into a string
-	pub fn expand_expr_string(&self, expr: &Expr<'s>, visitor: &mut impl Visitor<'s>) -> Result<CowStr<'s>, AppError> {
+	pub fn expand_expr_string(&self, expr: &Expr<'s>, visitor: &Visitor<'_, 's>) -> Result<CowStr<'s>, AppError> {
 		let expr_cmpts = self.expand_expr(expr, visitor)?.cmpts.into_boxed_slice();
 		let res = match Box::<[_; 0]>::try_from(expr_cmpts) {
 			Ok(box []) => Ok("".into()),
@@ -153,7 +155,7 @@ impl<'s> Expander<'s> {
 	pub fn expand_rule(
 		&self,
 		rule: &Rule<'s, Expr<'s>>,
-		visitor: &mut impl Visitor<'s>,
+		visitor: &Visitor<'_, 's>,
 	) -> Result<Rule<'s, CowStr<'s>>, AppError> {
 		let aliases = rule
 			.aliases
@@ -224,7 +226,7 @@ impl<'s> Expander<'s> {
 	pub fn expand_cmd(
 		&self,
 		cmd: &Command<Expr<'s>>,
-		visitor: &mut impl Visitor<'s>,
+		visitor: &Visitor<'_, 's>,
 	) -> Result<Command<CowStr<'s>>, AppError> {
 		Ok(Command {
 			cwd:  cmd
@@ -249,7 +251,7 @@ impl<'s> Expander<'s> {
 	pub fn expand_target(
 		&self,
 		target: &Target<'s, Expr<'s>>,
-		visitor: &mut impl Visitor<'s>,
+		visitor: &Visitor<'_, 's>,
 	) -> Result<Target<'s, CowStr<'s>>, AppError> {
 		let target = match *target {
 			Target::File { ref file, is_static } => Target::File {
@@ -281,6 +283,7 @@ impl<'s> Expander<'s> {
 }
 
 /// Flow control for [`Expander::expand_expr_string`]
+#[derive(Clone, Copy, Debug)]
 pub enum FlowControl<T> {
 	/// Expand to
 	ExpandTo(T),
@@ -292,11 +295,80 @@ pub enum FlowControl<T> {
 	Error,
 }
 
+impl<T> FlowControl<T> {
+	/// Converts a `&FlowControl<T>` to `FlowControl<&T>`
+	pub const fn as_ref(&self) -> FlowControl<&T> {
+		match self {
+			Self::ExpandTo(value) => FlowControl::ExpandTo(value),
+			Self::Keep => FlowControl::Keep,
+			Self::Error => FlowControl::Error,
+		}
+	}
+}
+
 /// Visitor for [`Expander`]
-pub trait Visitor<'s> {
+#[derive(Clone, Debug)]
+pub struct Visitor<'a, 's> {
+	/// All aliases, in order to check
+	aliases: SmallVec<[&'a IndexMap<&'s str, Expr<'s>>; 2]>,
+
+	/// All patterns, in order to check
+	pats: SmallVec<[&'a IndexMap<CowStr<'s>, CowStr<'s>>; 1]>,
+
+	/// Default alias action
+	default_alias: FlowControl<Expr<'s>>,
+
+	/// Default pattern action
+	default_pat: FlowControl<CowStr<'s>>,
+}
+
+impl<'a, 's> Visitor<'a, 's> {
+	/// Creates a new visitor with aliases and patterns
+	pub fn new<A, P>(aliases: A, pats: P) -> Self
+	where
+		A: AsRef<[&'a IndexMap<&'s str, Expr<'s>>]>,
+		P: AsRef<[&'a IndexMap<CowStr<'s>, CowStr<'s>>]>,
+	{
+		Self {
+			aliases:       aliases.as_ref().into(),
+			pats:          pats.as_ref().into(),
+			default_alias: FlowControl::Error,
+			default_pat:   FlowControl::Error,
+		}
+	}
+
+	/// Creates a visitor from aliases
+	pub fn from_aliases<A>(aliases: A) -> Self
+	where
+		A: AsRef<[&'a IndexMap<&'s str, Expr<'s>>]>,
+	{
+		Self::new(aliases, [])
+	}
+
+	/// Sets the default pattern
+	pub fn with_default_pat(self, default_pat: FlowControl<CowStr<'s>>) -> Self {
+		Self { default_pat, ..self }
+	}
+
 	/// Visits an alias
-	fn visit_alias(&mut self, alias_name: &str) -> FlowControl<Expr<'s>>;
+	fn visit_alias(&self, alias_name: &str) -> FlowControl<&Expr<'s>> {
+		for aliases in &self.aliases {
+			if let Some(alias) = aliases.get(alias_name) {
+				return FlowControl::ExpandTo(alias);
+			}
+		}
+
+		self.default_alias.as_ref()
+	}
 
 	/// Visits a pattern
-	fn visit_pat(&mut self, pat_name: &str) -> FlowControl<CowStr<'s>>;
+	fn visit_pat(&self, pat_name: &str) -> FlowControl<&CowStr<'s>> {
+		for pats in &self.pats {
+			if let Some(pat) = pats.get(pat_name) {
+				return FlowControl::ExpandTo(pat);
+			}
+		}
+
+		self.default_pat.as_ref()
+	}
 }

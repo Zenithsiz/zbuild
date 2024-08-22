@@ -1,7 +1,6 @@
 //! Build
 
 // Modules
-mod expand_visitor;
 mod lock;
 mod match_expr;
 
@@ -11,12 +10,12 @@ pub use lock::BuildResult;
 // Imports
 use {
 	self::{
-		expand_visitor::{GlobalVisitor, RuleOutputVisitor, RuleVisitor},
 		lock::{BuildLock, BuildLockDepGuard},
 		match_expr::match_expr,
 	},
 	crate::{
 		error::ResultMultiple,
+		expand,
 		rules::{Command, CommandArg, DepItem, Expr, OutItem, Rule, Target},
 		util::{self, CowStr},
 		AppError,
@@ -152,9 +151,10 @@ impl<'s> Builder<'s> {
 				let rule = rules.rules.get(&**rule).ok_or_else(|| AppError::UnknownRule {
 					rule_name: (**rule).to_owned(),
 				})?;
+				let expand_visitor = expand::Visitor::new([&rule.aliases, &rules.aliases], [pats]);
 				let rule = self
 					.expander
-					.expand_rule(rule, &mut RuleVisitor::new(&rules.aliases, &rule.aliases, pats))
+					.expand_rule(rule, &expand_visitor)
 					.map_err(AppError::expand_rule(rule.name))?;
 				let target_rule = TargetRule {
 					name: rule.name,
@@ -201,9 +201,10 @@ impl<'s> Builder<'s> {
 		reason: BuildReason<'_, 's>,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
 		// Expand the target
+		let expand_visitor = expand::Visitor::from_aliases([&rules.aliases]);
 		let target = self
 			.expander
-			.expand_target(target, &mut GlobalVisitor::new(&rules.aliases))
+			.expand_target(target, &expand_visitor)
 			.map_err(AppError::expand_target(target))?;
 
 		// Then build
@@ -748,15 +749,16 @@ impl<'s> Builder<'s> {
 				let output_file = match output {
 					OutItem::File { file: output_file, .. } => output_file,
 				};
-				let output_file = self
-					.expander
-					.expand_expr(output_file, &mut RuleOutputVisitor::new(&rules.aliases, &rule.aliases))?;
+				let expand_visitor = expand::Visitor::from_aliases([&rule.aliases, &rules.aliases])
+					.with_default_pat(expand::FlowControl::Keep);
+				let output_file = self.expander.expand_expr(output_file, &expand_visitor)?;
 
 				// Then try to match the output file to the file we need to create
 				if let Some(rule_pats) = self::match_expr(&output_file, &output_file.cmpts, file)? {
+					let expand_visitor = expand::Visitor::new([&rule.aliases, &rules.aliases], [&rule_pats]);
 					let rule = self
 						.expander
-						.expand_rule(rule, &mut RuleVisitor::new(&rules.aliases, &rule.aliases, &rule_pats))
+						.expand_rule(rule, &expand_visitor)
 						.map_err(AppError::expand_rule(rule.name.to_owned()))?;
 					return Ok(Some((rule, rule_pats)));
 				}
