@@ -698,6 +698,10 @@ impl Termination for ExitResult {
 impl FromResidual<Result<Infallible, AppError>> for ExitResult {
 	fn from_residual(residual: Result<Infallible, AppError>) -> Self {
 		match residual {
+			#[expect(
+				unreachable_patterns,
+				reason = "We can't remove it yet until `never_patterns` gets better support"
+			)]
 			Ok(never) => match never {},
 			Err(err) => Self::Err(err),
 		}
