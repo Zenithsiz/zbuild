@@ -57,7 +57,7 @@ use {
 	watcher::Watcher,
 };
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 #[expect(clippy::too_many_lines, reason = "TODO: Split it up more")]
 async fn main() -> ExitResult {
 	// Get all args
