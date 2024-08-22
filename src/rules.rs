@@ -19,7 +19,7 @@ pub use {
 };
 
 // Imports
-use {crate::Ast, std::collections::HashMap};
+use {crate::Ast, indexmap::IndexMap};
 
 /// Rules.
 ///
@@ -31,13 +31,13 @@ pub struct Rules<'s> {
 	///
 	/// These are available for the whole program to
 	/// use.
-	pub aliases: HashMap<&'s str, Expr<'s>>,
+	pub aliases: IndexMap<&'s str, Expr<'s>>,
 
 	/// Default targets to build
 	pub default: Vec<Target<'s, Expr<'s>>>,
 
 	/// Rules
-	pub rules: HashMap<&'s str, Rule<'s, Expr<'s>>>,
+	pub rules: IndexMap<&'s str, Rule<'s, Expr<'s>>>,
 }
 
 impl<'s> Rules<'s> {

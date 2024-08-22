@@ -4,9 +4,9 @@
 use {
 	super::Expr,
 	crate::{ast, util::CowStr},
+	indexmap::IndexMap,
 	itertools::Itertools,
 	std::{
-		collections::HashMap,
 		fmt,
 		hash::{Hash, Hasher},
 		mem,
@@ -31,7 +31,7 @@ pub enum Target<'s, T> {
 		rule: T,
 
 		/// Patterns
-		pats: HashMap<CowStr<'s>, T>,
+		pats: IndexMap<CowStr<'s>, T>,
 	},
 }
 
@@ -55,7 +55,7 @@ impl<'s> Target<'s, Expr<'s>> {
 			},
 			ast::Target::Rule { rule } => Self::Rule {
 				rule: Expr::new(rule),
-				pats: HashMap::new(),
+				pats: IndexMap::new(),
 			},
 		}
 	}

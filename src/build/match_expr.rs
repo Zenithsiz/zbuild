@@ -7,7 +7,8 @@ use {
 		util::CowStr,
 		AppError,
 	},
-	std::{assert_matches::assert_matches, collections::HashMap},
+	indexmap::IndexMap,
+	std::assert_matches::assert_matches,
 };
 
 /// Returns if `value` matches all `cmpts` and returns all patterns resolved
@@ -19,8 +20,8 @@ pub fn match_expr<'s>(
 	expr: &Expr<'s>,
 	cmpts: &[ExprCmpt<'s>],
 	mut value: &str,
-) -> Result<Option<HashMap<CowStr<'s>, CowStr<'s>>>, AppError> {
-	let mut patterns = HashMap::new();
+) -> Result<Option<IndexMap<CowStr<'s>, CowStr<'s>>>, AppError> {
+	let mut patterns = IndexMap::new();
 
 	// Until `rhs` has anything to match left
 	let mut cur_cmpts = cmpts;

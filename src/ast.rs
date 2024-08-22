@@ -1,7 +1,7 @@
 //! Ast
 
 // Imports
-use {itertools::Itertools, serde::de::Error, std::collections::HashMap};
+use {indexmap::IndexMap, itertools::Itertools, serde::de::Error};
 
 /// Zbuild ast
 #[derive(Clone, Debug)]
@@ -11,7 +11,7 @@ pub struct Ast<'a> {
 	#[serde(rename = "alias")]
 	#[serde(default)]
 	#[serde(borrow)]
-	pub aliases: HashMap<&'a str, Expr<'a>>,
+	pub aliases: IndexMap<&'a str, Expr<'a>>,
 
 	/// Default target
 	#[serde(default)]
@@ -20,7 +20,7 @@ pub struct Ast<'a> {
 
 	/// Rules
 	#[serde(borrow)]
-	pub rules: HashMap<&'a str, Rule<'a>>,
+	pub rules: IndexMap<&'a str, Rule<'a>>,
 }
 
 /// Output Item
@@ -56,7 +56,7 @@ pub enum DepItem<'a> {
 		/// All patterns to expand the rule with
 		#[serde(default)]
 		#[serde(borrow)]
-		pats: HashMap<Expr<'a>, Expr<'a>>,
+		pats: IndexMap<Expr<'a>, Expr<'a>>,
 	},
 
 	/// Dependencies file
@@ -331,7 +331,7 @@ pub struct Rule<'a> {
 	#[serde(rename = "alias")]
 	#[serde(default)]
 	#[serde(borrow)]
-	pub aliases: HashMap<&'a str, Expr<'a>>,
+	pub aliases: IndexMap<&'a str, Expr<'a>>,
 
 	/// Output items
 	#[serde(default)]

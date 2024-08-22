@@ -6,6 +6,7 @@
     "dashmap",
     "debouncer",
     "filetime",
+    "indexmap",
     "itertools",
     "mapref",
     "npath",

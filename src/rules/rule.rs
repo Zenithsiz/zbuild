@@ -4,7 +4,7 @@
 use {
 	super::{DepItem, Expr, OutItem},
 	crate::ast,
-	std::collections::HashMap,
+	indexmap::IndexMap,
 };
 
 /// Rule
@@ -14,7 +14,7 @@ pub struct Rule<'s, T> {
 	pub name: &'s str,
 
 	/// Aliases
-	pub aliases: HashMap<&'s str, T>,
+	pub aliases: IndexMap<&'s str, T>,
 
 	/// Output items
 	pub output: Vec<OutItem<T>>,

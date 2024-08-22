@@ -7,7 +7,7 @@ use {
 		rules::Expr,
 		util::CowStr,
 	},
-	std::collections::HashMap,
+	indexmap::IndexMap,
 };
 
 
@@ -18,12 +18,12 @@ use {
 #[derive(Clone, Copy, Debug)]
 pub struct GlobalVisitor<'s, 'global> {
 	/// Aliases
-	aliases: &'global HashMap<&'s str, Expr<'s>>,
+	aliases: &'global IndexMap<&'s str, Expr<'s>>,
 }
 
 impl<'s, 'global> GlobalVisitor<'s, 'global> {
 	/// Creates a new global visitor
-	pub const fn new(aliases: &'global HashMap<&'s str, Expr<'s>>) -> Self {
+	pub const fn new(aliases: &'global IndexMap<&'s str, Expr<'s>>) -> Self {
 		Self { aliases }
 	}
 }
@@ -48,17 +48,17 @@ impl<'s> Visitor<'s> for GlobalVisitor<'s, '_> {
 #[derive(Clone, Copy, Debug)]
 pub struct RuleOutputVisitor<'s, 'global, 'rule> {
 	/// Global aliases
-	global_aliases: &'global HashMap<&'s str, Expr<'s>>,
+	global_aliases: &'global IndexMap<&'s str, Expr<'s>>,
 
 	/// Rule aliases
-	rule_aliases: &'rule HashMap<&'s str, Expr<'s>>,
+	rule_aliases: &'rule IndexMap<&'s str, Expr<'s>>,
 }
 
 impl<'s, 'global, 'rule> RuleOutputVisitor<'s, 'global, 'rule> {
 	/// Creates a new rule output expression visitor
 	pub const fn new(
-		global_aliases: &'global HashMap<&'s str, Expr<'s>>,
-		rule_aliases: &'rule HashMap<&'s str, Expr<'s>>,
+		global_aliases: &'global IndexMap<&'s str, Expr<'s>>,
+		rule_aliases: &'rule IndexMap<&'s str, Expr<'s>>,
 	) -> Self {
 		Self {
 			global_aliases,
@@ -91,21 +91,21 @@ impl<'s> Visitor<'s> for RuleOutputVisitor<'s, '_, '_> {
 #[derive(Clone, Copy, Debug)]
 pub struct RuleVisitor<'s, 'global, 'rule, 'pats> {
 	/// Global aliases
-	global_aliases: &'global HashMap<&'s str, Expr<'s>>,
+	global_aliases: &'global IndexMap<&'s str, Expr<'s>>,
 
 	/// Rule aliases
-	rule_aliases: &'rule HashMap<&'s str, Expr<'s>>,
+	rule_aliases: &'rule IndexMap<&'s str, Expr<'s>>,
 
 	/// Rule patterns
-	rule_pats: &'pats HashMap<CowStr<'s>, CowStr<'s>>,
+	rule_pats: &'pats IndexMap<CowStr<'s>, CowStr<'s>>,
 }
 
 impl<'s, 'global, 'rule, 'pats> RuleVisitor<'s, 'global, 'rule, 'pats> {
 	/// Creates a new rule visitor
 	pub const fn new(
-		global_aliases: &'global HashMap<&'s str, Expr<'s>>,
-		rule_aliases: &'rule HashMap<&'s str, Expr<'s>>,
-		rule_pats: &'pats HashMap<CowStr<'s>, CowStr<'s>>,
+		global_aliases: &'global IndexMap<&'s str, Expr<'s>>,
+		rule_aliases: &'rule IndexMap<&'s str, Expr<'s>>,
+		rule_pats: &'pats IndexMap<CowStr<'s>, CowStr<'s>>,
 	) -> Self {
 		Self {
 			global_aliases,

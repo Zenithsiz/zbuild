@@ -25,8 +25,9 @@ use {
 	},
 	dashmap::DashMap,
 	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
+	indexmap::IndexMap,
 	itertools::Itertools,
-	std::{borrow::Cow, collections::HashMap, ffi::OsStr, ops::Try, time::SystemTime},
+	std::{borrow::Cow, ffi::OsStr, ops::Try, time::SystemTime},
 	tokio::{fs, process, sync::Semaphore},
 };
 
@@ -98,7 +99,7 @@ impl<'s> Builder<'s> {
 	}
 
 	/// Returns all build results
-	pub fn into_build_results(self) -> HashMap<&'s str, Option<Result<BuildResult, ()>>> {
+	pub fn into_build_results(self) -> IndexMap<&'s str, Option<Result<BuildResult, ()>>> {
 		self.rules_lock
 			.into_iter()
 			.map(|(rule, lock)| (rule.name, lock.into_res()))
@@ -363,7 +364,7 @@ impl<'s> Builder<'s> {
 			/// Rule
 			Rule {
 				name: CowStr<'s>,
-				pats: &'a HashMap<CowStr<'s>, CowStr<'s>>,
+				pats: &'a IndexMap<CowStr<'s>, CowStr<'s>>,
 			},
 		}
 
@@ -739,7 +740,7 @@ impl<'s> Builder<'s> {
 		&self,
 		file: &str,
 		rules: &Rules<'s>,
-	) -> Result<Option<(Rule<'s, CowStr<'s>>, HashMap<CowStr<'s>, CowStr<'s>>)>, AppError> {
+	) -> Result<Option<(Rule<'s, CowStr<'s>>, IndexMap<CowStr<'s>, CowStr<'s>>)>, AppError> {
 		for rule in rules.rules.values() {
 			for output in &rule.output {
 				// Expand all expressions in the output file

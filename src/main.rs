@@ -43,9 +43,9 @@ use {
 	args::Args,
 	clap::Parser,
 	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
+	indexmap::IndexMap,
 	std::{
 		borrow::Cow,
-		collections::HashMap,
 		env,
 		fmt,
 		fs,
@@ -128,7 +128,7 @@ async fn main() -> ExitResult {
 					// TODO: If it requires patterns maybe error out here?
 					|rule| rules::Target::Rule {
 						rule: rules::Expr::string(rule.name.to_owned()),
-						pats: HashMap::new(),
+						pats: IndexMap::new(),
 					},
 				)
 			})
