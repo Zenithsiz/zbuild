@@ -310,22 +310,6 @@ decl_error! {
 		cmd: String,
 	},
 
-	/// Wait for command
-	#[from_fn(
-		fn wait_command<T: fmt::Display>(source: io::Error)(
-			cmd: &Command<T> => self::cmd_to_string(cmd)
-		) + '_
-	)]
-	#[source(Some(source))]
-	#[fmt("Unable to wait for {cmd}")]
-	WaitCommand {
-		/// Underlying error
-		source: io::Error,
-
-		/// Command formatted
-		cmd: String,
-	},
-
 	/// Command failed
 	#[from_fn(
 		fn command_failed<T: fmt::Display>(source: ExitStatusError)(
@@ -607,7 +591,6 @@ fn cmd_to_string<T: fmt::Display>(cmd: &Command<T>) -> String {
 		.iter()
 		.map(|arg| match arg {
 			rules::CommandArg::Expr(expr) => format!("\"{expr}\""),
-			rules::CommandArg::Command { cmd, .. } => self::cmd_to_string(cmd),
 		})
 		.join(" ");
 	format!("[{inner}]")

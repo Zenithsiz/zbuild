@@ -26,13 +26,7 @@ use {
 	dashmap::DashMap,
 	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
 	itertools::Itertools,
-	std::{
-		borrow::Cow,
-		collections::HashMap,
-		ffi::{OsStr, OsString},
-		ops::Try,
-		time::SystemTime,
-	},
+	std::{borrow::Cow, collections::HashMap, ffi::OsStr, ops::Try, time::SystemTime},
 	tokio::{fs, process, sync::Semaphore},
 };
 
@@ -674,46 +668,24 @@ impl<'s> Builder<'s> {
 		};
 
 		for cmd in &rule.exec.cmds {
-			// Note: We don't care about the stdout here and don't capture it anyway.
-			let _: Vec<u8> = self.exec_cmd(rule.name, cmd, false).await?;
+			self.exec_cmd(rule.name, cmd).await?;
 		}
 
 		Ok(())
 	}
 
-	/// Executes a command, returning it's stdout
+	/// Executes a command
 	#[expect(unused_results, reason = "Due to the builder pattern of `Command`")]
-	#[expect(clippy::only_used_in_recursion, reason = "It might be used in the future")]
+	#[expect(clippy::unused_self, reason = "It might be used in the future")]
 	#[async_recursion::async_recursion]
-	async fn exec_cmd(
-		&self,
-		rule_name: &str,
-		cmd: &Command<CowStr<'s>>,
-		capture_stdout: bool,
-	) -> Result<Vec<u8>, AppError> {
+	async fn exec_cmd(&self, rule_name: &str, cmd: &Command<CowStr<'s>>) -> Result<(), AppError> {
 		// Process all arguments
-		// Note: When recursing, always capture stdout
 		let args = cmd
 			.args
 			.iter()
 			.map(move |arg| async move {
 				match arg {
 					CommandArg::Expr(arg) => Ok(Some(Cow::Borrowed(OsStr::new(&**arg)))),
-					CommandArg::Command { strip_on_fail, cmd } => {
-						let res = self.exec_cmd(rule_name, cmd, true).await;
-						match (res, strip_on_fail) {
-							(Ok(arg), _) => {
-								let arg = String::from_utf8(arg).map_err(AppError::command_output_non_utf8(cmd))?;
-								let arg = OsString::from(arg);
-								Ok(Some(Cow::Owned(arg)))
-							},
-							(Err(err), true) => {
-								tracing::debug!(?arg, err=%err.pretty(), "Stripping argument from failure");
-								Ok(None)
-							},
-							(Err(err), false) => Err(err),
-						}
-					},
 				}
 			})
 			.enumerate()
@@ -741,35 +713,23 @@ impl<'s> Builder<'s> {
 			os_cmd.current_dir(&**cwd);
 		}
 
-		// If we capture pipe stdout, do it
-		if capture_stdout {
-			#[expect(
-				clippy::absolute_paths,
-				reason = "We're already using a `process` (`tokio::process`)"
-			)]
-			os_cmd.stdout(std::process::Stdio::piped());
-		}
-
 		// Then spawn it and measure
 		tracing::debug!(target: "zbuild_exec", "{} {}",
 			program.to_string_lossy(),
 			args.iter().map(|arg| arg.to_string_lossy()).join(" ")
 		);
-		let (duration, stdout) = util::try_measure_async(async {
-			let output = os_cmd
-				.spawn()
-				.map_err(AppError::spawn_command(cmd))?
-				.wait_with_output()
+		let (duration, ()) = util::try_measure_async(async {
+			os_cmd
+				.status()
 				.await
-				.map_err(AppError::wait_command(cmd))?;
-
-			output.status.exit_ok().map_err(AppError::command_failed(cmd))?;
-			Ok(output.stdout)
+				.map_err(AppError::spawn_command(cmd))?
+				.exit_ok()
+				.map_err(AppError::command_failed(cmd))
 		})
 		.await?;
 		tracing::trace!(target: "zbuild_exec", ?rule_name, ?program, ?args, ?duration, "Execution duration");
 
-		Ok(stdout)
+		Ok(())
 	}
 
 	/// Finds a rule for `file`
