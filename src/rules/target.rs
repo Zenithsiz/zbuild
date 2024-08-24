@@ -9,6 +9,7 @@ use {
 		fmt,
 		hash::{Hash, Hasher},
 		mem,
+		sync::Arc,
 	},
 };
 
@@ -30,7 +31,7 @@ pub enum Target<'s, T> {
 		rule: T,
 
 		/// Patterns
-		pats: BTreeMap<CowStr<'s>, T>,
+		pats: Arc<BTreeMap<CowStr<'s>, T>>,
 	},
 }
 
@@ -54,7 +55,7 @@ impl<'s> Target<'s, Expr<'s>> {
 			},
 			ast::Target::Rule { rule } => Self::Rule {
 				rule: Expr::new(rule),
-				pats: BTreeMap::new(),
+				pats: Arc::new(BTreeMap::new()),
 			},
 		}
 	}
@@ -70,7 +71,7 @@ impl<T: Hash + Ord> Hash for Target<'_, T> {
 			},
 			Self::Rule { rule, pats } => {
 				rule.hash(state);
-				for (pat, value) in pats {
+				for (pat, value) in &**pats {
 					pat.hash(state);
 					value.hash(state);
 				}
@@ -93,7 +94,7 @@ impl<T: fmt::Display> fmt::Display for Target<'_, T> {
 				if !pats.is_empty() {
 					write!(f, " (")?;
 
-					for (pat, value) in pats {
+					for (pat, value) in &**pats {
 						write!(f, "{pat}={value}, ")?;
 					}
 

@@ -26,7 +26,7 @@ use {
 	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
 	indexmap::IndexMap,
 	itertools::Itertools,
-	std::{borrow::Cow, collections::BTreeMap, ffi::OsStr, ops::Try, time::SystemTime},
+	std::{borrow::Cow, collections::BTreeMap, ffi::OsStr, ops::Try, sync::Arc, time::SystemTime},
 	tokio::{fs, process, sync::Semaphore},
 };
 
@@ -50,7 +50,7 @@ pub struct TargetRule<'s> {
 	name: &'s str,
 
 	/// Patterns
-	pats: BTreeMap<CowStr<'s>, CowStr<'s>>,
+	pats: Arc<BTreeMap<CowStr<'s>, CowStr<'s>>>,
 }
 
 /// Builder
@@ -132,10 +132,7 @@ impl<'s> Builder<'s> {
 			Target::File { ref file, .. } => match self.find_rule_for_file(file, rules)? {
 				Some((rule, pats)) => {
 					tracing::trace!(%target, %rule.name, "Found target rule");
-					let target_rule = TargetRule {
-						name: rule.name,
-						pats: pats.clone(),
-					};
+					let target_rule = TargetRule { name: rule.name, pats };
 					(rule, target_rule)
 				},
 
@@ -155,7 +152,7 @@ impl<'s> Builder<'s> {
 					.map_err(AppError::expand_rule(rule.name))?;
 				let target_rule = TargetRule {
 					name: rule.name,
-					pats: pats.iter().map(|(pat, value)| (pat.clone(), value.clone())).collect(),
+					pats: Arc::clone(pats),
 				};
 				(rule, target_rule)
 			},
@@ -344,7 +341,7 @@ impl<'s> Builder<'s> {
 	{
 		/// Dependency
 		#[derive(Clone, Debug)]
-		enum Dep<'s, 'a> {
+		enum Dep<'s> {
 			/// File
 			File {
 				file:         CowStr<'s>,
@@ -358,7 +355,7 @@ impl<'s> Builder<'s> {
 			/// Rule
 			Rule {
 				name: CowStr<'s>,
-				pats: &'a BTreeMap<CowStr<'s>, CowStr<'s>>,
+				pats: Arc<BTreeMap<CowStr<'s>, CowStr<'s>>>,
 			},
 		}
 
@@ -385,7 +382,7 @@ impl<'s> Builder<'s> {
 					}),
 					DepItem::Rule { ref name, ref pats } => Ok(Dep::Rule {
 						name: name.clone(),
-						pats,
+						pats: Arc::clone(pats),
 					}),
 				}
 			})
@@ -451,9 +448,9 @@ impl<'s> Builder<'s> {
 						}),
 
 						// If a rule, always build
-						Dep::Rule { ref name, pats } => Some(Target::Rule {
+						Dep::Rule { ref name, ref pats } => Some(Target::Rule {
 							rule: name.clone(),
-							pats: pats.clone(),
+							pats: Arc::clone(pats),
 						}),
 					};
 
@@ -734,7 +731,7 @@ impl<'s> Builder<'s> {
 		&self,
 		file: &str,
 		rules: &Rules<'s>,
-	) -> Result<Option<(Rule<'s, CowStr<'s>>, BTreeMap<CowStr<'s>, CowStr<'s>>)>, AppError> {
+	) -> Result<Option<(Rule<'s, CowStr<'s>>, Arc<BTreeMap<CowStr<'s>, CowStr<'s>>>)>, AppError> {
 		for rule in rules.rules.values() {
 			for output in &rule.output {
 				// Expand all expressions in the output file
@@ -748,6 +745,8 @@ impl<'s> Builder<'s> {
 
 				// Then try to match the output file to the file we need to create
 				if let Some(rule_pats) = self::match_expr(&output_file, &output_file.cmpts, file)? {
+					let rule_pats = Arc::new(rule_pats);
+
 					let expand_visitor = expand::Visitor::new([&rule.aliases, &rules.aliases], [&rule_pats]);
 					let rule = self
 						.expander

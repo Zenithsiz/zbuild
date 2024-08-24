@@ -4,7 +4,7 @@
 use {
 	super::Expr,
 	crate::ast,
-	std::{collections::BTreeMap, fmt},
+	std::{collections::BTreeMap, fmt, sync::Arc},
 };
 
 
@@ -77,7 +77,7 @@ pub enum DepItem<T> {
 		name: T,
 
 		/// All rule patterns
-		pats: BTreeMap<T, T>,
+		pats: Arc<BTreeMap<T, T>>,
 	},
 }
 
@@ -91,12 +91,15 @@ impl<'s> DepItem<Expr<'s>> {
 				is_static:    false,
 				is_deps_file: false,
 			},
-			ast::DepItem::Rule { rule, pats } => Self::Rule {
-				name: Expr::new(rule),
-				pats: pats
+			ast::DepItem::Rule { rule, pats } => {
+				let pats = pats
 					.into_iter()
 					.map(|(pat, value)| (Expr::new(pat), Expr::new(value)))
-					.collect(),
+					.collect();
+				Self::Rule {
+					name: Expr::new(rule),
+					pats: Arc::new(pats),
+				}
 			},
 			ast::DepItem::DepsFile { deps_file } => Self::File {
 				file:         Expr::new(deps_file),
@@ -166,7 +169,7 @@ impl<T: fmt::Display> fmt::Display for DepItem<T> {
 				if !pats.is_empty() {
 					write!(f, " (")?;
 
-					for (pat, value) in pats {
+					for (pat, value) in &**pats {
 						write!(f, "{pat}={value}, ")?;
 					}
 

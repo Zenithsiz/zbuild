@@ -19,7 +19,7 @@ pub use {
 };
 
 // Imports
-use {crate::Ast, indexmap::IndexMap};
+use {crate::Ast, indexmap::IndexMap, std::sync::Arc};
 
 /// Rules.
 ///
@@ -31,7 +31,7 @@ pub struct Rules<'s> {
 	///
 	/// These are available for the whole program to
 	/// use.
-	pub aliases: IndexMap<&'s str, Expr<'s>>,
+	pub aliases: Arc<IndexMap<&'s str, Expr<'s>>>,
 
 	/// Default targets to build
 	pub default: Vec<Target<'s, Expr<'s>>>,
@@ -57,7 +57,7 @@ impl<'s> Rules<'s> {
 			.collect();
 
 		Self {
-			aliases,
+			aliases: Arc::new(aliases),
 			default,
 			rules,
 		}

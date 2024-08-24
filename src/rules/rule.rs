@@ -5,6 +5,7 @@ use {
 	super::{DepItem, Expr, OutItem},
 	crate::ast,
 	indexmap::IndexMap,
+	std::sync::Arc,
 };
 
 /// Rule
@@ -14,7 +15,7 @@ pub struct Rule<'s, T> {
 	pub name: &'s str,
 
 	/// Aliases
-	pub aliases: IndexMap<&'s str, T>,
+	pub aliases: Arc<IndexMap<&'s str, T>>,
 
 	/// Output items
 	pub output: Vec<OutItem<T>>,
@@ -40,7 +41,7 @@ impl<'s> Rule<'s, Expr<'s>> {
 
 		Self {
 			name,
-			aliases,
+			aliases: Arc::new(aliases),
 			output,
 			deps,
 			exec,

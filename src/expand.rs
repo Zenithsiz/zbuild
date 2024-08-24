@@ -10,7 +10,7 @@ use {
 	indexmap::IndexMap,
 	itertools::Itertools,
 	smallvec::SmallVec,
-	std::{collections::BTreeMap, marker::PhantomData, path::PathBuf},
+	std::{collections::BTreeMap, marker::PhantomData, path::PathBuf, sync::Arc},
 };
 
 /// Expander
@@ -28,7 +28,7 @@ impl<'s> Expander<'s> {
 	}
 
 	/// Expands an expression to it's components
-	pub fn expand_expr(&self, expr: &Expr<'s>, visitor: &Visitor<'_, 's>) -> Result<Expr<'s>, AppError> {
+	pub fn expand_expr(&self, expr: &Expr<'s>, visitor: &Visitor<'s>) -> Result<Expr<'s>, AppError> {
 		// Go through all components
 		let cmpts = expr
 			.cmpts
@@ -112,7 +112,7 @@ impl<'s> Expander<'s> {
 	}
 
 	/// Expands an expression into a string
-	pub fn expand_expr_string(&self, expr: &Expr<'s>, visitor: &Visitor<'_, 's>) -> Result<CowStr<'s>, AppError> {
+	pub fn expand_expr_string(&self, expr: &Expr<'s>, visitor: &Visitor<'s>) -> Result<CowStr<'s>, AppError> {
 		let expr_cmpts = self.expand_expr(expr, visitor)?.cmpts.into_boxed_slice();
 		let res = match Box::<[_; 0]>::try_from(expr_cmpts) {
 			Ok(box []) => Ok("".into()),
@@ -155,7 +155,7 @@ impl<'s> Expander<'s> {
 	pub fn expand_rule(
 		&self,
 		rule: &Rule<'s, Expr<'s>>,
-		visitor: &Visitor<'_, 's>,
+		visitor: &Visitor<'s>,
 	) -> Result<Rule<'s, CowStr<'s>>, AppError> {
 		let aliases = rule
 			.aliases
@@ -189,9 +189,8 @@ impl<'s> Expander<'s> {
 					is_static,
 					is_deps_file,
 				}),
-				DepItem::Rule { ref name, ref pats } => Ok::<_, AppError>(DepItem::Rule {
-					name: self.expand_expr_string(name, visitor)?,
-					pats: pats
+				DepItem::Rule { ref name, ref pats } => {
+					let pats = pats
 						.iter()
 						.map(|(pat, expr)| {
 							Ok((
@@ -199,8 +198,12 @@ impl<'s> Expander<'s> {
 								self.expand_expr_string(expr, visitor)?,
 							))
 						})
-						.collect::<ResultMultiple<_>>()?,
-				}),
+						.collect::<ResultMultiple<_>>()?;
+					Ok::<_, AppError>(DepItem::Rule {
+						name: self.expand_expr_string(name, visitor)?,
+						pats: Arc::new(pats),
+					})
+				},
 			})
 			.collect::<ResultMultiple<_>>()?;
 
@@ -215,7 +218,7 @@ impl<'s> Expander<'s> {
 
 		Ok(Rule {
 			name: rule.name,
-			aliases,
+			aliases: Arc::new(aliases),
 			output,
 			deps,
 			exec,
@@ -223,11 +226,7 @@ impl<'s> Expander<'s> {
 	}
 
 	/// Expands a command
-	pub fn expand_cmd(
-		&self,
-		cmd: &Command<Expr<'s>>,
-		visitor: &Visitor<'_, 's>,
-	) -> Result<Command<CowStr<'s>>, AppError> {
+	pub fn expand_cmd(&self, cmd: &Command<Expr<'s>>, visitor: &Visitor<'s>) -> Result<Command<CowStr<'s>>, AppError> {
 		Ok(Command {
 			cwd:  cmd
 				.cwd
@@ -251,7 +250,7 @@ impl<'s> Expander<'s> {
 	pub fn expand_target(
 		&self,
 		target: &Target<'s, Expr<'s>>,
-		visitor: &Visitor<'_, 's>,
+		visitor: &Visitor<'s>,
 	) -> Result<Target<'s, CowStr<'s>>, AppError> {
 		let target = match *target {
 			Target::File { ref file, is_static } => Target::File {
@@ -261,11 +260,8 @@ impl<'s> Expander<'s> {
 				is_static,
 			},
 
-			Target::Rule { ref rule, ref pats } => Target::Rule {
-				rule: self
-					.expand_expr_string(rule, visitor)
-					.map_err(AppError::expand_expr(rule))?,
-				pats: pats
+			Target::Rule { ref rule, ref pats } => {
+				let pats = pats
 					.iter()
 					.map(|(pat, expr)| {
 						Ok((
@@ -274,7 +270,13 @@ impl<'s> Expander<'s> {
 								.map_err(AppError::expand_expr(expr))?,
 						))
 					})
-					.collect::<ResultMultiple<_>>()?,
+					.collect::<ResultMultiple<_>>()?;
+				Target::Rule {
+					rule: self
+						.expand_expr_string(rule, visitor)
+						.map_err(AppError::expand_expr(rule))?,
+					pats: Arc::new(pats),
+				}
 			},
 		};
 
@@ -308,12 +310,12 @@ impl<T> FlowControl<T> {
 
 /// Visitor for [`Expander`]
 #[derive(Clone, Debug)]
-pub struct Visitor<'a, 's> {
+pub struct Visitor<'s> {
 	/// All aliases, in order to check
-	aliases: SmallVec<[&'a IndexMap<&'s str, Expr<'s>>; 2]>,
+	aliases: SmallVec<[Arc<IndexMap<&'s str, Expr<'s>>>; 2]>,
 
 	/// All patterns, in order to check
-	pats: SmallVec<[&'a BTreeMap<CowStr<'s>, CowStr<'s>>; 1]>,
+	pats: SmallVec<[Arc<BTreeMap<CowStr<'s>, CowStr<'s>>>; 1]>,
 
 	/// Default alias action
 	default_alias: FlowControl<Expr<'s>>,
@@ -322,25 +324,27 @@ pub struct Visitor<'a, 's> {
 	default_pat: FlowControl<CowStr<'s>>,
 }
 
-impl<'a, 's> Visitor<'a, 's> {
+impl<'s> Visitor<'s> {
 	/// Creates a new visitor with aliases and patterns
-	pub fn new<A, P>(aliases: A, pats: P) -> Self
+	pub fn new<'a, A, P>(aliases: A, pats: P) -> Self
 	where
-		A: AsRef<[&'a IndexMap<&'s str, Expr<'s>>]>,
-		P: AsRef<[&'a BTreeMap<CowStr<'s>, CowStr<'s>>]>,
+		's: 'a,
+		A: IntoIterator<Item = &'a Arc<IndexMap<&'s str, Expr<'s>>>>,
+		P: IntoIterator<Item = &'a Arc<BTreeMap<CowStr<'s>, CowStr<'s>>>>,
 	{
 		Self {
-			aliases:       aliases.as_ref().into(),
-			pats:          pats.as_ref().into(),
+			aliases:       aliases.into_iter().map(Arc::clone).collect(),
+			pats:          pats.into_iter().map(Arc::clone).collect(),
 			default_alias: FlowControl::Error,
 			default_pat:   FlowControl::Error,
 		}
 	}
 
 	/// Creates a visitor from aliases
-	pub fn from_aliases<A>(aliases: A) -> Self
+	pub fn from_aliases<'a, A>(aliases: A) -> Self
 	where
-		A: AsRef<[&'a IndexMap<&'s str, Expr<'s>>]>,
+		's: 'a,
+		A: IntoIterator<Item = &'a Arc<IndexMap<&'s str, Expr<'s>>>>,
 	{
 		Self::new(aliases, [])
 	}

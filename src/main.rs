@@ -50,6 +50,7 @@ use {
 		fmt,
 		fs,
 		path::{Path, PathBuf},
+		sync::Arc,
 		thread,
 		time::{Duration, SystemTime},
 	},
@@ -128,7 +129,7 @@ async fn main() -> ExitResult {
 					// TODO: If it requires patterns maybe error out here?
 					|rule| rules::Target::Rule {
 						rule: rules::Expr::string(rule.name.to_owned()),
-						pats: BTreeMap::new(),
+						pats: Arc::new(BTreeMap::new()),
 					},
 				)
 			})
