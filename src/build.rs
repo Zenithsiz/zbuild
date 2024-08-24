@@ -30,9 +30,6 @@ use {
 	tokio::{fs, process, sync::Semaphore},
 };
 
-// TODO: If the user zbuild file is not generated properly, it can
-//       make us deadlock, check for cycles somehow
-
 /// Event
 #[derive(Clone, Debug)]
 pub enum Event<'s> {
