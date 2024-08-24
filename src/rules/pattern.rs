@@ -4,7 +4,7 @@
 use std::fmt;
 
 /// Pattern
-#[derive(PartialEq, Eq, Clone, Hash, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Debug)]
 pub struct Pattern<'s> {
 	/// Pattern name
 	pub name: &'s str,
@@ -14,7 +14,7 @@ pub struct Pattern<'s> {
 }
 
 /// Pattern operator
-#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
 pub enum PatternOp {
 	/// Non-empty
 	NonEmpty,

@@ -11,14 +11,14 @@ use {
 };
 
 /// Expression
-#[derive(PartialEq, Eq, Clone, Hash, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Debug)]
 pub struct Expr<'s> {
 	/// Components
 	pub cmpts: Vec<ExprCmpt<'s>>,
 }
 
 /// Expression component
-#[derive(PartialEq, Eq, Clone, Hash, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Debug)]
 pub enum ExprCmpt<'s> {
 	/// String
 	String(CowStr<'s>),

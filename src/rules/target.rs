@@ -4,9 +4,8 @@
 use {
 	super::Expr,
 	crate::{ast, util::CowStr},
-	indexmap::IndexMap,
-	itertools::Itertools,
 	std::{
+		collections::BTreeMap,
 		fmt,
 		hash::{Hash, Hasher},
 		mem,
@@ -31,7 +30,7 @@ pub enum Target<'s, T> {
 		rule: T,
 
 		/// Patterns
-		pats: IndexMap<CowStr<'s>, T>,
+		pats: BTreeMap<CowStr<'s>, T>,
 	},
 }
 
@@ -55,7 +54,7 @@ impl<'s> Target<'s, Expr<'s>> {
 			},
 			ast::Target::Rule { rule } => Self::Rule {
 				rule: Expr::new(rule),
-				pats: IndexMap::new(),
+				pats: BTreeMap::new(),
 			},
 		}
 	}
@@ -71,8 +70,7 @@ impl<T: Hash + Ord> Hash for Target<'_, T> {
 			},
 			Self::Rule { rule, pats } => {
 				rule.hash(state);
-				// TODO: Not have to sort the patterns
-				for (pat, value) in pats.iter().sorted() {
+				for (pat, value) in pats {
 					pat.hash(state);
 					value.hash(state);
 				}

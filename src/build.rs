@@ -26,7 +26,7 @@ use {
 	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
 	indexmap::IndexMap,
 	itertools::Itertools,
-	std::{borrow::Cow, ffi::OsStr, ops::Try, time::SystemTime},
+	std::{borrow::Cow, collections::BTreeMap, ffi::OsStr, ops::Try, time::SystemTime},
 	tokio::{fs, process, sync::Semaphore},
 };
 
@@ -49,8 +49,8 @@ pub struct TargetRule<'s> {
 	/// Name
 	name: &'s str,
 
-	/// Patterns (sorted)
-	pats: Vec<(CowStr<'s>, CowStr<'s>)>,
+	/// Patterns
+	pats: BTreeMap<CowStr<'s>, CowStr<'s>>,
 }
 
 /// Builder
@@ -134,7 +134,7 @@ impl<'s> Builder<'s> {
 					tracing::trace!(%target, %rule.name, "Found target rule");
 					let target_rule = TargetRule {
 						name: rule.name,
-						pats: pats.into_iter().sorted().collect(),
+						pats: pats.clone(),
 					};
 					(rule, target_rule)
 				},
@@ -155,11 +155,7 @@ impl<'s> Builder<'s> {
 					.map_err(AppError::expand_rule(rule.name))?;
 				let target_rule = TargetRule {
 					name: rule.name,
-					pats: pats
-						.iter()
-						.map(|(pat, value)| (pat.clone(), value.clone()))
-						.sorted()
-						.collect(),
+					pats: pats.iter().map(|(pat, value)| (pat.clone(), value.clone())).collect(),
 				};
 				(rule, target_rule)
 			},
@@ -362,7 +358,7 @@ impl<'s> Builder<'s> {
 			/// Rule
 			Rule {
 				name: CowStr<'s>,
-				pats: &'a IndexMap<CowStr<'s>, CowStr<'s>>,
+				pats: &'a BTreeMap<CowStr<'s>, CowStr<'s>>,
 			},
 		}
 
@@ -738,7 +734,7 @@ impl<'s> Builder<'s> {
 		&self,
 		file: &str,
 		rules: &Rules<'s>,
-	) -> Result<Option<(Rule<'s, CowStr<'s>>, IndexMap<CowStr<'s>, CowStr<'s>>)>, AppError> {
+	) -> Result<Option<(Rule<'s, CowStr<'s>>, BTreeMap<CowStr<'s>, CowStr<'s>>)>, AppError> {
 		for rule in rules.rules.values() {
 			for output in &rule.output {
 				// Expand all expressions in the output file

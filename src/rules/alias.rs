@@ -4,7 +4,7 @@
 use std::fmt;
 
 /// Alias
-#[derive(PartialEq, Eq, Clone, Hash, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Debug)]
 pub struct Alias<'s> {
 	/// Alias name
 	pub name: &'s str,
@@ -14,7 +14,7 @@ pub struct Alias<'s> {
 }
 
 /// Alias operator
-#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
 pub enum AliasOp {
 	/// Directory name
 	DirName,

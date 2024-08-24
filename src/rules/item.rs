@@ -1,7 +1,11 @@
 //! Items
 
 // Imports
-use {super::Expr, crate::ast, indexmap::IndexMap, std::fmt};
+use {
+	super::Expr,
+	crate::ast,
+	std::{collections::BTreeMap, fmt},
+};
 
 
 /// Output Item
@@ -73,7 +77,7 @@ pub enum DepItem<T> {
 		name: T,
 
 		/// All rule patterns
-		pats: IndexMap<T, T>,
+		pats: BTreeMap<T, T>,
 	},
 }
 

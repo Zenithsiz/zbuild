@@ -10,7 +10,7 @@ use {
 	indexmap::IndexMap,
 	itertools::Itertools,
 	smallvec::SmallVec,
-	std::{marker::PhantomData, path::PathBuf},
+	std::{collections::BTreeMap, marker::PhantomData, path::PathBuf},
 };
 
 /// Expander
@@ -313,7 +313,7 @@ pub struct Visitor<'a, 's> {
 	aliases: SmallVec<[&'a IndexMap<&'s str, Expr<'s>>; 2]>,
 
 	/// All patterns, in order to check
-	pats: SmallVec<[&'a IndexMap<CowStr<'s>, CowStr<'s>>; 1]>,
+	pats: SmallVec<[&'a BTreeMap<CowStr<'s>, CowStr<'s>>; 1]>,
 
 	/// Default alias action
 	default_alias: FlowControl<Expr<'s>>,
@@ -327,7 +327,7 @@ impl<'a, 's> Visitor<'a, 's> {
 	pub fn new<A, P>(aliases: A, pats: P) -> Self
 	where
 		A: AsRef<[&'a IndexMap<&'s str, Expr<'s>>]>,
-		P: AsRef<[&'a IndexMap<CowStr<'s>, CowStr<'s>>]>,
+		P: AsRef<[&'a BTreeMap<CowStr<'s>, CowStr<'s>>]>,
 	{
 		Self {
 			aliases:       aliases.as_ref().into(),

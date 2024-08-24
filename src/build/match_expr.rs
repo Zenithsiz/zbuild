@@ -7,8 +7,7 @@ use {
 		util::CowStr,
 		AppError,
 	},
-	indexmap::IndexMap,
-	std::assert_matches::assert_matches,
+	std::{assert_matches::assert_matches, collections::BTreeMap},
 };
 
 /// Returns if `value` matches all `cmpts` and returns all patterns resolved
@@ -20,8 +19,8 @@ pub fn match_expr<'s>(
 	expr: &Expr<'s>,
 	cmpts: &[ExprCmpt<'s>],
 	mut value: &str,
-) -> Result<Option<IndexMap<CowStr<'s>, CowStr<'s>>>, AppError> {
-	let mut patterns = IndexMap::new();
+) -> Result<Option<BTreeMap<CowStr<'s>, CowStr<'s>>>, AppError> {
+	let mut patterns = BTreeMap::new();
 
 	// Until `rhs` has anything to match left
 	let mut cur_cmpts = cmpts;
