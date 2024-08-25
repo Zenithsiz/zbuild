@@ -134,8 +134,6 @@ impl Borrow<str> for ArcStr {
 	}
 }
 
-// TODO: Optimize both of these conversions for
-//       when the `Arc` has no other strong references?
 impl From<String> for ArcStr {
 	fn from(s: String) -> Self {
 		Self {
