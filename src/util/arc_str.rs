@@ -103,10 +103,7 @@ impl Hash for ArcStr {
 
 impl Default for ArcStr {
 	fn default() -> Self {
-		Self {
-			base:  Arc::default(),
-			range: 0..0,
-		}
+		String::new().into()
 	}
 }
 
