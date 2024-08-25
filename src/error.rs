@@ -367,7 +367,7 @@ decl_error! {
 	/// Build target
 	#[from_fn(
 		fn build_target<'target, T: fmt::Display>(source: Self => Some(Box::new(source)))(
-			target: &'target Target<'_, T> => target.to_string()
+			target: &'target Target<T> => target.to_string()
 		) + 'target
 	)]
 	#[source(source.as_deref().map(|err: &AppError| <&dyn StdError>::from(err)))]
@@ -431,7 +431,7 @@ decl_error! {
 	/// Expand target
 	#[from_fn(
 		fn expand_target<'target, T: fmt::Display>(source: Self => Box::new(source))(
-			target: &'target Target<'_, T> => target.to_string()
+			target: &'target Target<T> => target.to_string()
 		) + 'target
 	)]
 	#[source(Some(&**source))]
@@ -447,7 +447,7 @@ decl_error! {
 	/// Expand expression
 	#[from_fn(
 		fn expand_expr<'expr,>(source: Self => Box::new(source))(
-			expr: &'expr Expr<'_> => expr.to_string()
+			expr: &'expr Expr => expr.to_string()
 		) + 'expr
 	)]
 	#[source(Some(&**source))]

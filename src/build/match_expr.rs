@@ -15,11 +15,11 @@ use {
 /// Returns error if more than 1 pattern is found.
 ///
 /// Panics if any aliases are found
-pub fn match_expr<'s>(
-	expr: &Expr<'s>,
-	cmpts: &[ExprCmpt<'s>],
+pub fn match_expr(
+	expr: &Expr,
+	cmpts: &[ExprCmpt],
 	mut value: &str,
-) -> Result<Option<BTreeMap<CowStr<'s>, CowStr<'s>>>, AppError> {
+) -> Result<Option<BTreeMap<CowStr, CowStr>>, AppError> {
 	let mut patterns = BTreeMap::new();
 
 	// Until `rhs` has anything to match left

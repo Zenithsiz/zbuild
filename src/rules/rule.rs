@@ -10,12 +10,12 @@ use {
 
 /// Rule
 #[derive(Clone, Debug)]
-pub struct Rule<'s, T> {
+pub struct Rule<T> {
 	/// Name
-	pub name: &'s str,
+	pub name: &'static str,
 
 	/// Aliases
-	pub aliases: Arc<IndexMap<&'s str, T>>,
+	pub aliases: Arc<IndexMap<&'static str, T>>,
 
 	/// Output items
 	pub output: Vec<OutItem<T>>,
@@ -27,9 +27,9 @@ pub struct Rule<'s, T> {
 	pub exec: Exec<T>,
 }
 
-impl<'s> Rule<'s, Expr<'s>> {
+impl Rule<Expr> {
 	/// Creates a new rule from it's ast
-	pub fn new(name: &'s str, rule: ast::Rule<'s>) -> Self {
+	pub fn new(name: &'static str, rule: ast::Rule<'static>) -> Self {
 		let aliases = rule
 			.aliases
 			.into_iter()
@@ -57,9 +57,9 @@ pub struct Exec<T> {
 	pub cmds: Vec<Command<T>>,
 }
 
-impl<'s> Exec<Expr<'s>> {
+impl Exec<Expr> {
 	/// Creates a new exec from it's ast
-	pub fn new(exec: ast::Exec<'s>) -> Self {
+	pub fn new(exec: ast::Exec<'static>) -> Self {
 		Self {
 			cmds: exec.cmds.into_iter().map(Command::new).collect(),
 		}
@@ -77,9 +77,9 @@ pub struct Command<T> {
 	pub args: Vec<CommandArg<T>>,
 }
 
-impl<'s> Command<Expr<'s>> {
+impl Command<Expr> {
 	/// Creates a new command from it's ast
-	pub fn new(cmd: ast::Command<'s>) -> Self {
+	pub fn new(cmd: ast::Command<'static>) -> Self {
 		match cmd {
 			ast::Command::OnlyArgs(args) => Self {
 				cwd:  None,
@@ -100,9 +100,9 @@ pub enum CommandArg<T> {
 	Expr(T),
 }
 
-impl<'s> CommandArg<Expr<'s>> {
+impl CommandArg<Expr> {
 	/// Creates a new command argument from it's ast
-	pub fn new(arg: ast::CommandArg<'s>) -> Self {
+	pub fn new(arg: ast::CommandArg<'static>) -> Self {
 		match arg {
 			ast::CommandArg::Expr(expr) => Self::Expr(Expr::new(expr)),
 		}

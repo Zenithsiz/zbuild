@@ -21,9 +21,9 @@ pub enum OutItem<T> {
 	},
 }
 
-impl<'s> OutItem<Expr<'s>> {
+impl OutItem<Expr> {
 	/// Creates a new item from it's `ast`.
-	pub fn new(item: ast::OutItem<'s>) -> Self {
+	pub fn new(item: ast::OutItem<'static>) -> Self {
 		match item {
 			ast::OutItem::File(file) => Self::File {
 				file:         Expr::new(file),
@@ -81,9 +81,9 @@ pub enum DepItem<T> {
 	},
 }
 
-impl<'s> DepItem<Expr<'s>> {
+impl DepItem<Expr> {
 	/// Creates a new item from it's `ast`.
-	pub fn new(item: ast::DepItem<'s>) -> Self {
+	pub fn new(item: ast::DepItem<'static>) -> Self {
 		match item {
 			ast::DepItem::File(file) => Self::File {
 				file:         Expr::new(file),

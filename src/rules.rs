@@ -26,24 +26,24 @@ use {crate::Ast, indexmap::IndexMap, std::sync::Arc};
 /// Stores all rules, along with associated information, such as
 /// global aliases and the default target.
 #[derive(Clone, Debug)]
-pub struct Rules<'s> {
+pub struct Rules {
 	/// Global aliases.
 	///
 	/// These are available for the whole program to
 	/// use.
-	pub aliases: Arc<IndexMap<&'s str, Expr<'s>>>,
+	pub aliases: Arc<IndexMap<&'static str, Expr>>,
 
 	/// Default targets to build
-	pub default: Vec<Target<'s, Expr<'s>>>,
+	pub default: Vec<Target<Expr>>,
 
 	/// Rules
-	pub rules: IndexMap<&'s str, Rule<'s, Expr<'s>>>,
+	pub rules: IndexMap<&'static str, Rule<Expr>>,
 }
 
-impl<'s> Rules<'s> {
+impl Rules {
 	/// Creates all rules from the ast
 	#[must_use]
-	pub fn new(ast: Ast<'s>) -> Self {
+	pub fn new(ast: Ast<'static>) -> Self {
 		let aliases = ast
 			.aliases
 			.into_iter()

@@ -32,44 +32,44 @@ use {
 
 /// Event
 #[derive(Clone, Debug)]
-pub enum Event<'s> {
+pub enum Event {
 	/// Target dependency built
 	TargetDepBuilt {
 		/// Target that was being built
-		target: Target<'s, CowStr<'s>>,
+		target: Target<CowStr>,
 
 		/// Dependency that was built
-		dep: Target<'s, CowStr<'s>>,
+		dep: Target<CowStr>,
 	},
 }
 
 /// Target rule
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
-pub struct TargetRule<'s> {
+pub struct TargetRule {
 	/// Name
-	name: &'s str,
+	name: &'static str,
 
 	/// Patterns
-	pats: Arc<BTreeMap<CowStr<'s>, CowStr<'s>>>,
+	pats: Arc<BTreeMap<CowStr, CowStr>>,
 }
 
 /// Builder
 #[derive(Debug)]
-pub struct Builder<'s> {
+pub struct Builder {
 	/// Event sender
-	event_tx: async_broadcast::Sender<Event<'s>>,
+	event_tx: async_broadcast::Sender<Event>,
 
 	/// Event receiver
 	// Note: We don't care about the receiver, since we can
 	//       just create them from the sender, but if dropped
 	//       it closes the channel, so we need to keep it around.
-	_event_rx: async_broadcast::InactiveReceiver<Event<'s>>,
+	_event_rx: async_broadcast::InactiveReceiver<Event>,
 
 	/// Expander
-	expander: Expander<'s>,
+	expander: Expander,
 
 	/// All rules' build lock
-	rules_lock: DashMap<TargetRule<'s>, BuildLock>,
+	rules_lock: DashMap<TargetRule, BuildLock>,
 
 	/// Execution semaphore
 	exec_semaphore: Semaphore,
@@ -78,7 +78,7 @@ pub struct Builder<'s> {
 	stop_builds_on_first_err: bool,
 }
 
-impl<'s> Builder<'s> {
+impl Builder {
 	/// Creates a new builder
 	pub fn new(jobs: usize, stop_builds_on_first_err: bool) -> Self {
 		let (event_tx, event_rx) = async_broadcast::broadcast(jobs);
@@ -95,7 +95,7 @@ impl<'s> Builder<'s> {
 	}
 
 	/// Returns all build results
-	pub fn into_build_results(self) -> IndexMap<&'s str, Option<Result<BuildResult, ()>>> {
+	pub fn into_build_results(self) -> IndexMap<&'static str, Option<Result<BuildResult, ()>>> {
 		self.rules_lock
 			.into_iter()
 			.map(|(rule, lock)| (rule.name, lock.into_res()))
@@ -103,12 +103,12 @@ impl<'s> Builder<'s> {
 	}
 
 	/// Sends an event, if any are subscribers
-	async fn send_event(&self, make_event: impl FnOnce() -> Event<'s> + Send) {
+	async fn send_event(&self, make_event: impl FnOnce() -> Event + Send) {
 		// Note: We only send them if there are any receivers (excluding ours, which is inactive),
 		//       to ensure we don't deadlock waiting for someone to read the events
 		if self.event_tx.receiver_count() > 0 {
 			// Note: We don't care about the event
-			let _: Option<Event<'_>> = self
+			let _: Option<Event> = self
 				.event_tx
 				.broadcast(make_event())
 				.await
@@ -117,16 +117,16 @@ impl<'s> Builder<'s> {
 	}
 
 	/// Subscribes to builder events
-	pub fn subscribe_events(&self) -> async_broadcast::Receiver<Event<'s>> {
+	pub fn subscribe_events(&self) -> async_broadcast::Receiver<Event> {
 		self.event_tx.new_receiver()
 	}
 
 	/// Finds a target's rule
 	fn target_rule(
 		&self,
-		target: &Target<'s, CowStr<'s>>,
-		rules: &Rules<'s>,
-	) -> Result<Option<(Rule<'s, CowStr<'s>>, TargetRule<'s>)>, AppError> {
+		target: &Target<CowStr>,
+		rules: &Rules,
+	) -> Result<Option<(Rule<CowStr>, TargetRule)>, AppError> {
 		let target_rule = match *target {
 			// If we got a file, check which rule can make it
 			Target::File { ref file, .. } => match self.find_rule_for_file(file, rules)? {
@@ -162,7 +162,7 @@ impl<'s> Builder<'s> {
 	}
 
 	/// Resets a build
-	pub async fn reset_build(&self, target: &Target<'s, CowStr<'s>>, rules: &Rules<'s>) -> Result<(), AppError> {
+	pub async fn reset_build(&self, target: &Target<CowStr>, rules: &Rules) -> Result<(), AppError> {
 		// Get the rule for the target
 		let Some((_, target_rule)) = self.target_rule(target, rules)? else {
 			return Ok(());
@@ -185,10 +185,10 @@ impl<'s> Builder<'s> {
 	/// Builds an expression-encoded target
 	pub async fn build_expr(
 		&self,
-		target: &Target<'s, Expr<'s>>,
-		rules: &Rules<'s>,
+		target: &Target<Expr>,
+		rules: &Rules,
 		ignore_missing: bool,
-		reason: BuildReason<'_, 's>,
+		reason: BuildReason<'_>,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
 		// Expand the target
 		let expand_visitor = expand::Visitor::from_aliases([&rules.aliases]);
@@ -204,10 +204,10 @@ impl<'s> Builder<'s> {
 	/// Builds a target
 	pub async fn build(
 		&self,
-		target: &Target<'s, CowStr<'s>>,
-		rules: &Rules<'s>,
+		target: &Target<CowStr>,
+		rules: &Rules,
 		ignore_missing: bool,
-		reason: BuildReason<'_, 's>,
+		reason: BuildReason<'_>,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
 		tracing::trace!(%target, reason=?reason.0.as_ref().map(|reason| reason.target), "Building target");
 
@@ -330,21 +330,21 @@ impl<'s> Builder<'s> {
 	#[async_recursion::async_recursion]
 	async fn build_unchecked<'reason>(
 		&self,
-		target: &Target<'s, CowStr<'s>>,
-		rule: &Rule<'s, CowStr<'s>>,
-		rules: &Rules<'s>,
+		target: &Target<CowStr>,
+		rule: &Rule<CowStr>,
+		rules: &Rules,
 		ignore_missing: bool,
-		reason: BuildReason<'reason, 's>,
+		reason: BuildReason<'reason>,
 	) -> Result<BuildResult, AppError>
 	where
 		'reason: 'async_recursion,
 	{
 		/// Dependency
 		#[derive(Clone, Debug)]
-		enum Dep<'s> {
+		enum Dep {
 			/// File
 			File {
-				file:         CowStr<'s>,
+				file:         CowStr,
 				is_static:    bool,
 				is_deps_file: bool,
 				is_output:    bool,
@@ -354,8 +354,8 @@ impl<'s> Builder<'s> {
 
 			/// Rule
 			Rule {
-				name: CowStr<'s>,
-				pats: Arc<BTreeMap<CowStr<'s>, CowStr<'s>>>,
+				name: CowStr,
+				pats: Arc<BTreeMap<CowStr, CowStr>>,
 			},
 		}
 
@@ -573,13 +573,13 @@ impl<'s> Builder<'s> {
 	/// Returns the latest modification date of the dependencies
 	async fn build_deps_file(
 		&self,
-		parent_target: &Target<'s, CowStr<'s>>,
+		parent_target: &Target<CowStr>,
 		deps_file: &str,
-		rule: &Rule<'s, CowStr<'s>>,
-		rules: &Rules<'s>,
+		rule: &Rule<CowStr>,
+		rules: &Rules,
 		ignore_missing: bool,
-		reason: BuildReason<'_, 's>,
-	) -> Result<Vec<(Target<'s, CowStr<'s>>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {
+		reason: BuildReason<'_>,
+	) -> Result<Vec<(Target<CowStr>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {
 		tracing::trace!(target=?parent_target, ?rule.name, ?deps_file, "Building dependencies of target rule dependency-file");
 		let (output, deps) = self::parse_deps_file(deps_file).await?;
 
@@ -646,7 +646,7 @@ impl<'s> Builder<'s> {
 	}
 
 	/// Rebuilds a rule
-	pub async fn rebuild_rule(&self, rule: &Rule<'s, CowStr<'s>>) -> Result<(), AppError> {
+	pub async fn rebuild_rule(&self, rule: &Rule<CowStr>) -> Result<(), AppError> {
 		// Lock the semaphore
 		// Note: If we locked it per-command, we could exit earlier
 		//       when closed, but that would break some executions.
@@ -670,7 +670,7 @@ impl<'s> Builder<'s> {
 	#[expect(unused_results, reason = "Due to the builder pattern of `Command`")]
 	#[expect(clippy::unused_self, reason = "It might be used in the future")]
 	#[async_recursion::async_recursion]
-	async fn exec_cmd(&self, rule_name: &str, cmd: &Command<CowStr<'s>>) -> Result<(), AppError> {
+	async fn exec_cmd(&self, rule_name: &str, cmd: &Command<CowStr>) -> Result<(), AppError> {
 		// Process all arguments
 		let args = cmd
 			.args
@@ -730,8 +730,8 @@ impl<'s> Builder<'s> {
 	pub fn find_rule_for_file(
 		&self,
 		file: &str,
-		rules: &Rules<'s>,
-	) -> Result<Option<(Rule<'s, CowStr<'s>>, Arc<BTreeMap<CowStr<'s>, CowStr<'s>>>)>, AppError> {
+		rules: &Rules,
+	) -> Result<Option<(Rule<CowStr>, Arc<BTreeMap<CowStr, CowStr>>)>, AppError> {
 		for rule in rules.rules.values() {
 			for output in &rule.output {
 				// Expand all expressions in the output file
@@ -782,7 +782,7 @@ async fn parse_deps_file(file: &str) -> Result<(String, Vec<String>), AppError> 
 ///
 /// Returns `Err` if any files didn't exist,
 /// Returns `Ok(None)` if rule has no outputs
-async fn rule_last_build_time<'s>(rule: &Rule<'s, CowStr<'s>>) -> Result<Option<SystemTime>, AppError> {
+async fn rule_last_build_time(rule: &Rule<CowStr>) -> Result<Option<SystemTime>, AppError> {
 	// Note: We get the time of the oldest file in order to ensure all
 	//       files are at-least that old
 	let built_time = rule
@@ -811,33 +811,33 @@ async fn rule_last_build_time<'s>(rule: &Rule<'s, CowStr<'s>>) -> Result<Option<
 
 /// Build reason inner
 #[derive(Clone, Copy, Debug)]
-pub struct BuildReasonInner<'a, 's> {
+pub struct BuildReasonInner<'a> {
 	/// Target
-	target: &'a Target<'s, CowStr<'s>>,
+	target: &'a Target<CowStr>,
 
 	/// Previous reason
-	prev: &'a BuildReason<'a, 's>,
+	prev: &'a BuildReason<'a>,
 }
 
 /// Build reason
 #[derive(Clone, Copy, Debug)]
-pub struct BuildReason<'a, 's>(Option<BuildReasonInner<'a, 's>>);
+pub struct BuildReason<'a>(Option<BuildReasonInner<'a>>);
 
-impl<'s> BuildReason<'_, 's> {
+impl BuildReason<'_> {
 	/// Creates an empty build reason
 	pub const fn empty() -> Self {
 		Self(None)
 	}
 
 	/// Adds a target to this build reason
-	pub const fn with_target<'a>(&'a self, target: &'a Target<'s, CowStr<'s>>) -> BuildReason<'a, 's> {
+	pub const fn with_target<'a>(&'a self, target: &'a Target<CowStr>) -> BuildReason<'a> {
 		BuildReason(Some(BuildReasonInner { target, prev: self }))
 	}
 
 	/// Iterates over all reasons
 	pub fn for_each<F, R>(&self, mut f: F) -> R
 	where
-		F: FnMut(&Target<'s, CowStr<'s>>) -> R,
+		F: FnMut(&Target<CowStr>) -> R,
 		R: Try<Output = ()>,
 	{
 		let mut reason = &self.0;
@@ -850,7 +850,7 @@ impl<'s> BuildReason<'_, 's> {
 	}
 
 	/// Collects all reasons
-	pub fn collect_all(&self) -> Vec<&Target<'s, CowStr<'s>>> {
+	pub fn collect_all(&self) -> Vec<&Target<CowStr>> {
 		let mut targets = vec![];
 
 		let mut reason = &self.0;

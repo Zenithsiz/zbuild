@@ -12,27 +12,27 @@ use {
 
 /// Expression
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Debug)]
-pub struct Expr<'s> {
+pub struct Expr {
 	/// Components
-	pub cmpts: Vec<ExprCmpt<'s>>,
+	pub cmpts: Vec<ExprCmpt>,
 }
 
 /// Expression component
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Debug)]
-pub enum ExprCmpt<'s> {
+pub enum ExprCmpt {
 	/// String
-	String(CowStr<'s>),
+	String(CowStr),
 
 	/// Pattern
-	Pattern(Pattern<'s>),
+	Pattern(Pattern),
 
 	/// Alias
-	Alias(Alias<'s>),
+	Alias(Alias),
 }
 
-impl<'s> Expr<'s> {
+impl Expr {
 	/// Creates a new expression from it's ast
-	pub fn new(expr: ast::Expr<'s>) -> Self {
+	pub fn new(expr: ast::Expr<'static>) -> Self {
 		let cmpts = expr
 			.cmpts
 			.into_iter()
@@ -63,14 +63,14 @@ impl<'s> Expr<'s> {
 	}
 
 	/// Returns an expression that's just a string
-	pub fn string(value: impl Into<CowStr<'s>>) -> Self {
+	pub fn string(value: impl Into<CowStr>) -> Self {
 		Self {
 			cmpts: vec![ExprCmpt::String(value.into())],
 		}
 	}
 }
 
-impl fmt::Display for Expr<'_> {
+impl fmt::Display for Expr {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		for cmpt in &self.cmpts {
 			write!(f, "{cmpt}")?;
@@ -80,7 +80,7 @@ impl fmt::Display for Expr<'_> {
 	}
 }
 
-impl fmt::Display for ExprCmpt<'_> {
+impl fmt::Display for ExprCmpt {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::String(s) => write!(f, "{s}"),

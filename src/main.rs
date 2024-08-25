@@ -83,8 +83,9 @@ async fn main() -> ExitResult {
 
 	// Parse the ast
 	let zbuild_file = fs::read_to_string(zbuild_path).map_err(AppError::read_file(&zbuild_path))?;
+	let zbuild_file = zbuild_file.leak();
 	tracing::trace!(?zbuild_file, "Read zbuild.yaml");
-	let ast = serde_yaml::from_str::<Ast<'_>>(&zbuild_file).map_err(AppError::parse_yaml(&zbuild_path))?;
+	let ast = serde_yaml::from_str::<Ast<'_>>(zbuild_file).map_err(AppError::parse_yaml(&zbuild_path))?;
 	tracing::trace!(?ast, "Parsed ast");
 
 	// Build the rules
@@ -225,10 +226,10 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 }
 
 /// Builds a target.
-async fn build_target<'s, T: BuildableTargetInner<'s> + fmt::Display + fmt::Debug>(
-	builder: &Builder<'s>,
-	target: &rules::Target<'s, T>,
-	rules: &Rules<'s>,
+async fn build_target<T: BuildableTargetInner + fmt::Display + fmt::Debug>(
+	builder: &Builder,
+	target: &rules::Target<T>,
+	rules: &Rules,
 	ignore_missing: bool,
 ) -> Result<(), AppError> {
 	tracing::debug!(%target, "Building target");
@@ -260,24 +261,24 @@ async fn build_target<'s, T: BuildableTargetInner<'s> + fmt::Display + fmt::Debu
 }
 
 /// A buildable target inner type
-trait BuildableTargetInner<'s>: Sized {
+trait BuildableTargetInner: Sized {
 	/// Builds this target
 	async fn build(
-		target: &rules::Target<'s, Self>,
-		builder: &Builder<'s>,
-		rules: &Rules<'s>,
+		target: &rules::Target<Self>,
+		builder: &Builder,
+		rules: &Rules,
 		ignore_missing: bool,
-		reason: BuildReason<'_, 's>,
+		reason: BuildReason<'_>,
 	) -> Result<build::BuildResult, AppError>;
 }
 
-impl<'s> BuildableTargetInner<'s> for rules::Expr<'s> {
+impl BuildableTargetInner for rules::Expr {
 	async fn build(
-		target: &rules::Target<'s, Self>,
-		builder: &Builder<'s>,
-		rules: &Rules<'s>,
+		target: &rules::Target<Self>,
+		builder: &Builder,
+		rules: &Rules,
 		ignore_missing: bool,
-		reason: BuildReason<'_, 's>,
+		reason: BuildReason<'_>,
 	) -> Result<build::BuildResult, AppError> {
 		builder
 			.build_expr(target, rules, ignore_missing, reason)
@@ -286,13 +287,13 @@ impl<'s> BuildableTargetInner<'s> for rules::Expr<'s> {
 	}
 }
 
-impl<'s> BuildableTargetInner<'s> for CowStr<'s> {
+impl BuildableTargetInner for CowStr {
 	async fn build(
-		target: &rules::Target<'s, Self>,
-		builder: &Builder<'s>,
-		rules: &Rules<'s>,
+		target: &rules::Target<Self>,
+		builder: &Builder,
+		rules: &Rules,
 		ignore_missing: bool,
-		reason: BuildReason<'_, 's>,
+		reason: BuildReason<'_>,
 	) -> Result<build::BuildResult, AppError> {
 		builder
 			.build(target, rules, ignore_missing, reason)

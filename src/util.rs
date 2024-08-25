@@ -15,8 +15,10 @@ use {
 	tokio::fs,
 };
 
-/// Alias for `Cow<'a, str>`
-pub type CowStr<'a> = Cow<'a, str>;
+/// Alias for `Cow<'static, str>`
+// TODO: Replace this with some type like `(Arc<str>, Range<usize>)`
+//       to allow for cheap `clone`ing, which we perform a lot?
+pub type CowStr = Cow<'static, str>;
 
 /// Chains together any number of `IntoIterator`s
 pub macro chain {

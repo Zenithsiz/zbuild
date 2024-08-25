@@ -26,33 +26,33 @@ use {
 
 /// A reverse dependency
 #[derive(Clone, Debug)]
-struct RevDep<'s> {
+struct RevDep {
 	/// Target of the dependency
-	target: Target<'s, CowStr<'s>>,
+	target: Target<CowStr>,
 
 	/// All parent targets
-	parents: Arc<DashSet<Target<'s, CowStr<'s>>>>,
+	parents: Arc<DashSet<Target<CowStr>>>,
 }
 
 /// Target watcher
-pub struct Watcher<'s> {
+pub struct Watcher {
 	/// Watcher
 	watcher: Debouncer<notify::RecommendedWatcher, notify_debouncer_full::FileIdMap>,
 
 	/// Reverse dependencies
-	rev_deps: DashMap<PathBuf, RevDep<'s>>,
+	rev_deps: DashMap<PathBuf, RevDep>,
 
 	/// File event stream
 	fs_event_stream: ReceiverStream<notify_debouncer_full::DebouncedEvent>,
 
 	/// Builder event receiver
-	builder_event_rx: async_broadcast::Receiver<build::Event<'s>>,
+	builder_event_rx: async_broadcast::Receiver<build::Event>,
 }
 
-impl<'s> Watcher<'s> {
+impl Watcher {
 	/// Creates a new watcher
 	pub fn new(
-		builder_event_rx: async_broadcast::Receiver<build::Event<'s>>,
+		builder_event_rx: async_broadcast::Receiver<build::Event>,
 		debouncer_timeout: Duration,
 	) -> Result<Self, AppError> {
 		// Create the watcher
@@ -87,7 +87,7 @@ impl<'s> Watcher<'s> {
 
 	/// Watches over all files and rebuilds any changed files
 	#[expect(clippy::too_many_lines, reason = "TODO: Refactor")]
-	pub async fn watch_rebuild(mut self, builder: &Builder<'s>, rules: &Rules<'s>, ignore_missing: bool) {
+	pub async fn watch_rebuild(mut self, builder: &Builder, rules: &Rules, ignore_missing: bool) {
 		let rev_deps = &self.rev_deps;
 		futures::future::join(
 			async move {

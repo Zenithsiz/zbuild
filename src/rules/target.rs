@@ -15,7 +15,7 @@ use {
 
 /// Target
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub enum Target<'s, T> {
+pub enum Target<T> {
 	/// File
 	File {
 		/// Target file
@@ -31,11 +31,11 @@ pub enum Target<'s, T> {
 		rule: T,
 
 		/// Patterns
-		pats: Arc<BTreeMap<CowStr<'s>, T>>,
+		pats: Arc<BTreeMap<CowStr, T>>,
 	},
 }
 
-impl<T> Target<'_, T> {
+impl<T> Target<T> {
 	/// Returns if this target is static
 	pub const fn is_static(&self) -> bool {
 		match *self {
@@ -45,9 +45,9 @@ impl<T> Target<'_, T> {
 	}
 }
 
-impl<'s> Target<'s, Expr<'s>> {
+impl Target<Expr> {
 	/// Creates a new target from it's ast
-	pub fn new(ast: ast::Target<'s>) -> Self {
+	pub fn new(ast: ast::Target<'static>) -> Self {
 		match ast {
 			ast::Target::File(file) => Self::File {
 				file:      Expr::new(file),
@@ -61,7 +61,7 @@ impl<'s> Target<'s, Expr<'s>> {
 	}
 }
 
-impl<T: Hash + Ord> Hash for Target<'_, T> {
+impl<T: Hash + Ord> Hash for Target<T> {
 	fn hash<H: Hasher>(&self, state: &mut H) {
 		mem::discriminant(self).hash(state);
 		match self {
@@ -81,7 +81,7 @@ impl<T: Hash + Ord> Hash for Target<'_, T> {
 }
 
 
-impl<T: fmt::Display> fmt::Display for Target<'_, T> {
+impl<T: fmt::Display> fmt::Display for Target<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::File { file, is_static } => match is_static {
