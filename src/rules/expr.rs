@@ -7,7 +7,7 @@ use {
 		pattern::{Pattern, PatternOp},
 	},
 	crate::{ast, util::ArcStr},
-	std::{fmt, mem},
+	std::fmt,
 };
 
 /// Expression component
@@ -51,12 +51,7 @@ impl Expr {
 	/// Pushes a string into this expression
 	pub fn push_str(&mut self, s: &ArcStr) {
 		match self.cmpts.last_mut() {
-			Some(ExprCmpt::String(last)) => {
-				let mut last_s = String::from(mem::take(last));
-				last_s.push_str(s);
-
-				*last = last_s.into();
-			},
+			Some(ExprCmpt::String(last)) => last.with_mut(|last| last.push_str(s)),
 			_ => self.cmpts.push(ExprCmpt::String(s.clone())),
 		}
 	}

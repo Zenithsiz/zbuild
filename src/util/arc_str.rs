@@ -10,7 +10,7 @@ use std::{
 	fmt,
 	hash::{Hash, Hasher},
 	ops::Deref,
-	ptr::{self, NonNull},
+	ptr::NonNull,
 	str::pattern::{Pattern, ReverseSearcher},
 	sync::Arc,
 };
@@ -33,6 +33,56 @@ pub struct ArcStr {
 }
 
 impl ArcStr {
+	/// Returns the offset of this string compared to the base
+	fn base_offset(&self) -> usize {
+		// SAFETY: `self.ptr` was derived from `inner.base_ptr`
+		let start = unsafe { self.ptr.as_ptr().byte_offset_from(self.inner.as_ptr()) };
+		usize::try_from(start).expect("String pointer was before base pointer")
+	}
+
+	/// Updates this string as a `&mut String`.
+	///
+	/// Copies the string unless no other copies exist
+	pub fn with_mut<F, R>(&mut self, f: F) -> R
+	where
+		F: FnOnce(&mut String) -> R,
+	{
+		// Get the offset and length of our specific string
+		let start = self.base_offset();
+		let len = self.len();
+
+		// Get the inner string
+		let s = match Arc::get_mut(&mut self.inner) {
+			// If we're unique, slice the parts we don't care about and return
+			Some(s) => {
+				// Since we're invalidating `self.inner`, replace `ptr`
+				// with a dummy value in case of panics.
+				self.ptr = NonNull::from("");
+
+				s.truncate(start + len);
+				let _ = s.drain(..start);
+
+				s
+			},
+
+			// Otherwise copy
+			None => {
+				self.inner = Arc::new(self.to_string());
+				self.ptr = NonNull::from(self.inner.as_str());
+
+				Arc::get_mut(&mut self.inner).expect("Should be unique")
+			},
+		};
+
+		// Then mutate
+		let output = f(s);
+
+		// And finally, reconstruct ourselves
+		self.ptr = NonNull::from(s.as_str());
+
+		output
+	}
+
 	/// Creates a sub-slice of `self` containing `s`.
 	///
 	/// # Panics
@@ -145,15 +195,13 @@ impl From<String> for ArcStr {
 
 impl From<ArcStr> for String {
 	fn from(s: ArcStr) -> Self {
+		// Get the offset and length of our specific string
+		let start = s.base_offset();
+		let len = s.len();
+
 		match Arc::try_unwrap(s.inner) {
 			Ok(mut inner) => {
-				// Get the offset and length of our specific string
-				// SAFETY: `s.ptr` was derived from `inner.base_ptr`
-				let start = unsafe { s.ptr.as_ptr().byte_offset_from(inner.as_ptr()) };
-				let start = usize::try_from(start).expect("String pointer was before base pointer");
-				let len = ptr::metadata(s.ptr.as_ptr());
-
-				// And slice the string to fit
+				// Slice the string to fit
 				let _ = inner.drain(start + len..);
 				let _ = inner.drain(..start);
 
