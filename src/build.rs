@@ -191,7 +191,7 @@ impl Builder {
 		target: &Target<Expr>,
 		rules: &Rules,
 		ignore_missing: bool,
-		reason: BuildReason<'_>,
+		reason: BuildReason,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
 		// Expand the target
 		let expand_visitor = expand::Visitor::from_aliases([&rules.aliases]);
@@ -210,9 +210,9 @@ impl Builder {
 		target: &Target<ArcStr>,
 		rules: &Rules,
 		ignore_missing: bool,
-		reason: BuildReason<'_>,
+		reason: BuildReason,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
-		tracing::trace!(%target, reason=?reason.0.as_ref().map(|reason| reason.target), "Building target");
+		tracing::trace!(%target, reason=?reason.0.as_ref().map(|reason| &reason.target), "Building target");
 
 		// Normalize file paths
 		let target = match *target {
@@ -227,7 +227,7 @@ impl Builder {
 		reason.for_each(|parent_target| match &target == parent_target {
 			true => Err(AppError::FoundRecursiveRule {
 				target:         target.to_string(),
-				parent_targets: reason.collect_all().into_iter().map(Target::to_string).collect(),
+				parent_targets: reason.collect_all().iter().map(Target::to_string).collect(),
 			}),
 			false => Ok(()),
 		})?;
@@ -331,17 +331,14 @@ impl Builder {
 	/// Builds a target without checking if the target is already being built.
 	#[expect(clippy::too_many_lines, reason = "TODO: Split this function onto smaller ones")]
 	#[async_recursion::async_recursion]
-	async fn build_unchecked<'reason>(
+	async fn build_unchecked(
 		&self,
 		target: &Target<ArcStr>,
 		rule: &Rule<ArcStr>,
 		rules: &Rules,
 		ignore_missing: bool,
-		reason: BuildReason<'reason>,
-	) -> Result<BuildResult, AppError>
-	where
-		'reason: 'async_recursion,
-	{
+		reason: BuildReason,
+	) -> Result<BuildResult, AppError> {
 		/// Dependency
 		#[derive(Clone, Debug)]
 		enum Dep {
@@ -434,6 +431,7 @@ impl Builder {
 			.map(|dep| {
 				tracing::trace!(%target, ?rule.name, ?dep, "Found target rule dependency");
 				let rule = &rule;
+				let reason = &reason;
 				async move {
 					tracing::trace!(%target, ?rule.name, ?dep, "Building target rule dependency");
 
@@ -465,7 +463,7 @@ impl Builder {
 									&dep_target,
 									rules,
 									ignore_missing | matches!(dep, Dep::File { is_optional: true, .. }),
-									reason.with_target(target),
+									reason.with_target(target.clone()),
 								)
 								.await
 								.map_err(AppError::build_target(&dep_target))?;
@@ -583,7 +581,7 @@ impl Builder {
 		rule: &Rule<ArcStr>,
 		rules: &Rules,
 		ignore_missing: bool,
-		reason: BuildReason<'_>,
+		reason: &BuildReason,
 	) -> Result<Vec<(Target<ArcStr>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {
 		tracing::trace!(target=?parent_target, ?rule.name, ?deps_file, "Building dependencies of target rule dependency-file");
 		let (output, deps) = self::parse_deps_file(deps_file).await?;
@@ -628,7 +626,12 @@ impl Builder {
 				};
 				async move {
 					let (res, dep_guard) = self
-						.build(&dep_target, rules, ignore_missing, reason.with_target(parent_target))
+						.build(
+							&dep_target,
+							rules,
+							ignore_missing,
+							reason.with_target(parent_target.clone()),
+						)
 						.await
 						.map_err(AppError::build_target(&dep_target))?;
 
@@ -815,28 +818,31 @@ async fn rule_last_build_time(rule: &Rule<ArcStr>) -> Result<Option<SystemTime>,
 }
 
 /// Build reason inner
-#[derive(Clone, Copy, Debug)]
-pub struct BuildReasonInner<'a> {
+#[derive(Clone, Debug)]
+pub struct BuildReasonInner {
 	/// Target
-	target: &'a Target<ArcStr>,
+	target: Target<ArcStr>,
 
 	/// Previous reason
-	prev: &'a BuildReason<'a>,
+	prev: BuildReason,
 }
 
 /// Build reason
-#[derive(Clone, Copy, Debug)]
-pub struct BuildReason<'a>(Option<BuildReasonInner<'a>>);
+#[derive(Clone, Debug)]
+pub struct BuildReason(Option<Arc<BuildReasonInner>>);
 
-impl BuildReason<'_> {
+impl BuildReason {
 	/// Creates an empty build reason
 	pub const fn empty() -> Self {
 		Self(None)
 	}
 
 	/// Adds a target to this build reason
-	pub const fn with_target<'a>(&'a self, target: &'a Target<ArcStr>) -> BuildReason<'a> {
-		BuildReason(Some(BuildReasonInner { target, prev: self }))
+	pub fn with_target(&self, target: Target<ArcStr>) -> Self {
+		Self(Some(Arc::new(BuildReasonInner {
+			target,
+			prev: self.clone(),
+		})))
 	}
 
 	/// Iterates over all reasons
@@ -847,7 +853,7 @@ impl BuildReason<'_> {
 	{
 		let mut reason = &self.0;
 		while let Some(inner) = reason {
-			f(inner.target)?;
+			f(&inner.target)?;
 			reason = &inner.prev.0;
 		}
 
@@ -855,12 +861,12 @@ impl BuildReason<'_> {
 	}
 
 	/// Collects all reasons
-	pub fn collect_all(&self) -> Vec<&Target<ArcStr>> {
+	pub fn collect_all(&self) -> Vec<Target<ArcStr>> {
 		let mut targets = vec![];
 
 		let mut reason = &self.0;
 		while let Some(inner) = reason {
-			targets.push(inner.target);
+			targets.push(inner.target.clone());
 			reason = &inner.prev.0;
 		}
 

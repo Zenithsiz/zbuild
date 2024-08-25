@@ -273,7 +273,7 @@ trait BuildableTargetInner: Sized {
 		builder: &Builder,
 		rules: &Rules,
 		ignore_missing: bool,
-		reason: BuildReason<'_>,
+		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError>;
 }
 
@@ -283,7 +283,7 @@ impl BuildableTargetInner for rules::Expr {
 		builder: &Builder,
 		rules: &Rules,
 		ignore_missing: bool,
-		reason: BuildReason<'_>,
+		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError> {
 		builder
 			.build_expr(target, rules, ignore_missing, reason)
@@ -298,7 +298,7 @@ impl BuildableTargetInner for ArcStr {
 		builder: &Builder,
 		rules: &Rules,
 		ignore_missing: bool,
-		reason: BuildReason<'_>,
+		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError> {
 		builder
 			.build(target, rules, ignore_missing, reason)
