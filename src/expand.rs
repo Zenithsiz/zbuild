@@ -8,7 +8,6 @@ use {
 		util::CowStr,
 	},
 	indexmap::IndexMap,
-	itertools::Itertools,
 	smallvec::SmallVec,
 	std::{collections::BTreeMap, marker::PhantomData, path::PathBuf, sync::Arc},
 };
@@ -30,22 +29,21 @@ impl Expander {
 	/// Expands an expression to it's components
 	pub fn expand_expr(&self, expr: &Expr, visitor: &Visitor) -> Result<Expr, AppError> {
 		// Go through all components
-		let cmpts = expr
-			.cmpts
+		expr.cmpts
 			.iter()
-			.try_fold::<_, _, Result<_, _>>(vec![], |mut cmpts, cmpt| {
+			.try_fold::<_, _, Result<_, _>>(Expr::empty(), |mut expr, cmpt| {
 				match cmpt {
 					// If it's a string, we keep it
-					ExprCmpt::String(_) => cmpts.push(cmpt.clone()),
+					ExprCmpt::String(s) => expr.push_str(s),
 
 					// If it's a pattern, we visit it
 					// Note: We don't care about the operations on patterns, those are for matching
 					ExprCmpt::Pattern(pat) => match visitor.visit_pat(pat.name) {
 						// If expanded, just replace it with a string
-						FlowControl::ExpandTo(value) => cmpts.push(ExprCmpt::String(value.clone())),
+						FlowControl::ExpandTo(value) => expr.push_str(value),
 
 						// Else keep on Keep and error on Error
-						FlowControl::Keep => cmpts.push(cmpt.clone()),
+						FlowControl::Keep => expr.push(cmpt),
 						FlowControl::Error =>
 							return Err(AppError::UnknownPattern {
 								pattern_name: pat.name.to_owned(),
@@ -57,7 +55,7 @@ impl Expander {
 						// If expanded, check if we need to apply any operations
 						FlowControl::ExpandTo(alias_expr) => match alias.ops.is_empty() {
 							// If not, just recursively expand it
-							true => cmpts.extend(self.expand_expr(alias_expr, visitor)?.cmpts),
+							true => expr.extend(self.expand_expr(alias_expr, visitor)?.cmpts),
 
 							// Else expand it to a string, then apply all operations
 							// Note: We expand to string even if we don't *need* to to ensure the user doesn't
@@ -75,12 +73,12 @@ impl Expander {
 										.map_err(AppError::alias_op(op))
 								})?;
 
-								cmpts.push(ExprCmpt::String(value));
+								expr.push_str(&value);
 							},
 						},
 
 						// Else keep on Keep and error on Error
-						FlowControl::Keep => cmpts.push(cmpt.clone()),
+						FlowControl::Keep => expr.push(cmpt),
 						FlowControl::Error =>
 							return Err(AppError::UnknownAlias {
 								alias_name: alias.name.to_owned(),
@@ -88,27 +86,8 @@ impl Expander {
 					},
 				};
 
-				Ok(cmpts)
-			})?;
-
-		// Then merge neighboring strings
-		// TODO: Do this in the above pass
-		let cmpts = cmpts
-			.into_iter()
-			.coalesce(|prev, next| match (prev, next) {
-				// Merge strings
-				#[expect(
-					clippy::arithmetic_side_effects,
-					reason = "String arithmetic doesn't have any side effects we care about"
-				)]
-				(ExprCmpt::String(prev), ExprCmpt::String(next)) => Ok(ExprCmpt::String(prev + next)),
-
-				// Everything else leave
-				(prev, next) => Err((prev, next)),
+				Ok(expr)
 			})
-			.collect();
-
-		Ok(Expr { cmpts })
 	}
 
 	/// Expands an expression into a string

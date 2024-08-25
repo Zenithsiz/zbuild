@@ -11,7 +11,8 @@
 	must_not_suspend,
 	strict_provenance,
 	assert_matches,
-	try_trait_v2
+	try_trait_v2,
+	if_let_guard
 )]
 // Lints
 #![allow(
