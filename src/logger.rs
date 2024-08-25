@@ -35,8 +35,18 @@ pub fn init(log_path: Option<&Path>) {
 		},
 	});
 
-	// Create a registry with all the layers and initialize it
-	Registry::default().with(term_layer).with(file_layer).init();
+	// Create the console layer
+	#[cfg(feature = "tokio-console")]
+	let (console_layer, console_server) = console_subscriber::ConsoleLayer::builder().with_default_env().build();
+
+	// Create a registry with all the layers
+	let registry = Registry::default().with(term_layer).with(file_layer);
+
+	#[cfg(feature = "tokio-console")]
+	let registry = registry.with(console_layer);
+
+	// Then initialize it
+	registry.init();
 	tracing::debug!(?log_path, "Initialized logging");
 
 	// And emit all pre-init warnings
@@ -48,6 +58,19 @@ pub fn init(log_path: Option<&Path>) {
 	}
 	for message in pre_init::take_warnings() {
 		tracing::warn!("{message}");
+	}
+
+	// Finally spawn the console server
+	#[cfg(feature = "tokio-console")]
+	{
+		use std::mem;
+
+		let console_serve = tokio::spawn(async move {
+			if let Err(err) = console_server.serve().await {
+				tracing::warn!(?err, "Unable to spawn tokio console server");
+			}
+		});
+		mem::drop(console_serve);
 	}
 }
 

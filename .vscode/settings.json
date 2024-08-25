@@ -17,5 +17,6 @@
     "thiserror",
     "yeet",
     "Zbuild"
-  ]
+  ],
+  "rust-analyzer.cargo.features": "all"
 }
