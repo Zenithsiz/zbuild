@@ -119,12 +119,12 @@ impl Expr {
 	}
 
 	/// Creates a new expression from it's ast
-	pub fn new(expr: ast::Expr<'static>) -> Self {
+	pub fn new(zbuild_file: &ArcStr, expr: ast::Expr<'_>) -> Self {
 		let cmpts = expr
 			.cmpts
 			.into_iter()
 			.map(|cmpt| match cmpt {
-				ast::ExprCmpt::String(s) => ExprCmpt::String(ArcStr::from(s)),
+				ast::ExprCmpt::String(s) => ExprCmpt::String(zbuild_file.slice_from_str(s)),
 				ast::ExprCmpt::Pattern(ast::Pattern { name, ops }) => ExprCmpt::Pattern(Pattern {
 					name: name.into(),
 					ops:  ops
@@ -135,8 +135,8 @@ impl Expr {
 						.collect(),
 				}),
 				ast::ExprCmpt::Alias(ast::Alias { name, ops }) => ExprCmpt::Alias(Alias {
-					name,
-					ops: ops
+					name: zbuild_file.slice_from_str(name),
+					ops:  ops
 						.into_iter()
 						.map(|op| match op {
 							ast::AliasOp::DirName => AliasOp::DirName,

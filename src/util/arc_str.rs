@@ -37,7 +37,7 @@ impl ArcStr {
 	///
 	/// # Panics
 	/// `s` must be derived from this string, else this method panics.
-	fn slice_from_str(&self, s: &str) -> Self {
+	pub fn slice_from_str(&self, s: &str) -> Self {
 		// Get pointer ranges
 		let self_range = self.as_bytes().as_ptr_range();
 		let s_range = s.as_bytes().as_ptr_range();

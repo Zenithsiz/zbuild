@@ -51,7 +51,7 @@ impl Expander {
 					},
 
 					// If it's an alias, we visit and then expand it
-					ExprCmpt::Alias(alias) => match visitor.visit_alias(alias.name) {
+					ExprCmpt::Alias(alias) => match visitor.visit_alias(&alias.name) {
 						// If expanded, check if we need to apply any operations
 						FlowControl::ExpandTo(alias_expr) => match alias.ops.is_empty() {
 							// If not, just recursively expand it
@@ -81,7 +81,7 @@ impl Expander {
 						FlowControl::Keep => expr.push(cmpt),
 						FlowControl::Error =>
 							return Err(AppError::UnknownAlias {
-								alias_name: alias.name.to_owned(),
+								alias_name: alias.name.to_string(),
 							}),
 					},
 				};
@@ -127,7 +127,7 @@ impl Expander {
 		let aliases = rule
 			.aliases
 			.iter()
-			.map(|(&name, expr)| Ok((name, self.expand_expr_string(expr, visitor)?)))
+			.map(|(name, expr)| Ok((name.clone(), self.expand_expr_string(expr, visitor)?)))
 			.collect::<ResultMultiple<_>>()?;
 
 		let output = rule
@@ -184,7 +184,7 @@ impl Expander {
 		};
 
 		Ok(Rule {
-			name: rule.name,
+			name: rule.name.clone(),
 			aliases: Arc::new(aliases),
 			output,
 			deps,
@@ -275,7 +275,7 @@ impl<T> FlowControl<T> {
 #[derive(Clone, Debug)]
 pub struct Visitor {
 	/// All aliases, in order to check
-	aliases: SmallVec<[Arc<IndexMap<&'static str, Expr>>; 2]>,
+	aliases: SmallVec<[Arc<IndexMap<ArcStr, Expr>>; 2]>,
 
 	/// All patterns, in order to check
 	pats: SmallVec<[Arc<BTreeMap<ArcStr, ArcStr>>; 1]>,
@@ -291,7 +291,7 @@ impl Visitor {
 	/// Creates a new visitor with aliases and patterns
 	pub fn new<'a, A, P>(aliases: A, pats: P) -> Self
 	where
-		A: IntoIterator<Item = &'a Arc<IndexMap<&'static str, Expr>>>,
+		A: IntoIterator<Item = &'a Arc<IndexMap<ArcStr, Expr>>>,
 		P: IntoIterator<Item = &'a Arc<BTreeMap<ArcStr, ArcStr>>>,
 	{
 		Self {
@@ -305,7 +305,7 @@ impl Visitor {
 	/// Creates a visitor from aliases
 	pub fn from_aliases<'a, A>(aliases: A) -> Self
 	where
-		A: IntoIterator<Item = &'a Arc<IndexMap<&'static str, Expr>>>,
+		A: IntoIterator<Item = &'a Arc<IndexMap<ArcStr, Expr>>>,
 	{
 		Self::new(aliases, [])
 	}

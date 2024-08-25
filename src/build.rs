@@ -47,7 +47,7 @@ pub enum Event {
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub struct TargetRule {
 	/// Name
-	name: &'static str,
+	name: ArcStr,
 
 	/// Patterns
 	pats: Arc<BTreeMap<ArcStr, ArcStr>>,
@@ -95,7 +95,7 @@ impl Builder {
 	}
 
 	/// Returns all build results
-	pub fn into_build_results(self) -> IndexMap<&'static str, Option<Result<BuildResult, ()>>> {
+	pub fn into_build_results(self) -> IndexMap<ArcStr, Option<Result<BuildResult, ()>>> {
 		self.rules_lock
 			.into_iter()
 			.map(|(rule, lock)| (rule.name, lock.into_res()))
@@ -132,7 +132,10 @@ impl Builder {
 			Target::File { ref file, .. } => match self.find_rule_for_file(file, rules)? {
 				Some((rule, pats)) => {
 					tracing::trace!(%target, %rule.name, "Found target rule");
-					let target_rule = TargetRule { name: rule.name, pats };
+					let target_rule = TargetRule {
+						name: rule.name.clone(),
+						pats,
+					};
 					(rule, target_rule)
 				},
 
@@ -149,9 +152,9 @@ impl Builder {
 				let rule = self
 					.expander
 					.expand_rule(rule, &expand_visitor)
-					.map_err(AppError::expand_rule(rule.name))?;
+					.map_err(AppError::expand_rule(&*rule.name))?;
 				let target_rule = TargetRule {
-					name: rule.name,
+					name: rule.name.clone(),
 					pats: Arc::clone(pats),
 				};
 				(rule, target_rule)
@@ -554,7 +557,9 @@ impl Builder {
 		// Then rebuild, if needed
 		if needs_rebuilt {
 			tracing::trace!(%target, ?rule.name, ?deps_last_build_time, ?rule_last_build_time, "Rebuilding target rule");
-			self.rebuild_rule(rule).await.map_err(AppError::build_rule(rule.name))?;
+			self.rebuild_rule(rule)
+				.await
+				.map_err(AppError::build_rule(&*rule.name))?;
 		}
 
 		// Then get the build time
@@ -587,10 +592,10 @@ impl Builder {
 			// If there were no outputs, make sure it matches the rule name
 			// TODO: Seems kinda weird for it to match the rule name, but not sure how else to check this here
 			true =>
-				if output != rule.name {
+				if output != *rule.name {
 					return Err(AppError::DepFileMissingRuleName {
 						deps_file_path: deps_file.into(),
-						rule_name:      rule.name.to_owned(),
+						rule_name:      rule.name.to_string(),
 						dep_output:     output,
 					});
 				},
@@ -660,7 +665,7 @@ impl Builder {
 		};
 
 		for cmd in &rule.exec.cmds {
-			self.exec_cmd(rule.name, cmd).await?;
+			self.exec_cmd(&rule.name, cmd).await?;
 		}
 
 		Ok(())
@@ -751,7 +756,7 @@ impl Builder {
 					let rule = self
 						.expander
 						.expand_rule(rule, &expand_visitor)
-						.map_err(AppError::expand_rule(rule.name.to_owned()))?;
+						.map_err(AppError::expand_rule(&*rule.name))?;
 					return Ok(Some((rule, rule_pats)));
 				}
 			}

@@ -88,13 +88,13 @@ async fn main() -> ExitResult {
 
 	// Parse the ast
 	let zbuild_file = fs::read_to_string(zbuild_path).map_err(AppError::read_file(&zbuild_path))?;
-	let zbuild_file = zbuild_file.leak();
+	let zbuild_file = ArcStr::from(zbuild_file);
 	tracing::trace!(?zbuild_file, "Read zbuild.yaml");
-	let ast = serde_yaml::from_str::<Ast<'_>>(zbuild_file).map_err(AppError::parse_yaml(&zbuild_path))?;
+	let ast = serde_yaml::from_str::<Ast<'_>>(&zbuild_file).map_err(AppError::parse_yaml(&zbuild_path))?;
 	tracing::trace!(?ast, "Parsed ast");
 
 	// Build the rules
-	let rules = Rules::new(ast);
+	let rules = Rules::new(&zbuild_file, ast);
 	tracing::trace!(?rules, "Built rules");
 
 	// Get the max number of jobs we can execute at once
@@ -134,7 +134,7 @@ async fn main() -> ExitResult {
 					// If there was a rule, use it without any patterns
 					// TODO: If it requires patterns maybe error out here?
 					|rule| rules::Target::Rule {
-						rule: rules::Expr::string(rule.name.to_owned()),
+						rule: rules::Expr::string(rule.name.clone()),
 						pats: Arc::new(BTreeMap::new()),
 					},
 				)
