@@ -1,11 +1,16 @@
 //! Utilities
 
+// Modules
+pub mod arc_str;
+
+// Exports
+pub use self::arc_str::ArcStr;
+
 // Imports
 use {
 	futures::Future,
 	pin_project::pin_project,
 	std::{
-		borrow::Cow,
 		io,
 		path::{self, Path, PathBuf},
 		pin::Pin,
@@ -14,11 +19,6 @@ use {
 	},
 	tokio::fs,
 };
-
-/// Alias for `Cow<'static, str>`
-// TODO: Replace this with some type like `(Arc<str>, Range<usize>)`
-//       to allow for cheap `clone`ing, which we perform a lot?
-pub type CowStr = Cow<'static, str>;
 
 /// Chains together any number of `IntoIterator`s
 pub macro chain {

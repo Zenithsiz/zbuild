@@ -8,7 +8,7 @@
 
 // Imports
 use {
-	crate::{build, rules::Target, util::CowStr, AppError, Builder, Rules},
+	crate::{build, rules::Target, util::ArcStr, AppError, Builder, Rules},
 	anyhow::Context,
 	dashmap::{DashMap, DashSet},
 	futures::{stream::FuturesUnordered, StreamExt},
@@ -28,10 +28,10 @@ use {
 #[derive(Clone, Debug)]
 struct RevDep {
 	/// Target of the dependency
-	target: Target<CowStr>,
+	target: Target<ArcStr>,
 
 	/// All parent targets
-	parents: Arc<DashSet<Target<CowStr>>>,
+	parents: Arc<DashSet<Target<ArcStr>>>,
 }
 
 /// Target watcher

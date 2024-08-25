@@ -12,7 +12,9 @@
 	strict_provenance,
 	assert_matches,
 	try_trait_v2,
-	if_let_guard
+	if_let_guard,
+	pattern,
+	unsigned_signed_diff
 )]
 // Lints
 #![allow(
@@ -55,7 +57,7 @@ use {
 		thread,
 		time::{Duration, SystemTime},
 	},
-	util::CowStr,
+	util::ArcStr,
 	watcher::Watcher,
 };
 
@@ -288,7 +290,7 @@ impl BuildableTargetInner for rules::Expr {
 	}
 }
 
-impl BuildableTargetInner for CowStr {
+impl BuildableTargetInner for ArcStr {
 	async fn build(
 		target: &rules::Target<Self>,
 		builder: &Builder,

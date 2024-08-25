@@ -17,7 +17,7 @@ use {
 		error::ResultMultiple,
 		expand,
 		rules::{Command, CommandArg, DepItem, Expr, OutItem, Rule, Target},
-		util::{self, CowStr},
+		util::{self, ArcStr},
 		AppError,
 		Expander,
 		Rules,
@@ -36,10 +36,10 @@ pub enum Event {
 	/// Target dependency built
 	TargetDepBuilt {
 		/// Target that was being built
-		target: Target<CowStr>,
+		target: Target<ArcStr>,
 
 		/// Dependency that was built
-		dep: Target<CowStr>,
+		dep: Target<ArcStr>,
 	},
 }
 
@@ -50,7 +50,7 @@ pub struct TargetRule {
 	name: &'static str,
 
 	/// Patterns
-	pats: Arc<BTreeMap<CowStr, CowStr>>,
+	pats: Arc<BTreeMap<ArcStr, ArcStr>>,
 }
 
 /// Builder
@@ -124,9 +124,9 @@ impl Builder {
 	/// Finds a target's rule
 	fn target_rule(
 		&self,
-		target: &Target<CowStr>,
+		target: &Target<ArcStr>,
 		rules: &Rules,
-	) -> Result<Option<(Rule<CowStr>, TargetRule)>, AppError> {
+	) -> Result<Option<(Rule<ArcStr>, TargetRule)>, AppError> {
 		let target_rule = match *target {
 			// If we got a file, check which rule can make it
 			Target::File { ref file, .. } => match self.find_rule_for_file(file, rules)? {
@@ -162,7 +162,7 @@ impl Builder {
 	}
 
 	/// Resets a build
-	pub async fn reset_build(&self, target: &Target<CowStr>, rules: &Rules) -> Result<(), AppError> {
+	pub async fn reset_build(&self, target: &Target<ArcStr>, rules: &Rules) -> Result<(), AppError> {
 		// Get the rule for the target
 		let Some((_, target_rule)) = self.target_rule(target, rules)? else {
 			return Ok(());
@@ -204,7 +204,7 @@ impl Builder {
 	/// Builds a target
 	pub async fn build(
 		&self,
-		target: &Target<CowStr>,
+		target: &Target<ArcStr>,
 		rules: &Rules,
 		ignore_missing: bool,
 		reason: BuildReason<'_>,
@@ -214,7 +214,7 @@ impl Builder {
 		// Normalize file paths
 		let target = match *target {
 			Target::File { ref file, is_static } => Target::File {
-				file: CowStr::Owned(util::normalize_path(file)),
+				file: util::normalize_path(file).into(),
 				is_static,
 			},
 			ref target @ Target::Rule { .. } => target.clone(),
@@ -330,8 +330,8 @@ impl Builder {
 	#[async_recursion::async_recursion]
 	async fn build_unchecked<'reason>(
 		&self,
-		target: &Target<CowStr>,
-		rule: &Rule<CowStr>,
+		target: &Target<ArcStr>,
+		rule: &Rule<ArcStr>,
 		rules: &Rules,
 		ignore_missing: bool,
 		reason: BuildReason<'reason>,
@@ -344,7 +344,7 @@ impl Builder {
 		enum Dep {
 			/// File
 			File {
-				file:         CowStr,
+				file:         ArcStr,
 				is_static:    bool,
 				is_deps_file: bool,
 				is_output:    bool,
@@ -354,8 +354,8 @@ impl Builder {
 
 			/// Rule
 			Rule {
-				name: CowStr,
-				pats: Arc<BTreeMap<CowStr, CowStr>>,
+				name: ArcStr,
+				pats: Arc<BTreeMap<ArcStr, ArcStr>>,
 			},
 		}
 
@@ -573,13 +573,13 @@ impl Builder {
 	/// Returns the latest modification date of the dependencies
 	async fn build_deps_file(
 		&self,
-		parent_target: &Target<CowStr>,
+		parent_target: &Target<ArcStr>,
 		deps_file: &str,
-		rule: &Rule<CowStr>,
+		rule: &Rule<ArcStr>,
 		rules: &Rules,
 		ignore_missing: bool,
 		reason: BuildReason<'_>,
-	) -> Result<Vec<(Target<CowStr>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {
+	) -> Result<Vec<(Target<ArcStr>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {
 		tracing::trace!(target=?parent_target, ?rule.name, ?deps_file, "Building dependencies of target rule dependency-file");
 		let (output, deps) = self::parse_deps_file(deps_file).await?;
 
@@ -598,7 +598,7 @@ impl Builder {
 			// If there were any output, make sure the dependency file applies to one of them
 			false => {
 				let any_matches = rule.output.iter().any(|out| match out {
-					OutItem::File { file, .. } => file == &output,
+					OutItem::File { file, .. } => **file == output,
 				});
 				if !any_matches {
 					return Err(AppError::DepFileMissingOutputs {
@@ -615,7 +615,7 @@ impl Builder {
 		let deps_res = deps
 			.into_iter()
 			.map(|dep| {
-				let dep = CowStr::Owned(util::normalize_path(&dep));
+				let dep = ArcStr::from(util::normalize_path(&dep));
 				tracing::trace!(?rule.name, ?dep, "Found rule dependency");
 				let dep_target = Target::File {
 					file:      dep,
@@ -646,7 +646,7 @@ impl Builder {
 	}
 
 	/// Rebuilds a rule
-	pub async fn rebuild_rule(&self, rule: &Rule<CowStr>) -> Result<(), AppError> {
+	pub async fn rebuild_rule(&self, rule: &Rule<ArcStr>) -> Result<(), AppError> {
 		// Lock the semaphore
 		// Note: If we locked it per-command, we could exit earlier
 		//       when closed, but that would break some executions.
@@ -670,7 +670,7 @@ impl Builder {
 	#[expect(unused_results, reason = "Due to the builder pattern of `Command`")]
 	#[expect(clippy::unused_self, reason = "It might be used in the future")]
 	#[async_recursion::async_recursion]
-	async fn exec_cmd(&self, rule_name: &str, cmd: &Command<CowStr>) -> Result<(), AppError> {
+	async fn exec_cmd(&self, rule_name: &str, cmd: &Command<ArcStr>) -> Result<(), AppError> {
 		// Process all arguments
 		let args = cmd
 			.args
@@ -729,9 +729,9 @@ impl Builder {
 	#[expect(clippy::type_complexity, reason = "TODO: Add some type aliases / struct")]
 	pub fn find_rule_for_file(
 		&self,
-		file: &str,
+		file: &ArcStr,
 		rules: &Rules,
-	) -> Result<Option<(Rule<CowStr>, Arc<BTreeMap<CowStr, CowStr>>)>, AppError> {
+	) -> Result<Option<(Rule<ArcStr>, Arc<BTreeMap<ArcStr, ArcStr>>)>, AppError> {
 		for rule in rules.rules.values() {
 			for output in &rule.output {
 				// Expand all expressions in the output file
@@ -744,7 +744,7 @@ impl Builder {
 				let output_file = self.expander.expand_expr(output_file, &expand_visitor)?;
 
 				// Then try to match the output file to the file we need to create
-				if let Some(rule_pats) = self::match_expr(&output_file, &output_file.cmpts, file)? {
+				if let Some(rule_pats) = self::match_expr(&output_file, &output_file.cmpts, file.clone())? {
 					let rule_pats = Arc::new(rule_pats);
 
 					let expand_visitor = expand::Visitor::new([&rule.aliases, &rules.aliases], [&rule_pats]);
@@ -782,7 +782,7 @@ async fn parse_deps_file(file: &str) -> Result<(String, Vec<String>), AppError> 
 ///
 /// Returns `Err` if any files didn't exist,
 /// Returns `Ok(None)` if rule has no outputs
-async fn rule_last_build_time(rule: &Rule<CowStr>) -> Result<Option<SystemTime>, AppError> {
+async fn rule_last_build_time(rule: &Rule<ArcStr>) -> Result<Option<SystemTime>, AppError> {
 	// Note: We get the time of the oldest file in order to ensure all
 	//       files are at-least that old
 	let built_time = rule
@@ -813,7 +813,7 @@ async fn rule_last_build_time(rule: &Rule<CowStr>) -> Result<Option<SystemTime>,
 #[derive(Clone, Copy, Debug)]
 pub struct BuildReasonInner<'a> {
 	/// Target
-	target: &'a Target<CowStr>,
+	target: &'a Target<ArcStr>,
 
 	/// Previous reason
 	prev: &'a BuildReason<'a>,
@@ -830,14 +830,14 @@ impl BuildReason<'_> {
 	}
 
 	/// Adds a target to this build reason
-	pub const fn with_target<'a>(&'a self, target: &'a Target<CowStr>) -> BuildReason<'a> {
+	pub const fn with_target<'a>(&'a self, target: &'a Target<ArcStr>) -> BuildReason<'a> {
 		BuildReason(Some(BuildReasonInner { target, prev: self }))
 	}
 
 	/// Iterates over all reasons
 	pub fn for_each<F, R>(&self, mut f: F) -> R
 	where
-		F: FnMut(&Target<CowStr>) -> R,
+		F: FnMut(&Target<ArcStr>) -> R,
 		R: Try<Output = ()>,
 	{
 		let mut reason = &self.0;
@@ -850,7 +850,7 @@ impl BuildReason<'_> {
 	}
 
 	/// Collects all reasons
-	pub fn collect_all(&self) -> Vec<&Target<CowStr>> {
+	pub fn collect_all(&self) -> Vec<&Target<ArcStr>> {
 		let mut targets = vec![];
 
 		let mut reason = &self.0;

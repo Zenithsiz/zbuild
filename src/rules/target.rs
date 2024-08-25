@@ -3,7 +3,7 @@
 // Imports
 use {
 	super::Expr,
-	crate::{ast, util::CowStr},
+	crate::{ast, util::ArcStr},
 	std::{
 		collections::BTreeMap,
 		fmt,
@@ -31,7 +31,7 @@ pub enum Target<T> {
 		rule: T,
 
 		/// Patterns
-		pats: Arc<BTreeMap<CowStr, T>>,
+		pats: Arc<BTreeMap<ArcStr, T>>,
 	},
 }
 

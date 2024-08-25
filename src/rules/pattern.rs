@@ -1,13 +1,13 @@
 //! Pattern
 
 // Imports
-use std::fmt;
+use {crate::util::ArcStr, std::fmt};
 
 /// Pattern
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Debug)]
 pub struct Pattern {
 	/// Pattern name
-	pub name: &'static str,
+	pub name: ArcStr,
 
 	/// Operators
 	pub ops: Vec<PatternOp>,
