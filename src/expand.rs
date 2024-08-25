@@ -92,20 +92,12 @@ impl Expander {
 
 	/// Expands an expression into a string
 	pub fn expand_expr_string(&self, expr: &Expr, visitor: &Visitor) -> Result<CowStr, AppError> {
-		let expr_cmpts = self.expand_expr(expr, visitor)?.cmpts.into_boxed_slice();
-		let res = match Box::<[_; 0]>::try_from(expr_cmpts) {
-			Ok(box []) => Ok("".into()),
-			Err(cmpts) => match Box::<[_; 1]>::try_from(cmpts) {
-				Ok(box [ExprCmpt::String(s)]) => Ok(s),
-				Ok(box [cmpt]) => Err(vec![cmpt]),
-				Err(cmpts) => Err(cmpts.into_vec()),
-			},
-		};
-
-		res.map_err(|cmpts| AppError::UnresolvedAliasOrPats {
-			expr:       expr.to_string(),
-			expr_cmpts: cmpts.into_iter().map(|cmpt| cmpt.to_string()).collect(),
-		})
+		self.expand_expr(expr, visitor)?
+			.try_into_string()
+			.map_err(|expr| AppError::UnresolvedAliasOrPats {
+				expr:       expr.to_string(),
+				expr_cmpts: expr.cmpts.into_iter().map(|cmpt| cmpt.to_string()).collect(),
+			})
 	}
 
 	/// Expands an alias operation on the value of that alias

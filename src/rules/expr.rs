@@ -23,6 +23,17 @@ pub enum ExprCmpt {
 	Alias(Alias),
 }
 
+impl ExprCmpt {
+	/// Converts this expression into a string, if it's a string.
+	pub fn try_into_string(self) -> Result<CowStr, Self> {
+		#[expect(clippy::wildcard_enum_match_arm, reason = "We only care about a specific variant")]
+		match self {
+			Self::String(v) => Ok(v),
+			_ => Err(self),
+		}
+	}
+}
+
 /// Expression
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Debug)]
 pub struct Expr {
@@ -70,6 +81,31 @@ impl Expr {
 		for cmpt in cmpts {
 			self.push(&cmpt);
 		}
+	}
+
+	/// Converts this expression into a string, if it's compromised of only string components
+	pub fn try_into_string(self) -> Result<CowStr, Self> {
+		// If all components aren't strings, return Err
+		if !self.cmpts.iter().all(|cmpt| matches!(cmpt, ExprCmpt::String(_))) {
+			return Err(self);
+		}
+
+		// Otherwise, get the first string, if any, then push all other strings
+		let mut cmpts = self.cmpts.into_iter();
+		let Some(output) = cmpts.next() else {
+			return Ok("".into());
+		};
+		let mut output = output.try_into_string().expect("Component wasn't a string");
+
+		// Then add all other strings, if non-empty
+		for cmpt in cmpts {
+			let cmpt = cmpt.try_into_string().expect("Component wasn't a string");
+			if !cmpt.is_empty() {
+				output.to_mut().push_str(&cmpt);
+			}
+		}
+
+		Ok(output)
 	}
 
 	/// Creates a new expression from it's ast
