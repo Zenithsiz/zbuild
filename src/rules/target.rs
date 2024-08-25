@@ -3,7 +3,7 @@
 // Imports
 use {
 	super::Expr,
-	crate::{ast, util::CowStr},
+	crate::{ast, util::ArcStr},
 	std::{
 		collections::BTreeMap,
 		fmt,
@@ -31,7 +31,7 @@ pub enum Target<T> {
 		rule: T,
 
 		/// Patterns
-		pats: Arc<BTreeMap<CowStr, T>>,
+		pats: Arc<BTreeMap<ArcStr, T>>,
 	},
 }
 
@@ -47,14 +47,14 @@ impl<T> Target<T> {
 
 impl Target<Expr> {
 	/// Creates a new target from it's ast
-	pub fn new(ast: ast::Target<'static>) -> Self {
+	pub fn new(zbuild_file: &ArcStr, ast: ast::Target<'_>) -> Self {
 		match ast {
 			ast::Target::File(file) => Self::File {
-				file:      Expr::new(file),
+				file:      Expr::new(zbuild_file, file),
 				is_static: false,
 			},
 			ast::Target::Rule { rule } => Self::Rule {
-				rule: Expr::new(rule),
+				rule: Expr::new(zbuild_file, rule),
 				pats: Arc::new(BTreeMap::new()),
 			},
 		}

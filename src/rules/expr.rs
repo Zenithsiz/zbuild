@@ -6,7 +6,7 @@ use {
 		alias::{Alias, AliasOp},
 		pattern::{Pattern, PatternOp},
 	},
-	crate::{ast, util::CowStr},
+	crate::{ast, util::ArcStr},
 	std::fmt,
 };
 
@@ -14,7 +14,7 @@ use {
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Debug)]
 pub enum ExprCmpt {
 	/// String
-	String(CowStr),
+	String(ArcStr),
 
 	/// Pattern
 	Pattern(Pattern),
@@ -25,7 +25,7 @@ pub enum ExprCmpt {
 
 impl ExprCmpt {
 	/// Converts this expression into a string, if it's a string.
-	pub fn try_into_string(self) -> Result<CowStr, Self> {
+	pub fn try_into_string(self) -> Result<ArcStr, Self> {
 		#[expect(clippy::wildcard_enum_match_arm, reason = "We only care about a specific variant")]
 		match self {
 			Self::String(v) => Ok(v),
@@ -49,24 +49,20 @@ impl Expr {
 	}
 
 	/// Pushes a string into this expression
-	pub fn push_str(&mut self, s: &CowStr) {
+	pub fn push_str(&mut self, s: &ArcStr) {
 		match self.cmpts.last_mut() {
-			Some(ExprCmpt::String(last)) => {
-				last.to_mut().push_str(s);
-			},
+			Some(ExprCmpt::String(last)) => last.with_mut(|last| last.push_str(s)),
 			_ => self.cmpts.push(ExprCmpt::String(s.clone())),
 		}
 	}
 
 	/// Pushes a component into this expression
 	pub fn push(&mut self, cmpt: &ExprCmpt) {
-		#[expect(clippy::wildcard_enum_match_arm, reason = "The wildcard matches all variants")]
 		match cmpt {
 			// If it's a string, try to use `push_str` for merging strings.
-			ExprCmpt::String(s) if let Some(ExprCmpt::String(last)) = self.cmpts.last_mut() =>
-				last.to_mut().push_str(s),
+			ExprCmpt::String(s) => self.push_str(s),
 
-			cmpt => self.cmpts.push(cmpt.clone()),
+			cmpt @ (ExprCmpt::Alias(_) | ExprCmpt::Pattern(_)) => self.cmpts.push(cmpt.clone()),
 		}
 	}
 
@@ -84,7 +80,7 @@ impl Expr {
 	}
 
 	/// Converts this expression into a string, if it's compromised of only string components
-	pub fn try_into_string(self) -> Result<CowStr, Self> {
+	pub fn try_into_string(self) -> Result<ArcStr, Self> {
 		// If all components aren't strings, return Err
 		if !self.cmpts.iter().all(|cmpt| matches!(cmpt, ExprCmpt::String(_))) {
 			return Err(self);
@@ -101,7 +97,7 @@ impl Expr {
 		for cmpt in cmpts {
 			let cmpt = cmpt.try_into_string().expect("Component wasn't a string");
 			if !cmpt.is_empty() {
-				output.to_mut().push_str(&cmpt);
+				output.with_mut(|output| output.push_str(&cmpt));
 			}
 		}
 
@@ -109,15 +105,15 @@ impl Expr {
 	}
 
 	/// Creates a new expression from it's ast
-	pub fn new(expr: ast::Expr<'static>) -> Self {
+	pub fn new(zbuild_file: &ArcStr, expr: ast::Expr<'_>) -> Self {
 		let cmpts = expr
 			.cmpts
 			.into_iter()
 			.map(|cmpt| match cmpt {
-				ast::ExprCmpt::String(s) => ExprCmpt::String(CowStr::Borrowed(s)),
+				ast::ExprCmpt::String(s) => ExprCmpt::String(zbuild_file.slice_from_str(s)),
 				ast::ExprCmpt::Pattern(ast::Pattern { name, ops }) => ExprCmpt::Pattern(Pattern {
-					name,
-					ops: ops
+					name: zbuild_file.slice_from_str(name),
+					ops:  ops
 						.into_iter()
 						.map(|op| match op {
 							ast::PatternOp::NonEmpty => PatternOp::NonEmpty,
@@ -125,8 +121,8 @@ impl Expr {
 						.collect(),
 				}),
 				ast::ExprCmpt::Alias(ast::Alias { name, ops }) => ExprCmpt::Alias(Alias {
-					name,
-					ops: ops
+					name: zbuild_file.slice_from_str(name),
+					ops:  ops
 						.into_iter()
 						.map(|op| match op {
 							ast::AliasOp::DirName => AliasOp::DirName,
@@ -140,7 +136,7 @@ impl Expr {
 	}
 
 	/// Returns an expression that's just a string
-	pub fn string(value: impl Into<CowStr>) -> Self {
+	pub fn string(value: impl Into<ArcStr>) -> Self {
 		Self {
 			cmpts: vec![ExprCmpt::String(value.into())],
 		}

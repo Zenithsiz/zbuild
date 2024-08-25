@@ -4,7 +4,7 @@
 use {
 	crate::{
 		rules::{Expr, ExprCmpt, PatternOp},
-		util::CowStr,
+		util::ArcStr,
 		AppError,
 	},
 	std::{assert_matches::assert_matches, collections::BTreeMap},
@@ -18,8 +18,8 @@ use {
 pub fn match_expr(
 	expr: &Expr,
 	cmpts: &[ExprCmpt],
-	mut value: &str,
-) -> Result<Option<BTreeMap<CowStr, CowStr>>, AppError> {
+	mut value: ArcStr,
+) -> Result<Option<BTreeMap<ArcStr, ArcStr>>, AppError> {
 	let mut patterns = BTreeMap::new();
 
 	// Until `rhs` has anything to match left
@@ -65,10 +65,10 @@ pub fn match_expr(
 
 				// If we get here, match everything
 				// TODO: Borrow some cases?
-				let prev_value = patterns.insert(CowStr::Borrowed(pat.name), CowStr::Owned(value.to_owned()));
+				let prev_value = patterns.insert(pat.name.clone(), value);
 				assert_matches!(prev_value, None, "Found repeated pattern");
 				cur_cmpts = &[];
-				value = "";
+				value = ArcStr::default();
 			},
 
 			// If we have patterns on both sides, reject
@@ -82,7 +82,7 @@ pub fn match_expr(
 				unreachable!("Cannot match unexpanded alias: {alias:?}"),
 
 			// If we're empty, we match an empty string
-			[] => match value {
+			[] => match &*value {
 				"" => return Ok(Some(patterns)),
 				_ => return Ok(None),
 			},

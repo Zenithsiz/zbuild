@@ -1,13 +1,13 @@
 //! Pattern
 
 // Imports
-use std::fmt;
+use {crate::util::ArcStr, std::fmt};
 
 /// Alias
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Debug)]
 pub struct Alias {
 	/// Alias name
-	pub name: &'static str,
+	pub name: ArcStr,
 
 	/// Operators
 	pub ops: Vec<AliasOp>,
