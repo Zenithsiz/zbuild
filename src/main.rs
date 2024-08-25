@@ -14,7 +14,9 @@
 	try_trait_v2,
 	if_let_guard,
 	pattern,
-	unsigned_signed_diff
+	unsigned_signed_diff,
+	vec_into_raw_parts,
+	ptr_metadata
 )]
 // Lints
 #![allow(

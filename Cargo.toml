@@ -31,10 +31,8 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 [lints]
 
-# This project doesn't require unsafe code
-# Note: Although we don't use unsafe code, if we do in the future, `unsafe_op_in_unsafe_fn`
-#       should be denied, so we deny it already, despite it never triggering due to forbidding `rust.unsafe_code`
-rust.unsafe_code = "forbid"
+# This project doesn't require unsafe code (outside of some modules)
+rust.unsafe_code = "deny"
 rust.unsafe_op_in_unsafe_fn = "deny"
 
 # Group lints

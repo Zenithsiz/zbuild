@@ -1,12 +1,16 @@
 //! Arc string
 
+// Lints
+#![expect(unsafe_code, reason = "We need unsafe to implement our string 'cached' pointer")]
+
 // Imports
 use std::{
 	borrow::Borrow,
 	cmp,
 	fmt,
 	hash::{Hash, Hasher},
-	ops::{Deref, Range},
+	ops::Deref,
+	ptr::{self, NonNull},
 	str::pattern::{Pattern, ReverseSearcher},
 	sync::Arc,
 };
@@ -17,11 +21,15 @@ use std::{
 /// to allow for fast indexing and cloning.
 #[derive(Clone)]
 pub struct ArcStr {
-	/// Base string
-	base: Arc<str>,
+	/// This string's pointer
+	///
+	/// The string must *never* be mutated through this pointer,
+	/// due to it being possibly derived from a `&str`.
+	ptr: NonNull<str>,
 
-	/// Range
-	range: Range<usize>,
+	/// Inner
+	#[expect(clippy::rc_buffer, reason = "We need it for efficient conversion to/from `String`")]
+	inner: Arc<String>,
 }
 
 impl ArcStr {
@@ -31,35 +39,21 @@ impl ArcStr {
 	/// `s` must be derived from this string, else this method panics.
 	fn slice_from_str(&self, s: &str) -> Self {
 		// Get pointer ranges
-		let this = self.as_bytes().as_ptr_range();
-		let s = s.as_bytes().as_ptr_range();
+		let self_range = self.as_bytes().as_ptr_range();
+		let s_range = s.as_bytes().as_ptr_range();
 
-		let start_offset = s
-			.start
-			.addr()
-			.checked_signed_diff(this.start.addr())
-			.expect("Pointer difference overflowed");
-		let end_offset = s
-			.end
-			.addr()
-			.checked_signed_diff(this.end.addr())
-			.expect("Pointer difference overflowed");
-		assert!(start_offset >= 0 && end_offset <= 0, "Substring was larger than string");
-
-		let start = self
-			.range
-			.start
-			.checked_add_signed(start_offset)
-			.expect("Pointer addition overflowed");
-		let end = self
-			.range
-			.end
-			.checked_add_signed(end_offset)
-			.expect("Pointer addition overflowed");
+		assert!(
+			self_range.contains(&s_range.start) || s_range.start == self_range.end,
+			"String start was before this string"
+		);
+		assert!(
+			self_range.contains(&s_range.end) || s_range.end == self_range.end,
+			"String end was past this string"
+		);
 
 		Self {
-			base:  Arc::clone(&self.base),
-			range: start..end,
+			ptr:   NonNull::from(s),
+			inner: Arc::clone(&self.inner),
 		}
 	}
 
@@ -76,6 +70,13 @@ impl ArcStr {
 		(**self).strip_suffix(suffix).map(|s| self.slice_from_str(s))
 	}
 }
+
+// SAFETY: We're immutable, like `Arc`
+unsafe impl Send for ArcStr {}
+
+// SAFETY: See above in [`Send`] impl
+unsafe impl Sync for ArcStr {}
+
 
 impl PartialEq for ArcStr {
 	fn eq(&self, other: &Self) -> bool {
@@ -122,7 +123,8 @@ impl Deref for ArcStr {
 	type Target = str;
 
 	fn deref(&self) -> &Self::Target {
-		&self.base[self.range.clone()]
+		// SAFETY: `self.ptr` always contains a valid `str`.
+		unsafe { self.ptr.as_ref() }
 	}
 }
 
@@ -137,23 +139,35 @@ impl Borrow<str> for ArcStr {
 impl From<String> for ArcStr {
 	fn from(s: String) -> Self {
 		Self {
-			range: 0..s.len(),
-			base:  s.into(),
+			ptr:   NonNull::from(s.as_str()),
+			inner: Arc::new(s),
 		}
 	}
 }
 
 impl From<ArcStr> for String {
 	fn from(s: ArcStr) -> Self {
-		(*s).to_string()
+		match Arc::try_unwrap(s.inner) {
+			Ok(mut inner) => {
+				// Get the offset and length of our specific string
+				// SAFETY: `s.ptr` was derived from `inner.base_ptr`
+				let start = unsafe { s.ptr.as_ptr().byte_offset_from(inner.as_ptr()) };
+				let start = usize::try_from(start).expect("String pointer was before base pointer");
+				let len = ptr::metadata(s.ptr.as_ptr());
+
+				// And slice the string to fit
+				let _ = inner.drain(start + len..);
+				let _ = inner.drain(..start);
+
+				inner
+			},
+			Err(inner) => (*inner).clone(),
+		}
 	}
 }
 
 impl From<&str> for ArcStr {
 	fn from(s: &str) -> Self {
-		Self {
-			base:  Arc::from(s),
-			range: 0..s.len(),
-		}
+		s.to_owned().into()
 	}
 }
