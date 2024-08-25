@@ -159,7 +159,7 @@ impl From<ArcStr> for String {
 
 				inner
 			},
-			Err(inner) => (*inner).clone(),
+			Err(inner) => ArcStr { inner, ..s }.to_string(),
 		}
 	}
 }
