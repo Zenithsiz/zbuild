@@ -12,7 +12,6 @@ publish = ["filipejr"]
 
 anyhow = "1.0.86"
 async-broadcast = "0.7.1"
-async-recursion = "1.1.1"
 clap = { version = "4.5.15", features = ["derive"] }
 console-subscriber = { version = "0.4.0", optional = true }
 dashmap = "6.0.1"

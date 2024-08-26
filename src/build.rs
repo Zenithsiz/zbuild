@@ -330,7 +330,6 @@ impl Builder {
 
 	/// Builds a target without checking if the target is already being built.
 	#[expect(clippy::too_many_lines, reason = "TODO: Split this function onto smaller ones")]
-	#[async_recursion::async_recursion]
 	async fn build_unchecked(
 		&self,
 		target: &Target<ArcStr>,
@@ -676,8 +675,6 @@ impl Builder {
 
 	/// Executes a command
 	#[expect(unused_results, reason = "Due to the builder pattern of `Command`")]
-	#[expect(clippy::unused_self, reason = "It might be used in the future")]
-	#[async_recursion::async_recursion]
 	async fn exec_cmd(&self, rule_name: &str, cmd: &Command<ArcStr>) -> Result<(), AppError> {
 		// Process all arguments
 		let args = cmd
