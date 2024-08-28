@@ -95,11 +95,13 @@ impl Builder {
 	}
 
 	/// Returns all build results
-	pub fn into_build_results(self) -> IndexMap<ArcStr, Option<Result<BuildResult, ()>>> {
+	pub async fn build_results(&self) -> IndexMap<ArcStr, Option<Result<BuildResult, ()>>> {
 		self.rules_lock
-			.into_iter()
-			.map(|(rule, lock)| (rule.name, lock.into_res()))
+			.iter()
+			.map(async move |rule_lock| (rule_lock.key().name.clone(), rule_lock.value().res().await))
+			.collect::<FuturesUnordered<_>>()
 			.collect()
+			.await
 	}
 
 	/// Sends an event, if any are subscribers

@@ -187,7 +187,7 @@ async fn main() -> ExitResult {
 	);
 
 	// Finally print some statistics
-	let targets = builder.into_build_results();
+	let targets = builder.build_results().await;
 	let total_targets = targets.len();
 	let built_targets = targets
 		.iter()

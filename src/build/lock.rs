@@ -52,13 +52,9 @@ impl BuildLock {
 		}
 	}
 
-	/// Retrieves this lock's result by consuming the lock
-	pub fn into_res(self) -> Option<Result<BuildResult, ()>> {
-		// TODO: Not panic here
-		Arc::try_unwrap(self.state)
-			.expect("Leftover references when unwrapping build lock")
-			.into_inner()
-			.res
+	/// Retrieves this lock's result
+	pub async fn res(&self) -> Option<Result<BuildResult, ()>> {
+		self.state.read().await.res
 	}
 }
 
