@@ -63,7 +63,7 @@ use {
 	watcher::Watcher,
 };
 
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main]
 #[expect(clippy::too_many_lines, reason = "TODO: Split it up more")]
 async fn main() -> ExitResult {
 	// Get all args
@@ -95,6 +95,7 @@ async fn main() -> ExitResult {
 
 	// Build the rules
 	let rules = Rules::new(&zbuild_file, ast);
+	let rules = Arc::new(rules);
 	tracing::trace!(?rules, "Built rules");
 
 	// Get the max number of jobs we can execute at once
@@ -149,6 +150,7 @@ async fn main() -> ExitResult {
 	// Create the builder
 	// Note: We should stop builds on the first error if we're *not* watching.
 	let builder = Builder::new(jobs, !args.watch);
+	let builder = Arc::new(builder);
 
 	// Then create the watcher, if we're watching
 	let watcher = args
@@ -232,9 +234,9 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 
 /// Builds a target.
 async fn build_target<T: BuildableTargetInner + fmt::Display + fmt::Debug>(
-	builder: &Builder,
+	builder: &Arc<Builder>,
 	target: &rules::Target<T>,
-	rules: &Rules,
+	rules: &Arc<Rules>,
 	ignore_missing: bool,
 ) -> Result<(), AppError> {
 	tracing::debug!(%target, "Building target");
@@ -270,8 +272,8 @@ trait BuildableTargetInner: Sized {
 	/// Builds this target
 	async fn build(
 		target: &rules::Target<Self>,
-		builder: &Builder,
-		rules: &Rules,
+		builder: &Arc<Builder>,
+		rules: &Arc<Rules>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError>;
@@ -280,8 +282,8 @@ trait BuildableTargetInner: Sized {
 impl BuildableTargetInner for rules::Expr {
 	async fn build(
 		target: &rules::Target<Self>,
-		builder: &Builder,
-		rules: &Rules,
+		builder: &Arc<Builder>,
+		rules: &Arc<Rules>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError> {
@@ -295,8 +297,8 @@ impl BuildableTargetInner for rules::Expr {
 impl BuildableTargetInner for ArcStr {
 	async fn build(
 		target: &rules::Target<Self>,
-		builder: &Builder,
-		rules: &Rules,
+		builder: &Arc<Builder>,
+		rules: &Arc<Rules>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError> {

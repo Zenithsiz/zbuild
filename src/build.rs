@@ -22,12 +22,13 @@ use {
 		Expander,
 		Rules,
 	},
+	anyhow::Context,
 	dashmap::DashMap,
 	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
 	indexmap::IndexMap,
 	itertools::Itertools,
-	std::{borrow::Cow, collections::BTreeMap, ffi::OsStr, ops::Try, sync::Arc, time::SystemTime},
-	tokio::{fs, process, sync::Semaphore},
+	std::{borrow::Cow, collections::BTreeMap, ffi::OsStr, future::Future, ops::Try, sync::Arc, time::SystemTime},
+	tokio::{fs, process, sync::Semaphore, task},
 };
 
 /// Event
@@ -189,9 +190,9 @@ impl Builder {
 
 	/// Builds an expression-encoded target
 	pub async fn build_expr(
-		&self,
+		self: &Arc<Self>,
 		target: &Target<Expr>,
-		rules: &Rules,
+		rules: &Arc<Rules>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
@@ -207,10 +208,28 @@ impl Builder {
 	}
 
 	/// Builds a target
-	pub async fn build(
-		&self,
-		target: &Target<ArcStr>,
-		rules: &Rules,
+	// TODO: Remove this wrapper function once the compiler behaves.
+	#[expect(
+		clippy::manual_async_fn,
+		reason = "For some reason, without this wrapper, the compiler
+			can't see that `build_inner`'s future is `Send`"
+	)]
+	pub fn build<'a>(
+		self: &'a Arc<Self>,
+		target: &'a Target<ArcStr>,
+		rules: &'a Arc<Rules>,
+		ignore_missing: bool,
+		reason: BuildReason,
+	) -> impl Future<Output = Result<(BuildResult, Option<BuildLockDepGuard>), AppError>> + Send + 'a {
+		async move { self.build_inner(target, rules, ignore_missing, reason).await }
+	}
+
+	/// Inner function for [`Builder::build`]
+	#[expect(clippy::too_many_lines, reason = "TODO: Split it up more")]
+	pub async fn build_inner<'a>(
+		self: &'a Arc<Self>,
+		target: &'a Target<ArcStr>,
+		rules: &'a Arc<Rules>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
@@ -224,9 +243,10 @@ impl Builder {
 			},
 			ref target @ Target::Rule { .. } => target.clone(),
 		};
+		let target = Arc::new(target);
 
 		// Check if we're being built recursively, and if so, return error
-		reason.for_each(|parent_target| match &target == parent_target {
+		reason.for_each(|parent_target| match &*target == parent_target {
 			true => Err(AppError::FoundRecursiveRule {
 				target:         target.to_string(),
 				parent_targets: reason.collect_all().iter().map(Target::to_string).collect(),
@@ -236,7 +256,7 @@ impl Builder {
 
 		// Get the rule for the target
 		let Some((rule, target_rule)) = self.target_rule(&target, rules)? else {
-			match target {
+			match *target {
 				Target::File { ref file, .. } => match fs::symlink_metadata(&**file).await {
 					Ok(metadata) => {
 						let build_time = metadata.modified().map_err(AppError::get_file_modified_time(&**file))?;
@@ -262,10 +282,10 @@ impl Builder {
 						));
 					},
 					Err(err) =>
-						do yeet AppError::MissingFile {
+						return Err(AppError::MissingFile {
 							file_path: (**file).into(),
 							source:    err,
-						},
+						}),
 				},
 				// Note: If `target_rule` returns `Err` if this was a rule, so we can never reach here
 				Target::Rule { .. } => unreachable!(),
@@ -306,11 +326,24 @@ impl Builder {
 			}
 		};
 
-		// Else build
-		match self
-			.build_unchecked(&target, &rule, rules, ignore_missing, reason)
+		let res = task::Builder::new()
+			.name(&format!("Build {target}"))
+			.spawn({
+				let this = Arc::clone(self);
+				let target = Arc::clone(&target);
+				let rules = Arc::clone(rules);
+				async move {
+					this.build_unchecked(&target, &rule, &rules, ignore_missing, reason)
+						.await
+				}
+			})
+			.context("Unable to execute task")
+			.map_err(AppError::Other)?
 			.await
-		{
+			.context("Unable to join task")
+			.map_err(AppError::Other)?;
+
+		match res {
 			Ok(res) => {
 				build_guard.finish(res);
 
@@ -335,10 +368,10 @@ impl Builder {
 	/// Builds a target without checking if the target is already being built.
 	#[expect(clippy::too_many_lines, reason = "TODO: Split this function onto smaller ones")]
 	async fn build_unchecked(
-		&self,
+		self: &Arc<Self>,
 		target: &Target<ArcStr>,
 		rule: &Rule<ArcStr>,
-		rules: &Rules,
+		rules: &Arc<Rules>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<BuildResult, AppError> {
@@ -578,11 +611,11 @@ impl Builder {
 	///
 	/// Returns the latest modification date of the dependencies
 	async fn build_deps_file(
-		&self,
+		self: &Arc<Self>,
 		parent_target: &Target<ArcStr>,
 		deps_file: &str,
 		rule: &Rule<ArcStr>,
-		rules: &Rules,
+		rules: &Arc<Rules>,
 		ignore_missing: bool,
 		reason: &BuildReason,
 	) -> Result<Vec<(Target<ArcStr>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {

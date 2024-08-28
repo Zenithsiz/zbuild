@@ -87,7 +87,7 @@ impl Watcher {
 
 	/// Watches over all files and rebuilds any changed files
 	#[expect(clippy::too_many_lines, reason = "TODO: Refactor")]
-	pub async fn watch_rebuild(mut self, builder: &Builder, rules: &Rules, ignore_missing: bool) {
+	pub async fn watch_rebuild(mut self, builder: &Arc<Builder>, rules: &Arc<Rules>, ignore_missing: bool) {
 		let rev_deps = &self.rev_deps;
 		futures::future::join(
 			async move {
