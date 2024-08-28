@@ -82,11 +82,14 @@ pub struct Builder {
 
 impl Builder {
 	/// Creates a new builder
-	pub fn new(jobs: usize, rules: &Rules, stop_builds_on_first_err: bool) -> Result<Self, AppError> {
+	pub fn new(
+		jobs: usize,
+		rules: &Rules,
+		expander: Expander,
+		stop_builds_on_first_err: bool,
+	) -> Result<Self, AppError> {
 		let (event_tx, event_rx) = async_broadcast::broadcast(jobs);
 		let event_rx = event_rx.deactivate();
-
-		let expander = Expander::new();
 
 		// Create the rule output tree
 		let mut rule_output_tree = ExprTree::new();

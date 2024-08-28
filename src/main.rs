@@ -136,6 +136,9 @@ async fn run(args: Args) -> ExitResult {
 	let ast = serde_yaml::from_str::<Ast<'_>>(&zbuild_file).map_err(AppError::parse_yaml(&zbuild_path))?;
 	tracing::trace!(?ast, "Parsed ast");
 
+	// Create the expander
+	let expander = Expander::new();
+
 	// Build the rules
 	let rules = Rules::new(&zbuild_file, ast);
 	let rules = Arc::new(rules);
@@ -192,7 +195,7 @@ async fn run(args: Args) -> ExitResult {
 
 	// Create the builder
 	// Note: We should stop builds on the first error if we're *not* watching.
-	let builder = Builder::new(jobs, &rules, !args.watch)
+	let builder = Builder::new(jobs, &rules, expander, !args.watch)
 		.context("Unable to create builder")
 		.map_err(AppError::Other)?;
 	let builder = Arc::new(builder);
