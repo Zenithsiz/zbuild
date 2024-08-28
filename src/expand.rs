@@ -27,9 +27,13 @@ impl Expander {
 	}
 
 	/// Expands an expression to it's components
-	pub fn expand_expr(&self, expr: &Expr, visitor: &Visitor) -> Result<Expr, AppError> {
-		// Go through all components
-		expr.cmpts
+	pub fn expand_expr<T>(&self, expr: &Expr, visitor: &Visitor) -> Result<T, AppError>
+	where
+		T: TryFromExpr,
+	{
+		// First convert everything into an expression
+		let expr = expr
+			.cmpts
 			.iter()
 			.try_fold::<_, _, Result<_, _>>(Expr::empty(), |mut expr, cmpt| {
 				match cmpt {
@@ -55,7 +59,7 @@ impl Expander {
 						// If expanded, check if we need to apply any operations
 						FlowControl::ExpandTo(alias_expr) => match alias.ops.is_empty() {
 							// If not, just recursively expand it
-							true => expr.extend(self.expand_expr(alias_expr, visitor)?.cmpts),
+							true => expr.extend(self.expand_expr::<Expr>(alias_expr, visitor)?.cmpts),
 
 							// Else expand it to a string, then apply all operations
 							// Note: We expand to string even if we don't *need* to to ensure the user doesn't
@@ -63,7 +67,7 @@ impl Expander {
 							//       we can't resolve the operations.
 							false => {
 								// Expand
-								let value = self.expand_expr_string(alias_expr, visitor)?;
+								let value = self.expand_expr::<ArcStr>(alias_expr, visitor)?;
 
 								// Then apply all
 								let value = alias.ops.iter().try_fold(value, |mut value, &op| {
@@ -88,17 +92,10 @@ impl Expander {
 				};
 
 				Ok(expr)
-			})
-	}
+			})?;
 
-	/// Expands an expression into a string
-	pub fn expand_expr_string(&self, expr: &Expr, visitor: &Visitor) -> Result<ArcStr, AppError> {
-		self.expand_expr(expr, visitor)?
-			.try_into_string()
-			.map_err(|expr| AppError::UnresolvedAliasOrPats {
-				expr:       expr.to_string(),
-				expr_cmpts: expr.cmpts.into_iter().map(|cmpt| cmpt.to_string()).collect(),
-			})
+		// Then try to parse from the expression
+		T::try_from_expr(expr)
 	}
 
 	/// Expands an alias operation on the value of that alias
@@ -125,11 +122,14 @@ impl Expander {
 	}
 
 	/// Expands a rule of all it's aliases and patterns
-	pub fn expand_rule(&self, rule: &Rule<Expr>, visitor: &Visitor) -> Result<Rule<ArcStr>, AppError> {
+	pub fn expand_rule<T>(&self, rule: &Rule<Expr>, visitor: &Visitor) -> Result<Rule<T>, AppError>
+	where
+		T: TryFromExpr + Ord,
+	{
 		let aliases = rule
 			.aliases
 			.iter()
-			.map(|(name, expr)| Ok((name.clone(), self.expand_expr_string(expr, visitor)?)))
+			.map(|(name, expr)| Ok((name.clone(), self.expand_expr(expr, visitor)?)))
 			.collect::<ResultMultiple<_>>()?;
 
 		let output = rule
@@ -137,7 +137,7 @@ impl Expander {
 			.iter()
 			.map(|item: &OutItem<Expr>| match *item {
 				OutItem::File { ref file, is_deps_file } => Ok::<_, AppError>(OutItem::File {
-					file: self.expand_expr_string(file, visitor)?,
+					file: self.expand_expr(file, visitor)?,
 					is_deps_file,
 				}),
 			})
@@ -153,7 +153,7 @@ impl Expander {
 					is_static,
 					is_deps_file,
 				} => Ok::<_, AppError>(DepItem::File {
-					file: self.expand_expr_string(file, visitor)?,
+					file: self.expand_expr(file, visitor)?,
 					is_optional,
 					is_static,
 					is_deps_file,
@@ -161,15 +161,10 @@ impl Expander {
 				DepItem::Rule { ref name, ref pats } => {
 					let pats = pats
 						.iter()
-						.map(|(pat, expr)| {
-							Ok((
-								self.expand_expr_string(pat, visitor)?,
-								self.expand_expr_string(expr, visitor)?,
-							))
-						})
+						.map(|(pat, expr)| Ok((self.expand_expr(pat, visitor)?, self.expand_expr(expr, visitor)?)))
 						.collect::<ResultMultiple<_>>()?;
 					Ok::<_, AppError>(DepItem::Rule {
-						name: self.expand_expr_string(name, visitor)?,
+						name: self.expand_expr(name, visitor)?,
 						pats: Arc::new(pats),
 					})
 				},
@@ -195,19 +190,18 @@ impl Expander {
 	}
 
 	/// Expands a command
-	pub fn expand_cmd(&self, cmd: &Command<Expr>, visitor: &Visitor) -> Result<Command<ArcStr>, AppError> {
+	pub fn expand_cmd<T>(&self, cmd: &Command<Expr>, visitor: &Visitor) -> Result<Command<T>, AppError>
+	where
+		T: TryFromExpr,
+	{
 		Ok(Command {
-			cwd:  cmd
-				.cwd
-				.as_ref()
-				.map(|cwd| self.expand_expr_string(cwd, visitor))
-				.transpose()?,
+			cwd:  cmd.cwd.as_ref().map(|cwd| self.expand_expr(cwd, visitor)).transpose()?,
 			args: cmd
 				.args
 				.iter()
 				.map(|arg| {
 					let arg = match *arg {
-						CommandArg::Expr(ref expr) => CommandArg::Expr(self.expand_expr_string(expr, visitor)?),
+						CommandArg::Expr(ref expr) => CommandArg::Expr(self.expand_expr(expr, visitor)?),
 					};
 					Ok(arg)
 				})
@@ -216,12 +210,13 @@ impl Expander {
 	}
 
 	/// Expands a target expression
-	pub fn expand_target(&self, target: &Target<Expr>, visitor: &Visitor) -> Result<Target<ArcStr>, AppError> {
+	pub fn expand_target<T>(&self, target: &Target<Expr>, visitor: &Visitor) -> Result<Target<T>, AppError>
+	where
+		T: TryFromExpr,
+	{
 		let target = match *target {
 			Target::File { ref file, is_static } => Target::File {
-				file: self
-					.expand_expr_string(file, visitor)
-					.map_err(AppError::expand_expr(file))?,
+				file: self.expand_expr(file, visitor).map_err(AppError::expand_expr(file))?,
 				is_static,
 			},
 
@@ -231,15 +226,12 @@ impl Expander {
 					.map(|(pat, expr)| {
 						Ok((
 							pat.clone(),
-							self.expand_expr_string(expr, visitor)
-								.map_err(AppError::expand_expr(expr))?,
+							self.expand_expr(expr, visitor).map_err(AppError::expand_expr(expr))?,
 						))
 					})
 					.collect::<ResultMultiple<_>>()?;
 				Target::Rule {
-					rule: self
-						.expand_expr_string(rule, visitor)
-						.map_err(AppError::expand_expr(rule))?,
+					rule: self.expand_expr(rule, visitor).map_err(AppError::expand_expr(rule))?,
 					pats: Arc::new(pats),
 				}
 			},
@@ -249,7 +241,7 @@ impl Expander {
 	}
 }
 
-/// Flow control for [`Expander::expand_expr_string`]
+/// Flow control for [`Expander::expand_expr`]
 #[derive(Clone, Copy, Debug)]
 pub enum FlowControl<T> {
 	/// Expand to
@@ -270,6 +262,26 @@ impl<T> FlowControl<T> {
 			Self::Keep => FlowControl::Keep,
 			Self::Error => FlowControl::Error,
 		}
+	}
+}
+
+/// Trait for converting from an expression
+pub trait TryFromExpr: Sized {
+	fn try_from_expr(expr: Expr) -> Result<Self, AppError>;
+}
+
+impl TryFromExpr for Expr {
+	fn try_from_expr(expr: Expr) -> Result<Self, AppError> {
+		Ok(expr)
+	}
+}
+
+impl TryFromExpr for ArcStr {
+	fn try_from_expr(expr: Expr) -> Result<Self, AppError> {
+		expr.try_into_string().map_err(|expr| AppError::UnresolvedAliasOrPats {
+			expr:       expr.to_string(),
+			expr_cmpts: expr.cmpts.into_iter().map(|cmpt| cmpt.to_string()).collect(),
+		})
 	}
 }
 
