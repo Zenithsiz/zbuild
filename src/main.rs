@@ -45,6 +45,7 @@ use {
 		expand::Expander,
 		rules::Rules,
 	},
+	anyhow::Context,
 	args::Args,
 	clap::Parser,
 	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
@@ -55,17 +56,23 @@ use {
 		fmt,
 		fs,
 		path::{Path, PathBuf},
-		sync::Arc,
+		sync::{
+			atomic::{self, AtomicUsize},
+			Arc,
+		},
 		thread,
 		time::{Duration, SystemTime},
 	},
+	tokio::runtime,
 	util::ArcStr,
 	watcher::Watcher,
 };
 
-#[tokio::main]
-#[expect(clippy::too_many_lines, reason = "TODO: Split it up more")]
-async fn main() -> ExitResult {
+#[expect(
+	unused_results,
+	reason = "Runtime builder method provides a lot of unused `&mut Builder`"
+)]
+fn main() -> ExitResult {
 	// Get all args
 	let args = Args::parse();
 
@@ -73,6 +80,42 @@ async fn main() -> ExitResult {
 	logger::init(args.log_file.as_deref());
 	tracing::trace!(?args, "Arguments");
 
+	// Build the tokio runtime
+	let mut runtime_builder = runtime::Builder::new_multi_thread();
+	runtime_builder.enable_all().thread_name_fn(|| {
+		static NEXT_THREAD_ID: AtomicUsize = AtomicUsize::new(0);
+		let thread_id = NEXT_THREAD_ID.fetch_add(1, atomic::Ordering::AcqRel);
+		format!("tokio${thread_id}")
+	});
+
+	// Note: Although `worker_threads` can be controlled via `TOKIO_WORKER_THREADS`,
+	//       the max number of blocking threads cannot, but it's possible to cut down
+	//       time in half for some builds with this option, so we supply it.
+	if let Ok(max_blocking_threads) = env::var("TOKIO_MAX_BLOCKING_THREADS") {
+		match max_blocking_threads.parse() {
+			Ok(max_blocking_threads) => {
+				runtime_builder.max_blocking_threads(max_blocking_threads);
+			},
+			Err(err) => {
+				tracing::warn!(
+					?max_blocking_threads,
+					?err,
+					"Unable to parse `TOKIO_MAX_BLOCKING_THREADS`, using default"
+				);
+			},
+		}
+	}
+
+	let runtime = runtime_builder
+		.build()
+		.context("Failed building the Runtime")
+		.map_err(AppError::Other)?;
+
+	runtime.block_on(self::run(args))
+}
+
+#[expect(clippy::too_many_lines, reason = "TODO: Split it up more")]
+async fn run(args: Args) -> ExitResult {
 	// Find the zbuild location and change the current directory to it
 	// TODO: Not adjust the zbuild path and read it before?
 	let zbuild_path = match args.zbuild_path {
