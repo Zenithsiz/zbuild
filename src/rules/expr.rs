@@ -80,9 +80,8 @@ pub struct Expr {
 }
 
 impl Expr {
-	/// Creates an empty expression
-	// TODO: Rename this to `new` and have `new` be `from_ast`?
-	pub const fn empty() -> Self {
+	/// Creates a new, empty, expression
+	pub const fn new() -> Self {
 		Self { cmpts: vec![] }
 	}
 
@@ -143,7 +142,7 @@ impl Expr {
 	}
 
 	/// Creates a new expression from it's ast
-	pub fn new(zbuild_file: &ArcStr, expr: ast::Expr<'_>) -> Self {
+	pub fn from_ast(zbuild_file: &ArcStr, expr: ast::Expr<'_>) -> Self {
 		let cmpts = expr
 			.cmpts
 			.into_iter()
@@ -178,6 +177,12 @@ impl Expr {
 		Self {
 			cmpts: vec![ExprCmpt::String(value.into())],
 		}
+	}
+}
+
+impl Default for Expr {
+	fn default() -> Self {
+		Self::new()
 	}
 }
 

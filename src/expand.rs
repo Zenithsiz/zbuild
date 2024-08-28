@@ -35,7 +35,7 @@ impl Expander {
 		let expr = expr
 			.cmpts
 			.iter()
-			.try_fold::<_, _, Result<_, _>>(Expr::empty(), |mut expr, cmpt| {
+			.try_fold::<_, _, Result<_, _>>(Expr::new(), |mut expr, cmpt| {
 				match cmpt {
 					// If it's a string, we keep it
 					ExprCmpt::String(s) => expr.push_str(s),

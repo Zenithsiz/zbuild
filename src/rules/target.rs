@@ -47,14 +47,14 @@ impl<T> Target<T> {
 
 impl Target<Expr> {
 	/// Creates a new target from it's ast
-	pub fn new(zbuild_file: &ArcStr, ast: ast::Target<'_>) -> Self {
+	pub fn from_ast(zbuild_file: &ArcStr, ast: ast::Target<'_>) -> Self {
 		match ast {
 			ast::Target::File(file) => Self::File {
-				file:      Expr::new(zbuild_file, file),
+				file:      Expr::from_ast(zbuild_file, file),
 				is_static: false,
 			},
 			ast::Target::Rule { rule } => Self::Rule {
-				rule: Expr::new(zbuild_file, rule),
+				rule: Expr::from_ast(zbuild_file, rule),
 				pats: Arc::new(BTreeMap::new()),
 			},
 		}

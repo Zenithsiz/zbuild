@@ -29,19 +29,23 @@ pub struct Rule<T> {
 
 impl Rule<Expr> {
 	/// Creates a new rule from it's ast
-	pub fn new(zbuild_file: &ArcStr, name: ArcStr, rule: ast::Rule<'_>) -> Self {
+	pub fn from_ast(zbuild_file: &ArcStr, name: ArcStr, rule: ast::Rule<'_>) -> Self {
 		let aliases = rule
 			.aliases
 			.into_iter()
-			.map(|(alias, expr)| (zbuild_file.slice_from_str(alias), Expr::new(zbuild_file, expr)))
+			.map(|(alias, expr)| (zbuild_file.slice_from_str(alias), Expr::from_ast(zbuild_file, expr)))
 			.collect();
-		let output = rule.out.into_iter().map(|out| OutItem::new(zbuild_file, out)).collect();
+		let output = rule
+			.out
+			.into_iter()
+			.map(|out| OutItem::from_ast(zbuild_file, out))
+			.collect();
 		let deps = rule
 			.deps
 			.into_iter()
-			.map(|dep| DepItem::new(zbuild_file, dep))
+			.map(|dep| DepItem::from_ast(zbuild_file, dep))
 			.collect();
-		let exec = Exec::new(zbuild_file, rule.exec);
+		let exec = Exec::from_ast(zbuild_file, rule.exec);
 
 		Self {
 			name,
@@ -63,12 +67,12 @@ pub struct Exec<T> {
 
 impl Exec<Expr> {
 	/// Creates a new exec from it's ast
-	pub fn new(zbuild_file: &ArcStr, exec: ast::Exec<'_>) -> Self {
+	pub fn from_ast(zbuild_file: &ArcStr, exec: ast::Exec<'_>) -> Self {
 		Self {
 			cmds: exec
 				.cmds
 				.into_iter()
-				.map(|cmd| Command::new(zbuild_file, cmd))
+				.map(|cmd| Command::from_ast(zbuild_file, cmd))
 				.collect(),
 		}
 	}
@@ -87,15 +91,21 @@ pub struct Command<T> {
 
 impl Command<Expr> {
 	/// Creates a new command from it's ast
-	pub fn new(zbuild_file: &ArcStr, cmd: ast::Command<'_>) -> Self {
+	pub fn from_ast(zbuild_file: &ArcStr, cmd: ast::Command<'_>) -> Self {
 		match cmd {
 			ast::Command::OnlyArgs(args) => Self {
 				cwd:  None,
-				args: args.into_iter().map(|arg| CommandArg::new(zbuild_file, arg)).collect(),
+				args: args
+					.into_iter()
+					.map(|arg| CommandArg::from_ast(zbuild_file, arg))
+					.collect(),
 			},
 			ast::Command::Full { cwd, args } => Self {
-				cwd:  cwd.map(|cwd| Expr::new(zbuild_file, cwd)),
-				args: args.into_iter().map(|arg| CommandArg::new(zbuild_file, arg)).collect(),
+				cwd:  cwd.map(|cwd| Expr::from_ast(zbuild_file, cwd)),
+				args: args
+					.into_iter()
+					.map(|arg| CommandArg::from_ast(zbuild_file, arg))
+					.collect(),
 			},
 		}
 	}
@@ -110,9 +120,9 @@ pub enum CommandArg<T> {
 
 impl CommandArg<Expr> {
 	/// Creates a new command argument from it's ast
-	pub fn new(zbuild_file: &ArcStr, arg: ast::CommandArg<'_>) -> Self {
+	pub fn from_ast(zbuild_file: &ArcStr, arg: ast::CommandArg<'_>) -> Self {
 		match arg {
-			ast::CommandArg::Expr(expr) => Self::Expr(Expr::new(zbuild_file, expr)),
+			ast::CommandArg::Expr(expr) => Self::Expr(Expr::from_ast(zbuild_file, expr)),
 		}
 	}
 }

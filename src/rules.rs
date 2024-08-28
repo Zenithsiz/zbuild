@@ -47,23 +47,23 @@ pub struct Rules {
 impl Rules {
 	/// Creates all rules from the ast
 	#[must_use]
-	pub fn new(zbuild_file: &ArcStr, ast: Ast<'_>) -> Self {
+	pub fn from_ast(zbuild_file: &ArcStr, ast: Ast<'_>) -> Self {
 		let aliases = ast
 			.aliases
 			.into_iter()
-			.map(|(alias, value)| (zbuild_file.slice_from_str(alias), Expr::new(zbuild_file, value)))
+			.map(|(alias, value)| (zbuild_file.slice_from_str(alias), Expr::from_ast(zbuild_file, value)))
 			.collect();
 		let default = ast
 			.default
 			.into_iter()
-			.map(|target| Target::new(zbuild_file, target))
+			.map(|target| Target::from_ast(zbuild_file, target))
 			.collect();
 		let rules = ast
 			.rules
 			.into_iter()
 			.map(|(name, rule)| {
 				let name = zbuild_file.slice_from_str(name);
-				(name.clone(), Rule::new(zbuild_file, name, rule))
+				(name.clone(), Rule::from_ast(zbuild_file, name, rule))
 			})
 			.collect();
 

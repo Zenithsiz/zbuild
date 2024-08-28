@@ -140,7 +140,7 @@ async fn run(args: Args) -> ExitResult {
 	let expander = Expander::new();
 
 	// Build the rules
-	let rules = Rules::new(&zbuild_file, ast);
+	let rules = Rules::from_ast(&zbuild_file, ast);
 	let rules = Arc::new(rules);
 	tracing::trace!(?rules, "Built rules");
 
