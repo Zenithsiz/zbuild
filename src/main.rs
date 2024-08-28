@@ -192,7 +192,9 @@ async fn run(args: Args) -> ExitResult {
 
 	// Create the builder
 	// Note: We should stop builds on the first error if we're *not* watching.
-	let builder = Builder::new(jobs, !args.watch);
+	let builder = Builder::new(jobs, &rules, !args.watch)
+		.context("Unable to create builder")
+		.map_err(AppError::Other)?;
 	let builder = Arc::new(builder);
 
 	// Then create the watcher, if we're watching

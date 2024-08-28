@@ -2,21 +2,17 @@
 
 // Modules
 mod lock;
-mod match_expr;
 
 // Exports
 pub use lock::BuildResult;
 
 // Imports
 use {
-	self::{
-		lock::{BuildLock, BuildLockDepGuard},
-		match_expr::match_expr,
-	},
+	self::lock::{BuildLock, BuildLockDepGuard},
 	crate::{
 		error::ResultMultiple,
 		expand,
-		rules::{Command, CommandArg, DepItem, Expr, OutItem, Rule, Target},
+		rules::{Command, CommandArg, DepItem, Expr, ExprTree, OutItem, Rule, Target},
 		util::{self, ArcStr},
 		AppError,
 		Expander,
@@ -72,6 +68,11 @@ pub struct Builder {
 	/// All rules' build lock
 	rules_lock: DashMap<TargetRule, BuildLock>,
 
+	/// Rule output tree
+	///
+	/// Used to quickly find rules for a file
+	rule_output_tree: ExprTree<ArcStr>,
+
 	/// Execution semaphore
 	exec_semaphore: Semaphore,
 
@@ -81,18 +82,50 @@ pub struct Builder {
 
 impl Builder {
 	/// Creates a new builder
-	pub fn new(jobs: usize, stop_builds_on_first_err: bool) -> Self {
+	pub fn new(jobs: usize, rules: &Rules, stop_builds_on_first_err: bool) -> Result<Self, AppError> {
 		let (event_tx, event_rx) = async_broadcast::broadcast(jobs);
 		let event_rx = event_rx.deactivate();
 
-		Self {
+		let expander = Expander::new();
+
+		// Create the rule output tree
+		let mut rule_output_tree = ExprTree::new();
+		for (rule_name, rule) in &rules.rules {
+			for output in &rule.output {
+				// Expand the file first
+				// Expand all expressions in the output file
+				// Note: This doesn't expand patterns, so we can match those later
+				let output_file = match output {
+					OutItem::File { file: output_file, .. } => output_file,
+				};
+				let expand_visitor = expand::Visitor::from_aliases([&rule.aliases, &rules.aliases])
+					.with_default_pat(expand::FlowControl::Keep);
+				let output_file = expander.expand_expr(output_file, &expand_visitor)?;
+
+
+				// Then try to insert it
+				if let Some(prev_rule_name) = rule_output_tree
+					.insert(&output_file, rule_name.clone())
+					.context("Unable to add rule output to tree")
+					.map_err(AppError::Other)?
+				{
+					return Err(AppError::Other(anyhow::anyhow!(
+						"Multiple rules match the same output file: {output_file}\n  first rule: {prev_rule_name}\n  \
+						 second rule: {rule_name}"
+					)));
+				};
+			}
+		}
+
+		Ok(Self {
 			event_tx,
 			_event_rx: event_rx,
-			expander: Expander::new(),
+			expander,
 			rules_lock: DashMap::new(),
+			rule_output_tree,
 			exec_semaphore: Semaphore::new(jobs),
 			stop_builds_on_first_err,
-		}
+		})
 	}
 
 	/// Returns all build results
@@ -132,39 +165,39 @@ impl Builder {
 	) -> Result<Option<(Rule<ArcStr>, TargetRule)>, AppError> {
 		let target_rule = match *target {
 			// If we got a file, check which rule can make it
-			Target::File { ref file, .. } => match self.find_rule_for_file(file, rules)? {
-				Some((rule, pats)) => {
-					tracing::trace!(%target, %rule.name, "Found target rule");
-					let target_rule = TargetRule {
-						name: rule.name.clone(),
-						pats,
-					};
-					(rule, target_rule)
+			Target::File { ref file, .. } => match self.rule_output_tree.find(file) {
+				Some((name, pats)) => {
+					tracing::trace!(%target, %name, "Found target rule");
+					TargetRule {
+						name,
+						pats: Arc::new(pats),
+					}
 				},
 
 				None => return Ok(None),
 			},
 
 			// If we got a rule name with patterns, find it and replace all patterns
-			Target::Rule { ref rule, ref pats } => {
-				// Find the rule and expand it
-				let rule = rules.rules.get(&**rule).ok_or_else(|| AppError::UnknownRule {
-					rule_name: (**rule).to_owned(),
-				})?;
-				let expand_visitor = expand::Visitor::new([&rule.aliases, &rules.aliases], [pats]);
-				let rule = self
-					.expander
-					.expand_rule(rule, &expand_visitor)
-					.map_err(AppError::expand_rule(&*rule.name))?;
-				let target_rule = TargetRule {
-					name: rule.name.clone(),
-					pats: Arc::clone(pats),
-				};
-				(rule, target_rule)
+			Target::Rule { ref rule, ref pats } => TargetRule {
+				name: rule.clone(),
+				pats: Arc::clone(pats),
 			},
 		};
 
-		Ok(Some(target_rule))
+		// Find the rule and expand it
+		let rule = rules
+			.rules
+			.get(&*target_rule.name)
+			.ok_or_else(|| AppError::UnknownRule {
+				rule_name: (*target_rule.name).to_owned(),
+			})?;
+		let expand_visitor = expand::Visitor::new([&rule.aliases, &rules.aliases], [&target_rule.pats]);
+		let rule = self
+			.expander
+			.expand_rule(rule, &expand_visitor)
+			.map_err(AppError::expand_rule(&*rule.name))?;
+
+		Ok(Some((rule, target_rule)))
 	}
 
 	/// Resets a build
@@ -764,43 +797,6 @@ impl Builder {
 		tracing::trace!(target: "zbuild_exec", ?rule_name, ?program, ?args, ?duration, "Execution duration");
 
 		Ok(())
-	}
-
-	/// Finds a rule for `file`
-	// TODO: Not make this `O(N)` for the number of rules.
-	#[expect(clippy::type_complexity, reason = "TODO: Add some type aliases / struct")]
-	pub fn find_rule_for_file(
-		&self,
-		file: &ArcStr,
-		rules: &Rules,
-	) -> Result<Option<(Rule<ArcStr>, Arc<BTreeMap<ArcStr, ArcStr>>)>, AppError> {
-		for rule in rules.rules.values() {
-			for output in &rule.output {
-				// Expand all expressions in the output file
-				// Note: This doesn't expand patterns, so we can match those later
-				let output_file = match output {
-					OutItem::File { file: output_file, .. } => output_file,
-				};
-				let expand_visitor = expand::Visitor::from_aliases([&rule.aliases, &rules.aliases])
-					.with_default_pat(expand::FlowControl::Keep);
-				let output_file = self.expander.expand_expr(output_file, &expand_visitor)?;
-
-				// Then try to match the output file to the file we need to create
-				if let Some(rule_pats) = self::match_expr(&output_file, &output_file.cmpts, file.clone())? {
-					let rule_pats = Arc::new(rule_pats);
-
-					let expand_visitor = expand::Visitor::new([&rule.aliases, &rules.aliases], [&rule_pats]);
-					let rule = self
-						.expander
-						.expand_rule(rule, &expand_visitor)
-						.map_err(AppError::expand_rule(&*rule.name))?;
-					return Ok(Some((rule, rule_pats)));
-				}
-			}
-		}
-
-		// If we got here, there was no matching rule
-		Ok(None)
 	}
 }
 

@@ -11,7 +11,7 @@ mod target;
 // Exports
 pub use {
 	alias::AliasOp,
-	expr::{Expr, ExprCmpt},
+	expr::{Expr, ExprCmpt, ExprTree},
 	item::{DepItem, OutItem},
 	pattern::PatternOp,
 	rule::{Command, CommandArg, Exec, Rule},

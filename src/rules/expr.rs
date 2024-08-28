@@ -1,5 +1,11 @@
 //! Expressions
 
+// Modules
+pub mod expr_tree;
+
+// Exports
+pub use self::expr_tree::ExprTree;
+
 // Imports
 use {
 	super::{
@@ -24,12 +30,44 @@ pub enum ExprCmpt {
 }
 
 impl ExprCmpt {
-	/// Converts this expression into a string, if it's a string.
+	/// Returns `true` if the component is [`ExprCmpt::String`].
+	#[must_use]
+	pub const fn is_string(&self) -> bool {
+		matches!(self, Self::String(_))
+	}
+
+	/// Returns this expression as a string, if it is one.
+	#[must_use]
+	pub const fn as_string(&self) -> Option<&ArcStr> {
+		#[expect(clippy::wildcard_enum_match_arm, reason = "We only care about a specific variant")]
+		match self {
+			Self::String(v) => Some(v),
+			_ => None,
+		}
+	}
+
+	/// Converts this component into a string, if it's a string.
 	pub fn try_into_string(self) -> Result<ArcStr, Self> {
 		#[expect(clippy::wildcard_enum_match_arm, reason = "We only care about a specific variant")]
 		match self {
 			Self::String(v) => Ok(v),
 			_ => Err(self),
+		}
+	}
+
+	/// Returns `true` if the component is [`ExprCmpt::Pattern`].
+	#[must_use]
+	pub const fn is_pattern(&self) -> bool {
+		matches!(self, Self::Pattern(_))
+	}
+
+	/// Returns this expression as a pattern, if it is one.
+	#[must_use]
+	pub const fn as_pattern(&self) -> Option<&Pattern> {
+		#[expect(clippy::wildcard_enum_match_arm, reason = "We only care about a specific variant")]
+		match self {
+			Self::Pattern(v) => Some(v),
+			_ => None,
 		}
 	}
 }
