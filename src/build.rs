@@ -96,10 +96,10 @@ impl Builder {
 	}
 
 	/// Returns all build results
-	pub async fn build_results(&self) -> IndexMap<ArcStr, Option<Result<BuildResult, ()>>> {
+	pub async fn build_results(&self) -> IndexMap<TargetRule, Option<Result<BuildResult, ()>>> {
 		self.rules_lock
 			.iter()
-			.map(async move |rule_lock| (rule_lock.key().name.clone(), rule_lock.value().res().await))
+			.map(async move |rule_lock| (rule_lock.key().clone(), rule_lock.value().res().await))
 			.collect::<FuturesUnordered<_>>()
 			.collect()
 			.await
