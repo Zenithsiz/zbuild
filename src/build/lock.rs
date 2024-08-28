@@ -2,7 +2,15 @@
 
 // Imports
 use {
-	std::{assert_matches::assert_matches, sync::Arc, time::SystemTime},
+	std::{
+		assert_matches::assert_matches,
+		mem,
+		sync::{
+			atomic::{self, AtomicBool},
+			Arc,
+		},
+		time::SystemTime,
+	},
 	tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock},
 };
 
@@ -17,10 +25,13 @@ pub struct BuildResult {
 }
 
 /// Build state
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct BuildState {
 	/// Result
 	res: Option<Result<BuildResult, ()>>,
+
+	/// Whether someone has reserved a lock upgrade
+	upgrade_reserved: AtomicBool,
 }
 
 /// Build lock
@@ -34,7 +45,10 @@ impl BuildLock {
 	/// Creates a new build lock
 	pub fn new() -> Self {
 		Self {
-			state: Arc::new(RwLock::new(BuildState { res: None })),
+			state: Arc::new(RwLock::new(BuildState {
+				res:              None,
+				upgrade_reserved: AtomicBool::new(false),
+			})),
 		}
 	}
 
@@ -69,7 +83,7 @@ impl BuildLockBuildGuard {
 	/// Retrieves a target's result
 	///
 	/// Waits for any builders to finish
-	pub fn res(&self) -> Option<Result<BuildResult, ()>> {
+	pub fn _res(&self) -> Option<Result<BuildResult, ()>> {
 		self.state.res
 	}
 
@@ -111,5 +125,26 @@ impl BuildLockDepGuard {
 	/// Waits for any builders to finish
 	pub fn res(&self) -> Option<Result<BuildResult, ()>> {
 		self.state.res
+	}
+
+	/// Tries to upgrade this dependency lock to a build lock.
+	///
+	/// Returns `Err` if someone is already upgrading the lock.
+	pub async fn try_upgrade_into_build(self) -> Result<BuildLockBuildGuard, Self> {
+		// Try to reserve atomically, and if someone already reserved the upgrade, return `Err`
+		if self.state.upgrade_reserved.swap(true, atomic::Ordering::AcqRel) {
+			return Err(self);
+		}
+
+		// Otherwise, unlock and lock for building
+		// TODO: Check if there could be any consequences to performing an unlock first?
+		let state = Arc::clone(OwnedRwLockReadGuard::rwlock(&self.state));
+		mem::drop(self);
+		let mut state = state.write_owned().await;
+
+		// Then unset the reserve flag so we can get locked again in the future.
+		*state.upgrade_reserved.get_mut() = false;
+
+		Ok(BuildLockBuildGuard { state })
 	}
 }

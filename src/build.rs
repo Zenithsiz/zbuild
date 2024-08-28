@@ -279,30 +279,32 @@ impl Builder {
 			.or_insert_with(BuildLock::new)
 			.clone();
 
-		// Then check if we're already built
-		// Note: Tokio doesn't support lock upgrading, so we perform a double-checked lock
-		#[expect(irrefutable_let_patterns, reason = "We want to scope it to the `if` block")]
-		if let build_guard = build_lock.lock_dep().await &&
-			let Some(res) = build_guard.res()
-		{
-			return res
-				.map(|res| (res, Some(build_guard)))
-				.map_err(|()| AppError::BuildTarget {
-					source: None,
-					target: target.to_string(),
-				});
-		}
+		// Then check if we're built, and if not lock for building
+		let mut build_guard = loop {
+			// First check if we're done with a dependency lock
+			let build_guard = build_lock.lock_dep().await;
+			if let Some(res) = build_guard.res() {
+				return res
+					.map(|res| (res, Some(build_guard)))
+					.map_err(|()| AppError::BuildTarget {
+						source: None,
+						target: target.to_string(),
+					});
+			}
 
-		// Else lock it for building and re-check
-		let mut build_guard = build_lock.lock_build().await;
-		if let Some(res) = build_guard.res() {
-			return res
-				.map(|res| (res, Some(build_guard.into_dep())))
-				.map_err(|()| AppError::BuildTarget {
-					source: None,
-					target: target.to_string(),
-				});
-		}
+			// Otherwise, try to upgrade to a build lock
+			// Note: If we were unable to, that means someone else locked, so retry
+			//       and lock for dependency for when they finish
+			// Note: We drop the lock in the `Err` case, and then immediately try to
+			//       get it again at the start of the loop, but since the lock is *fair*,
+			//       the writer should have priority, so this shouldn't result in much
+			//       waiting for them.
+			let res = build_guard.try_upgrade_into_build().await;
+			match res {
+				Ok(build_guard) => break build_guard,
+				Err(_) => continue,
+			}
+		};
 
 		// Else build
 		match self

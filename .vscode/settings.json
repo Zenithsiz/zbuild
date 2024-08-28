@@ -13,6 +13,7 @@
     "oneshot",
     "petgraph",
     "PKGBUILD",
+    "rwlock",
     "smallvec",
     "thiserror",
     "yeet",
