@@ -3,7 +3,10 @@
 // Imports
 use {
 	super::Expr,
-	crate::{ast, util::ArcStr},
+	crate::{
+		ast,
+		util::{self, ArcStr},
+	},
 	std::{
 		collections::BTreeMap,
 		fmt,
@@ -57,6 +60,21 @@ impl Target<Expr> {
 				rule: Expr::from_ast(zbuild_file, rule),
 				pats: Arc::new(BTreeMap::new()),
 			},
+		}
+	}
+}
+
+impl Target<ArcStr> {
+	/// Normalizes this target.
+	///
+	/// If it's a file, the file name is normalized. Otherwise nothing is done.
+	pub fn normalized(self) -> Self {
+		match self {
+			Self::File { file, is_static } => Self::File {
+				file: util::normalize_path(&file).into(),
+				is_static,
+			},
+			target @ Self::Rule { .. } => target,
 		}
 	}
 }

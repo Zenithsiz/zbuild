@@ -261,7 +261,6 @@ impl Builder {
 	}
 
 	/// Inner function for [`Builder::build`]
-	#[expect(clippy::too_many_lines, reason = "TODO: Split it up more")]
 	pub async fn build_inner<'a>(
 		self: &'a Arc<Self>,
 		target: &'a Target<ArcStr>,
@@ -272,13 +271,7 @@ impl Builder {
 		tracing::trace!(%target, reason=?reason.0.as_ref().map(|reason| &reason.target), "Building target");
 
 		// Normalize file paths
-		let target = match *target {
-			Target::File { ref file, is_static } => Target::File {
-				file: util::normalize_path(file).into(),
-				is_static,
-			},
-			ref target @ Target::Rule { .. } => target.clone(),
-		};
+		let target = target.clone().normalized();
 		let target = Arc::new(target);
 
 		// Check if we're being built recursively, and if so, return error
