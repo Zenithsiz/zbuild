@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	crate::rules::{self, AliasOp, Command, Expr, Target},
+	crate::rules::{AliasOp, Command, Expr, Target},
 	itertools::{Itertools, Position as ItertoolsPos},
 	std::{
 		convert::Infallible,
@@ -586,13 +586,7 @@ decl_error! {
 
 /// Helper function to format a `Command` for errors
 fn cmd_to_string<T: fmt::Display>(cmd: &Command<T>) -> String {
-	let inner = cmd
-		.args
-		.iter()
-		.map(|arg| match arg {
-			rules::CommandArg::Expr(expr) => format!("\"{expr}\""),
-		})
-		.join(" ");
+	let inner = cmd.args.iter().map(|arg| format!("\"{arg}\"")).join(" ");
 	format!("[{inner}]")
 }
 

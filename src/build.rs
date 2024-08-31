@@ -13,7 +13,7 @@ use {
 	crate::{
 		error::ResultMultiple,
 		expand,
-		rules::{Command, CommandArg, DepItem, Expr, ExprTree, OutItem, Rule, Target},
+		rules::{Command, DepItem, Expr, ExprTree, OutItem, Rule, Target},
 		util::{self, ArcStr},
 		AppError,
 		Expander,
@@ -21,10 +21,10 @@ use {
 	},
 	anyhow::Context,
 	dashmap::DashMap,
-	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
+	futures::{stream::FuturesUnordered, StreamExt},
 	indexmap::IndexMap,
 	itertools::Itertools,
-	std::{borrow::Cow, collections::BTreeMap, ffi::OsStr, future::Future, sync::Arc, time::SystemTime},
+	std::{collections::BTreeMap, future::Future, sync::Arc, time::SystemTime},
 	tokio::{fs, process, sync::Semaphore, task},
 };
 
@@ -714,41 +714,21 @@ impl Builder {
 		};
 
 		for cmd in &rule.exec.cmds {
-			self.exec_cmd(&rule.name, cmd).await?;
+			self.exec_cmd(rule, cmd).await?;
 		}
 
 		Ok(())
 	}
 
-	/// Executes a command
+	/// Executes `cmd`.
 	#[expect(unused_results, reason = "Due to the builder pattern of `Command`")]
-	async fn exec_cmd(&self, rule_name: &str, cmd: &Command<ArcStr>) -> Result<(), AppError> {
-		// Process all arguments
-		let args = cmd
-			.args
-			.iter()
-			.map(move |arg| async move {
-				match arg {
-					CommandArg::Expr(arg) => Ok(Some(Cow::Borrowed(OsStr::new(&**arg)))),
-				}
-			})
-			.enumerate()
-			.map(|(idx, fut)| fut.map_ok(move |arg| (idx, arg)))
-			.collect::<FuturesUnordered<_>>()
-			.collect::<Vec<_>>()
-			.await
-			.into_iter()
-			.collect::<ResultMultiple<Vec<_>>>()?
-			.into_iter()
-			.sorted_by_key(|&(idx, _)| idx)
-			.filter_map(|(_, arg)| arg)
-			.collect::<Vec<_>>();
-
-		let (program, args) = args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
-			rule_name: rule_name.to_owned(),
+	async fn exec_cmd(&self, rule: &Rule<ArcStr>, cmd: &Command<ArcStr>) -> Result<(), AppError> {
+		// Get the program name
+		let (program, args) = cmd.args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
+			rule_name: rule.name.to_string(),
 		})?;
 
-		// Create the command
+		// Create the command and feed in all the arguments
 		let mut os_cmd = process::Command::new(&**program);
 		os_cmd.args(args.iter().map(|arg| &**arg));
 
@@ -758,9 +738,8 @@ impl Builder {
 		}
 
 		// Then spawn it and measure
-		tracing::debug!(target: "zbuild_exec", "{} {}",
-			program.to_string_lossy(),
-			args.iter().map(|arg| arg.to_string_lossy()).join(" ")
+		tracing::debug!(target: "zbuild_exec", "{program} {}",
+			args.iter().join(" ")
 		);
 		let (duration, ()) = util::try_measure_async(async {
 			os_cmd
@@ -771,7 +750,7 @@ impl Builder {
 				.map_err(AppError::command_failed(cmd))
 		})
 		.await?;
-		tracing::trace!(target: "zbuild_exec", ?rule_name, ?program, ?args, ?duration, "Execution duration");
+		tracing::trace!(target: "zbuild_exec", rule_name=?rule.name, ?program, ?args, ?duration, "Execution duration");
 
 		Ok(())
 	}

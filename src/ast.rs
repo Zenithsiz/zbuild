@@ -365,7 +365,7 @@ pub struct Exec<'a> {
 #[serde(untagged)]
 pub enum Command<'a> {
 	/// Only arguments
-	OnlyArgs(Vec<CommandArg<'a>>),
+	OnlyArgs(Vec<Expr<'a>>),
 
 	/// Full
 	Full {
@@ -375,16 +375,6 @@ pub enum Command<'a> {
 		cwd: Option<Expr<'a>>,
 
 		/// Arguments
-		args: Vec<CommandArg<'a>>,
+		args: Vec<Expr<'a>>,
 	},
-}
-
-/// Command argument
-#[derive(Clone, Debug)]
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(untagged)]
-pub enum CommandArg<'a> {
-	/// Expression
-	#[serde(borrow)]
-	Expr(Expr<'a>),
 }

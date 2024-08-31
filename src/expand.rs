@@ -4,7 +4,7 @@
 use {
 	crate::{
 		error::{AppError, ResultMultiple},
-		rules::{AliasOp, Command, CommandArg, DepItem, Exec, Expr, ExprCmpt, OutItem, Rule, Target},
+		rules::{AliasOp, Command, DepItem, Exec, Expr, ExprCmpt, OutItem, Rule, Target},
 		util::ArcStr,
 	},
 	indexmap::IndexMap,
@@ -199,12 +199,7 @@ impl Expander {
 			args: cmd
 				.args
 				.iter()
-				.map(|arg| {
-					let arg = match *arg {
-						CommandArg::Expr(ref expr) => CommandArg::Expr(self.expand_expr(expr, visitor)?),
-					};
-					Ok(arg)
-				})
+				.map(|arg| self.expand_expr(arg, visitor))
 				.collect::<ResultMultiple<_>>()?,
 		})
 	}

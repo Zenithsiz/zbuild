@@ -86,7 +86,7 @@ pub struct Command<T> {
 	pub cwd: Option<T>,
 
 	/// All arguments
-	pub args: Vec<CommandArg<T>>,
+	pub args: Vec<T>,
 }
 
 impl Command<Expr> {
@@ -95,34 +95,12 @@ impl Command<Expr> {
 		match cmd {
 			ast::Command::OnlyArgs(args) => Self {
 				cwd:  None,
-				args: args
-					.into_iter()
-					.map(|arg| CommandArg::from_ast(zbuild_file, arg))
-					.collect(),
+				args: args.into_iter().map(|arg| Expr::from_ast(zbuild_file, arg)).collect(),
 			},
 			ast::Command::Full { cwd, args } => Self {
 				cwd:  cwd.map(|cwd| Expr::from_ast(zbuild_file, cwd)),
-				args: args
-					.into_iter()
-					.map(|arg| CommandArg::from_ast(zbuild_file, arg))
-					.collect(),
+				args: args.into_iter().map(|arg| Expr::from_ast(zbuild_file, arg)).collect(),
 			},
-		}
-	}
-}
-
-/// Command argument
-#[derive(Clone, Debug)]
-pub enum CommandArg<T> {
-	/// Expression
-	Expr(T),
-}
-
-impl CommandArg<Expr> {
-	/// Creates a new command argument from it's ast
-	pub fn from_ast(zbuild_file: &ArcStr, arg: ast::CommandArg<'_>) -> Self {
-		match arg {
-			ast::CommandArg::Expr(expr) => Self::Expr(Expr::from_ast(zbuild_file, expr)),
 		}
 	}
 }
