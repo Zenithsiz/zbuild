@@ -275,13 +275,7 @@ impl Builder {
 		let target = Arc::new(target);
 
 		// Check if we're being built recursively, and if so, return error
-		reason.for_each(|parent_target| match &*target == parent_target {
-			true => Err(AppError::FoundRecursiveRule {
-				target:         target.to_string(),
-				parent_targets: reason.collect_all().iter().map(Target::to_string).collect(),
-			}),
-			false => Ok(()),
-		})?;
+		reason.check_recursively(&target)?;
 
 		// Get the rule for the target
 		let Some((rule, target_rule)) = self.target_rule(&target, rules)? else {
@@ -897,5 +891,19 @@ impl BuildReason {
 		}
 
 		targets
+	}
+
+	/// Checks for recursive targets.
+	///
+	/// Returns `Err` if `target` was already found somewhere in this build reason tree,
+	/// otherwise returns `Ok`.
+	fn check_recursively(&self, target: &Target<ArcStr>) -> Result<(), AppError> {
+		self.for_each(|parent_target| match target == parent_target {
+			true => Err(AppError::FoundRecursiveRule {
+				target:         target.to_string(),
+				parent_targets: self.collect_all().iter().map(Target::to_string).collect(),
+			}),
+			false => Ok(()),
+		})
 	}
 }
