@@ -2,9 +2,10 @@
 
 // Modules
 mod lock;
+mod reason;
 
 // Exports
-pub use lock::BuildResult;
+pub use self::{lock::BuildResult, reason::BuildReason};
 
 // Imports
 use {
@@ -23,7 +24,7 @@ use {
 	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
 	indexmap::IndexMap,
 	itertools::Itertools,
-	std::{borrow::Cow, collections::BTreeMap, ffi::OsStr, future::Future, ops::Try, sync::Arc, time::SystemTime},
+	std::{borrow::Cow, collections::BTreeMap, ffi::OsStr, future::Future, sync::Arc, time::SystemTime},
 	tokio::{fs, process, sync::Semaphore, task},
 };
 
@@ -268,7 +269,7 @@ impl Builder {
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
-		tracing::trace!(%target, reason=?reason.0.as_ref().map(|reason| &reason.target), "Building target");
+		tracing::trace!(%target, reason=?reason.target(), "Building target");
 
 		// Normalize file paths
 		let target = target.clone().normalized();
@@ -835,75 +836,4 @@ async fn rule_last_build_time(rule: &Rule<ArcStr>) -> Result<Option<SystemTime>,
 		.into_iter()
 		.min();
 	Ok(built_time)
-}
-
-/// Build reason inner
-#[derive(Clone, Debug)]
-pub struct BuildReasonInner {
-	/// Target
-	target: Target<ArcStr>,
-
-	/// Previous reason
-	prev: BuildReason,
-}
-
-/// Build reason
-#[derive(Clone, Debug)]
-pub struct BuildReason(Option<Arc<BuildReasonInner>>);
-
-impl BuildReason {
-	/// Creates an empty build reason
-	pub const fn empty() -> Self {
-		Self(None)
-	}
-
-	/// Adds a target to this build reason
-	pub fn with_target(&self, target: Target<ArcStr>) -> Self {
-		Self(Some(Arc::new(BuildReasonInner {
-			target,
-			prev: self.clone(),
-		})))
-	}
-
-	/// Iterates over all reasons
-	pub fn for_each<F, R>(&self, mut f: F) -> R
-	where
-		F: FnMut(&Target<ArcStr>) -> R,
-		R: Try<Output = ()>,
-	{
-		let mut reason = &self.0;
-		while let Some(inner) = reason {
-			f(&inner.target)?;
-			reason = &inner.prev.0;
-		}
-
-		R::from_output(())
-	}
-
-	/// Collects all reasons
-	pub fn collect_all(&self) -> Vec<Target<ArcStr>> {
-		let mut targets = vec![];
-
-		let mut reason = &self.0;
-		while let Some(inner) = reason {
-			targets.push(inner.target.clone());
-			reason = &inner.prev.0;
-		}
-
-		targets
-	}
-
-	/// Checks for recursive targets.
-	///
-	/// Returns `Err` if `target` was already found somewhere in this build reason tree,
-	/// otherwise returns `Ok`.
-	fn check_recursively(&self, target: &Target<ArcStr>) -> Result<(), AppError> {
-		self.for_each(|parent_target| match target == parent_target {
-			true => Err(AppError::FoundRecursiveRule {
-				target:         target.to_string(),
-				parent_targets: self.collect_all().iter().map(Target::to_string).collect(),
-			}),
-			false => Ok(()),
-		})
-	}
 }
