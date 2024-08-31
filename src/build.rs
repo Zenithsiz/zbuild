@@ -63,6 +63,9 @@ pub struct Builder {
 	//       it closes the channel, so we need to keep it around.
 	_event_rx: async_broadcast::InactiveReceiver<Event>,
 
+	/// Rules
+	rules: Rules,
+
 	/// Expander
 	expander: Expander,
 
@@ -85,7 +88,7 @@ impl Builder {
 	/// Creates a new builder
 	pub fn new(
 		jobs: usize,
-		rules: &Rules,
+		rules: Rules,
 		expander: Expander,
 		stop_builds_on_first_err: bool,
 	) -> Result<Self, AppError> {
@@ -124,6 +127,7 @@ impl Builder {
 		Ok(Self {
 			event_tx,
 			_event_rx: event_rx,
+			rules,
 			expander,
 			rules_lock: DashMap::new(),
 			rule_output_tree,
@@ -162,11 +166,7 @@ impl Builder {
 	}
 
 	/// Finds a target's rule
-	fn target_rule(
-		&self,
-		target: &Target<ArcStr>,
-		rules: &Rules,
-	) -> Result<Option<(Rule<ArcStr>, TargetRule)>, AppError> {
+	fn target_rule(&self, target: &Target<ArcStr>) -> Result<Option<(Rule<ArcStr>, TargetRule)>, AppError> {
 		let target_rule = match *target {
 			// If we got a file, check which rule can make it
 			Target::File { ref file, .. } => match self.rule_output_tree.find(file) {
@@ -189,13 +189,14 @@ impl Builder {
 		};
 
 		// Find the rule and expand it
-		let rule = rules
+		let rule = self
+			.rules
 			.rules
 			.get(&*target_rule.name)
 			.ok_or_else(|| AppError::UnknownRule {
 				rule_name: (*target_rule.name).to_owned(),
 			})?;
-		let expand_visitor = expand::Visitor::new([&rule.aliases, &rules.aliases], [&target_rule.pats]);
+		let expand_visitor = expand::Visitor::new([&rule.aliases, &self.rules.aliases], [&target_rule.pats]);
 		let rule = self
 			.expander
 			.expand_rule(rule, &expand_visitor)
@@ -205,9 +206,9 @@ impl Builder {
 	}
 
 	/// Resets a build
-	pub async fn reset_build(&self, target: &Target<ArcStr>, rules: &Rules) -> Result<(), AppError> {
+	pub async fn reset_build(&self, target: &Target<ArcStr>) -> Result<(), AppError> {
 		// Get the rule for the target
-		let Some((_, target_rule)) = self.target_rule(target, rules)? else {
+		let Some((_, target_rule)) = self.target_rule(target)? else {
 			return Ok(());
 		};
 
@@ -229,19 +230,18 @@ impl Builder {
 	pub async fn build_expr(
 		self: &Arc<Self>,
 		target: &Target<Expr>,
-		rules: &Arc<Rules>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
 		// Expand the target
-		let expand_visitor = expand::Visitor::from_aliases([&rules.aliases]);
+		let expand_visitor = expand::Visitor::from_aliases([&self.rules.aliases]);
 		let target = self
 			.expander
 			.expand_target(target, &expand_visitor)
 			.map_err(AppError::expand_target(target))?;
 
 		// Then build
-		self.build(&target, rules, ignore_missing, reason).await
+		self.build(&target, ignore_missing, reason).await
 	}
 
 	/// Builds a target
@@ -254,18 +254,16 @@ impl Builder {
 	pub fn build<'a>(
 		self: &'a Arc<Self>,
 		target: &'a Target<ArcStr>,
-		rules: &'a Arc<Rules>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> impl Future<Output = Result<(BuildResult, Option<BuildLockDepGuard>), AppError>> + Send + 'a {
-		async move { self.build_inner(target, rules, ignore_missing, reason).await }
+		async move { self.build_inner(target, ignore_missing, reason).await }
 	}
 
 	/// Inner function for [`Builder::build`]
 	pub async fn build_inner<'a>(
 		self: &'a Arc<Self>,
 		target: &'a Target<ArcStr>,
-		rules: &'a Arc<Rules>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
@@ -279,7 +277,7 @@ impl Builder {
 		reason.check_recursively(&target)?;
 
 		// Get the rule for the target
-		let Some((rule, target_rule)) = self.target_rule(&target, rules)? else {
+		let Some((rule, target_rule)) = self.target_rule(&target)? else {
 			match *target {
 				Target::File { ref file, .. } => match fs::symlink_metadata(&**file).await {
 					Ok(metadata) => {
@@ -355,11 +353,7 @@ impl Builder {
 			.spawn({
 				let this = Arc::clone(self);
 				let target = Arc::clone(&target);
-				let rules = Arc::clone(rules);
-				async move {
-					this.build_unchecked(&target, &rule, &rules, ignore_missing, reason)
-						.await
-				}
+				async move { this.build_unchecked(&target, &rule, ignore_missing, reason).await }
 			})
 			.context("Unable to execute task")
 			.map_err(AppError::Other)?
@@ -395,7 +389,6 @@ impl Builder {
 		self: &Arc<Self>,
 		target: &Target<ArcStr>,
 		rule: &Rule<ArcStr>,
-		rules: &Arc<Rules>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<BuildResult, AppError> {
@@ -521,7 +514,6 @@ impl Builder {
 							let (res, dep_guard) = self
 								.build(
 									&dep_target,
-									rules,
 									ignore_missing | matches!(dep, Dep::File { is_optional: true, .. }),
 									reason.with_target(target.clone()),
 								)
@@ -568,7 +560,7 @@ impl Builder {
 							exists: true,
 							..
 						} => self
-							.build_deps_file(target, file, rule, rules, ignore_missing, reason)
+							.build_deps_file(target, file, rule, ignore_missing, reason)
 							.await
 							.map_err(AppError::build_deps_file(&**file))?,
 						_ => vec![],
@@ -639,7 +631,6 @@ impl Builder {
 		parent_target: &Target<ArcStr>,
 		deps_file: &str,
 		rule: &Rule<ArcStr>,
-		rules: &Arc<Rules>,
 		ignore_missing: bool,
 		reason: &BuildReason,
 	) -> Result<Vec<(Target<ArcStr>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {
@@ -686,12 +677,7 @@ impl Builder {
 				};
 				async move {
 					let (res, dep_guard) = self
-						.build(
-							&dep_target,
-							rules,
-							ignore_missing,
-							reason.with_target(parent_target.clone()),
-						)
+						.build(&dep_target, ignore_missing, reason.with_target(parent_target.clone()))
 						.await
 						.map_err(AppError::build_target(&dep_target))?;
 

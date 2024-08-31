@@ -50,7 +50,6 @@ use {
 	clap::Parser,
 	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
 	std::{
-		borrow::Cow,
 		collections::BTreeMap,
 		env,
 		fmt,
@@ -141,7 +140,6 @@ async fn run(args: Args) -> ExitResult {
 
 	// Build the rules
 	let rules = Rules::from_ast(&zbuild_file, ast);
-	let rules = Arc::new(rules);
 	tracing::trace!(?rules, "Built rules");
 
 	// Get the max number of jobs we can execute at once
@@ -160,7 +158,7 @@ async fn run(args: Args) -> ExitResult {
 	// Then get all targets to build
 	let targets_to_build = match args.targets.is_empty() {
 		// If none were specified, use the default rules
-		true => Cow::Borrowed(rules.default.as_slice()),
+		true => rules.default.clone(),
 
 		// Else infer them as either rules or files
 		// TODO: Maybe be explicit about rule-name inferring?
@@ -195,7 +193,7 @@ async fn run(args: Args) -> ExitResult {
 
 	// Create the builder
 	// Note: We should stop builds on the first error if we're *not* watching.
-	let builder = Builder::new(jobs, &rules, expander, !args.watch)
+	let builder = Builder::new(jobs, rules, expander, !args.watch)
 		.context("Unable to create builder")
 		.map_err(AppError::Other)?;
 	let builder = Arc::new(builder);
@@ -218,8 +216,7 @@ async fn run(args: Args) -> ExitResult {
 			targets_to_build
 				.iter()
 				.map(|target| {
-					self::build_target(&builder, target, &rules, args.ignore_missing)
-						.map_err(|err| (target.clone(), err))
+					self::build_target(&builder, target, args.ignore_missing).map_err(|err| (target.clone(), err))
 				})
 				.collect::<FuturesUnordered<_>>()
 				.collect::<Vec<Result<(), _>>>()
@@ -231,7 +228,7 @@ async fn run(args: Args) -> ExitResult {
 		async {
 			if let Some(watcher) = watcher {
 				tracing::info!("Starting to watch for all targets");
-				watcher.watch_rebuild(&builder, &rules, args.ignore_missing).await;
+				watcher.watch_rebuild(&builder, args.ignore_missing).await;
 			}
 		}
 	);
@@ -284,14 +281,13 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 async fn build_target<T: BuildableTargetInner + fmt::Display + fmt::Debug>(
 	builder: &Arc<Builder>,
 	target: &rules::Target<T>,
-	rules: &Arc<Rules>,
 	ignore_missing: bool,
 ) -> Result<(), AppError> {
 	tracing::debug!(%target, "Building target");
 
 	// Try to build the target
 	let build_start_time = SystemTime::now();
-	let res = T::build(target, builder, rules, ignore_missing, BuildReason::empty()).await;
+	let res = T::build(target, builder, ignore_missing, BuildReason::empty()).await;
 
 	// Then check the status
 	match res {
@@ -321,7 +317,6 @@ trait BuildableTargetInner: Sized {
 	async fn build(
 		target: &rules::Target<Self>,
 		builder: &Arc<Builder>,
-		rules: &Arc<Rules>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError>;
@@ -331,12 +326,11 @@ impl BuildableTargetInner for rules::Expr {
 	async fn build(
 		target: &rules::Target<Self>,
 		builder: &Arc<Builder>,
-		rules: &Arc<Rules>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError> {
 		builder
-			.build_expr(target, rules, ignore_missing, reason)
+			.build_expr(target, ignore_missing, reason)
 			.await
 			.map(|(build_res, _)| build_res)
 	}
@@ -346,12 +340,11 @@ impl BuildableTargetInner for ArcStr {
 	async fn build(
 		target: &rules::Target<Self>,
 		builder: &Arc<Builder>,
-		rules: &Arc<Rules>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError> {
 		builder
-			.build(target, rules, ignore_missing, reason)
+			.build(target, ignore_missing, reason)
 			.await
 			.map(|(build_res, _)| build_res)
 	}

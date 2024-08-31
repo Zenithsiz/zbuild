@@ -8,7 +8,7 @@
 
 // Imports
 use {
-	crate::{build, rules::Target, util::ArcStr, AppError, Builder, Rules},
+	crate::{build, rules::Target, util::ArcStr, AppError, Builder},
 	anyhow::Context,
 	dashmap::{DashMap, DashSet},
 	futures::{stream::FuturesUnordered, StreamExt},
@@ -87,7 +87,7 @@ impl Watcher {
 
 	/// Watches over all files and rebuilds any changed files
 	#[expect(clippy::too_many_lines, reason = "TODO: Refactor")]
-	pub async fn watch_rebuild(mut self, builder: &Arc<Builder>, rules: &Arc<Rules>, ignore_missing: bool) {
+	pub async fn watch_rebuild(mut self, builder: &Arc<Builder>, ignore_missing: bool) {
 		let rev_deps = &self.rev_deps;
 		futures::future::join(
 			async move {
@@ -217,7 +217,7 @@ impl Watcher {
 					futures::join!(
 						async move {
 							builder
-								.reset_build(&rev_dep.target, rules)
+								.reset_build(&rev_dep.target)
 								.await
 								.expect("Unable to reset existing build");
 						},
@@ -225,7 +225,7 @@ impl Watcher {
 							.iter()
 							.map(move |target| async move {
 								builder
-									.reset_build(target, rules)
+									.reset_build(target)
 									.await
 									.expect("Unable to reset existing build");
 							})
@@ -244,7 +244,7 @@ impl Watcher {
 						.iter()
 						.map(|target| async {
 							#[expect(clippy::let_underscore_must_use, reason = "We don't care if the build succeeds")]
-							let _: Result<(), _> = crate::build_target(builder, target, rules, ignore_missing).await;
+							let _: Result<(), _> = crate::build_target(builder, target, ignore_missing).await;
 						})
 						.collect::<FuturesUnordered<_>>()
 						.collect::<()>()
