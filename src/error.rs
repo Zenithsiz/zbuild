@@ -528,7 +528,7 @@ decl_error! {
 
 	/// Dependencies file missing rule name
 	#[source(None)]
-	#[fmt("Dependencies file {deps_file_path:?} is missing the rule name {rule_name}, found {dep_output}")]
+	#[fmt("Dependencies file {deps_file_path:?} is missing the rule name {rule_name:?}, found {dep_output:?}")]
 	DepFileMissingRuleName {
 		/// Dep file path
 		deps_file_path: PathBuf,
@@ -542,7 +542,7 @@ decl_error! {
 
 	/// Dependencies file missing rule name
 	#[source(None)]
-	#[fmt("Dependencies file {deps_file_path:?} is missing any output of {rule_outputs:?}, found {dep_output}")]
+	#[fmt("Dependencies file {deps_file_path:?} is missing any output of {rule_outputs:?}, found {dep_output:?}")]
 	DepFileMissingOutputs {
 		/// Dep file path
 		deps_file_path: PathBuf,
@@ -552,6 +552,14 @@ decl_error! {
 
 		/// Dependency
 		dep_output: String,
+	},
+
+	/// Dependencies file empty
+	#[source(None)]
+	#[fmt("Dependencies file {deps_file_path:?} had no dependencies")]
+	DepFileEmpty {
+		/// Dep file path
+		deps_file_path: PathBuf,
 	},
 
 	/// Rule executable was empty

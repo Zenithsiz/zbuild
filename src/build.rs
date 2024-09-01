@@ -24,7 +24,12 @@ use {
 	futures::{stream::FuturesUnordered, StreamExt},
 	indexmap::IndexMap,
 	itertools::Itertools,
-	std::{collections::BTreeMap, future::Future, sync::Arc, time::SystemTime},
+	std::{
+		collections::{BTreeMap, HashMap},
+		future::Future,
+		sync::Arc,
+		time::SystemTime,
+	},
 	tokio::{fs, process, sync::Semaphore, task},
 };
 
@@ -635,39 +640,68 @@ impl Builder {
 		reason: &BuildReason,
 	) -> Result<Vec<(Target<ArcStr>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {
 		tracing::trace!(target=?parent_target, ?rule.name, ?deps_file, "Building dependencies of target rule dependency-file");
-		let (output, deps) = self::parse_deps_file(deps_file).await?;
+		let mut deps = self::parse_deps_file(deps_file).await?;
+		tracing::trace!(target=?parent_target, ?rule.name, ?deps_file, ?deps, "Found dependencies of target rule dependency-file");
 
-		match rule.output.is_empty() {
+		// Ensure that at least one dependency output matches the rule
+		let matches_rule = |output: &str| match rule.output.is_empty() {
 			// If there were no outputs, make sure it matches the rule name
 			// TODO: Seems kinda weird for it to match the rule name, but not sure how else to check this here
-			true =>
-				if output != *rule.name {
-					return Err(AppError::DepFileMissingRuleName {
-						deps_file_path: deps_file.into(),
-						rule_name:      rule.name.to_string(),
-						dep_output:     output,
-					});
-				},
+			true => (output == &*rule.name)
+				.then_some(())
+				.ok_or_else(|| AppError::DepFileMissingRuleName {
+					deps_file_path: deps_file.into(),
+					rule_name:      rule.name.to_string(),
+					dep_output:     output.to_owned(),
+				}),
 
 			// If there were any output, make sure the dependency file applies to one of them
-			false => {
-				let any_matches = rule.output.iter().any(|out| match out {
-					OutItem::File { file, .. } => **file == output,
+			false => rule
+				.output
+				.iter()
+				.any(|out| match out {
+					OutItem::File { file, .. } => &**file == output,
+				})
+				.then_some(())
+				.ok_or_else(|| AppError::DepFileMissingOutputs {
+					deps_file_path: deps_file.into(),
+					rule_outputs:   rule.output.iter().map(OutItem::to_string).collect(),
+					dep_output:     output.to_owned(),
+				}),
+		};
+
+		// Find all outputs that match and those that don't match
+		let (oks, errs) = deps
+			.keys()
+			.map(|output| matches_rule(output).map_err(|err| (output.clone(), err)))
+			.partition_result::<Vec<_>, Vec<_>, _, _>();
+		match oks.is_empty() {
+			true => {
+				// If we had no matching outputs, try to return all errors
+				errs.into_iter()
+					.map(|(_, err)| Err(err))
+					.collect::<ResultMultiple<()>>()?;
+
+				// If no errors existed, return an error for that
+				return Err(AppError::DepFileEmpty {
+					deps_file_path: deps_file.into(),
 				});
-				if !any_matches {
-					return Err(AppError::DepFileMissingOutputs {
-						deps_file_path: deps_file.into(),
-						rule_outputs:   rule.output.iter().map(OutItem::to_string).collect(),
-						dep_output:     output,
-					});
-				}
 			},
+
+			// Otherwise, just log and remove all errors
+			false =>
+				for (output, err) in errs {
+					let _: Vec<_> = deps.remove(&output).expect("Dependency should exist");
+
+					tracing::warn!(target=%parent_target, ?rule.name, err=%err.pretty(), "Ignoring unknown output in dependency file");
+				},
 		}
 
 		// Build all dependencies
 		// Note: We don't want to fail-early, see the note on `deps` in `build_unchecked`
 		let deps_res = deps
 			.into_iter()
+			.flat_map(|(_, deps)| deps)
 			.map(|dep| {
 				let dep = ArcStr::from(util::normalize_path(&dep));
 				tracing::trace!(?rule.name, ?dep, "Found rule dependency");
@@ -757,19 +791,35 @@ impl Builder {
 }
 
 /// Parses a dependencies file
-// TODO: Support multiple dependencies in each file
-async fn parse_deps_file(file: &str) -> Result<(String, Vec<String>), AppError> {
+async fn parse_deps_file(file: &str) -> Result<HashMap<ArcStr, Vec<ArcStr>>, AppError> {
 	// Read it
-	let contents = fs::read_to_string(file).await.map_err(AppError::read_file(file))?;
+	let mut contents = fs::read_to_string(file).await.map_err(AppError::read_file(file))?;
 
-	// Parse it
-	let (output, deps) = contents.split_once(':').ok_or_else(|| AppError::DepFileMissingColon {
-		deps_file_path: file.into(),
-	})?;
-	let output = output.trim().to_owned();
-	let deps = deps.split_whitespace().map(str::to_owned).collect();
+	// Replace all backslashes at the end of a line with spaces
+	// Note: Although it'd be fine to replace it with a single space, by replacing it
+	//       with two, we avoid having to move the string contents
+	util::string_replace_in_place_with(&mut contents, "\\\n", "  ");
 
-	Ok((output, deps))
+	// Now go through all non-empty lines and parse them
+	let deps = contents
+		.lines()
+		.filter_map(|line| {
+			let line = line.trim();
+			(!line.is_empty()).then_some(line)
+		})
+		.map(|line| {
+			// Parse it
+			let (output, deps) = line.split_once(':').ok_or_else(|| AppError::DepFileMissingColon {
+				deps_file_path: file.into(),
+			})?;
+			let output = ArcStr::from(output.trim());
+			let deps = deps.split_whitespace().map(ArcStr::from).collect();
+
+			Ok((output, deps))
+		})
+		.collect::<ResultMultiple<_>>()?;
+
+	Ok(deps)
 }
 
 /// Returns the last build time of a rule.
