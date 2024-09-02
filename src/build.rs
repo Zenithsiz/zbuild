@@ -145,7 +145,7 @@ impl Builder {
 	pub async fn build_results(&self) -> IndexMap<TargetRule, Option<Result<BuildResult, ()>>> {
 		self.rules_lock
 			.iter()
-			.map(async move |rule_lock| (rule_lock.key().clone(), rule_lock.value().res().await))
+			.map(|rule_lock| async move { (rule_lock.key().clone(), rule_lock.value().res().await) })
 			.collect::<FuturesUnordered<_>>()
 			.collect()
 			.await

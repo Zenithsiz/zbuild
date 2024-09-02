@@ -1,5 +1,11 @@
 //! Ast
 
+// Lints
+#![expect(
+	clippy::absolute_paths, // TODO: Remove once this false positive goes away
+	reason = "The expansion of `serde::{Serialize, Deserialize}` causes this and we can't do anything about it."
+)]
+
 // Imports
 use {indexmap::IndexMap, itertools::Itertools, serde::de::Error};
 
