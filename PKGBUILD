@@ -1,6 +1,6 @@
 # Maintainer: Filipe Rodrigues <filipejacintorodrigues1@gmail.com>
 pkgname=zbuild
-pkgver=0.1.8
+pkgver=0.1.9
 pkgrel=1
 pkgdesc="A make-like generic build system "
 arch=('x86_64')
