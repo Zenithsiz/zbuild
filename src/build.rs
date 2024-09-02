@@ -353,18 +353,16 @@ impl Builder {
 			}
 		};
 
-		let res = task::Builder::new()
-			.name(&format!("Build {target}"))
-			.spawn({
-				let this = Arc::clone(self);
-				let target = Arc::clone(&target);
-				async move { this.build_unchecked(&target, &rule, ignore_missing, reason).await }
-			})
-			.context("Unable to execute task")
-			.map_err(AppError::Other)?
-			.await
-			.context("Unable to join task")
-			.map_err(AppError::Other)?;
+		// TODO: Use `task::Builder` once we don't have issues with the
+		//       `PKGBUILD` not passing `tokio_unstable` to `rustc` for some reason.
+		let res = task::spawn({
+			let this = Arc::clone(self);
+			let target = Arc::clone(&target);
+			async move { this.build_unchecked(&target, &rule, ignore_missing, reason).await }
+		})
+		.await
+		.context("Unable to join task")
+		.map_err(AppError::Other)?;
 
 		match res {
 			Ok(res) => {
