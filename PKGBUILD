@@ -22,14 +22,14 @@ build() {
 	cd "$pkgname-$pkgver"
 
 	export RUSTUP_TOOLCHAIN=nightly
-	cargo build --frozen --release --all-features
+	cargo build --frozen --release
 }
 
 check() {
 	cd "$pkgname-$pkgver"
 
 	export RUSTUP_TOOLCHAIN=nightly
-	cargo test --frozen --all-features
+	cargo test --frozen
 }
 
 package() {
