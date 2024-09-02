@@ -1,7 +1,13 @@
 //! Ast
 
+// Lints
+#![expect(
+	clippy::absolute_paths, // TODO: Remove once this false positive goes away
+	reason = "The expansion of `serde::{Serialize, Deserialize}` causes this and we can't do anything about it."
+)]
+
 // Imports
-use {itertools::Itertools, serde::de::Error, std::collections::HashMap};
+use {indexmap::IndexMap, itertools::Itertools, serde::de::Error};
 
 /// Zbuild ast
 #[derive(Clone, Debug)]
@@ -11,7 +17,7 @@ pub struct Ast<'a> {
 	#[serde(rename = "alias")]
 	#[serde(default)]
 	#[serde(borrow)]
-	pub aliases: HashMap<&'a str, Expr<'a>>,
+	pub aliases: IndexMap<&'a str, Expr<'a>>,
 
 	/// Default target
 	#[serde(default)]
@@ -20,7 +26,7 @@ pub struct Ast<'a> {
 
 	/// Rules
 	#[serde(borrow)]
-	pub rules: HashMap<&'a str, Rule<'a>>,
+	pub rules: IndexMap<&'a str, Rule<'a>>,
 }
 
 /// Output Item
@@ -56,7 +62,7 @@ pub enum DepItem<'a> {
 		/// All patterns to expand the rule with
 		#[serde(default)]
 		#[serde(borrow)]
-		pats: HashMap<Expr<'a>, Expr<'a>>,
+		pats: IndexMap<Expr<'a>, Expr<'a>>,
 	},
 
 	/// Dependencies file
@@ -331,7 +337,7 @@ pub struct Rule<'a> {
 	#[serde(rename = "alias")]
 	#[serde(default)]
 	#[serde(borrow)]
-	pub aliases: HashMap<&'a str, Expr<'a>>,
+	pub aliases: IndexMap<&'a str, Expr<'a>>,
 
 	/// Output items
 	#[serde(default)]
@@ -365,7 +371,7 @@ pub struct Exec<'a> {
 #[serde(untagged)]
 pub enum Command<'a> {
 	/// Only arguments
-	OnlyArgs(Vec<CommandArg<'a>>),
+	OnlyArgs(Vec<Expr<'a>>),
 
 	/// Full
 	Full {
@@ -375,38 +381,6 @@ pub enum Command<'a> {
 		cwd: Option<Expr<'a>>,
 
 		/// Arguments
-		args: Vec<CommandArg<'a>>,
-	},
-}
-
-/// Command argument
-#[derive(Clone, Debug)]
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(untagged)]
-pub enum CommandArg<'a> {
-	/// Expression
-	#[serde(borrow)]
-	Expr(Expr<'a>),
-
-	/// Command
-	#[serde(borrow)]
-	Command(Command<'a>),
-
-	/// Command full
-	CommandFull {
-		/// Strip the command if failed
-		strip_on_fail: bool,
-
-		/// Command
-		#[serde(borrow)]
-		cmd: Command<'a>,
-	},
-
-	/// Strip on fail
-	StripOnFail {
-		/// Command
-		#[serde(rename = "strip_on_fail")]
-		#[serde(borrow)]
-		cmd: Command<'a>,
+		args: Vec<Expr<'a>>,
 	},
 }

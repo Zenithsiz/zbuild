@@ -6,14 +6,18 @@
     "dashmap",
     "debouncer",
     "filetime",
+    "indexmap",
     "itertools",
     "mapref",
     "npath",
     "oneshot",
     "petgraph",
     "PKGBUILD",
+    "rwlock",
+    "smallvec",
     "thiserror",
     "yeet",
     "Zbuild"
-  ]
+  ],
+  "rust-analyzer.cargo.features": "all"
 }

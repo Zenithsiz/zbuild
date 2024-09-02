@@ -1,22 +1,26 @@
 //! Utilities
 
+// Modules
+pub mod arc_str;
+
+// Exports
+pub use self::arc_str::ArcStr;
+
 // Imports
 use {
 	futures::Future,
 	pin_project::pin_project,
 	std::{
-		borrow::Cow,
 		io,
+		mem,
 		path::{self, Path, PathBuf},
 		pin::Pin,
+		str::pattern::Pattern,
 		task,
 		time::{Duration, Instant},
 	},
 	tokio::fs,
 };
-
-/// Alias for `Cow<'a, str>`
-pub type CowStr<'a> = Cow<'a, str>;
 
 /// Chains together any number of `IntoIterator`s
 pub macro chain {
@@ -112,6 +116,37 @@ pub fn normalize_path(path: &str) -> String {
 	}
 
 	path
+}
+
+/// In-place replaces matching parts of a string.
+#[expect(
+	clippy::needless_pass_by_value,
+	reason = "It's more ergonomic to pass patterns by value"
+)]
+pub fn string_replace_in_place_with<P>(s: &mut String, pat: P, replace_with: &str)
+where
+	P: Pattern + Clone,
+{
+	let mut cur_idx = 0;
+	let mut matches = s.match_indices(pat.clone());
+
+	// Find all matches, replacing the range as we go.
+	#[expect(
+		clippy::string_slice,
+		reason = "The index will always be valid, as it's the end of the string returned by `match_indices`, which \
+		          must return substrings of the string"
+	)]
+	while let Some((pos, part)) = matches.next() {
+		// Replace the range
+		mem::drop(matches);
+		s.replace_range(cur_idx + pos..cur_idx + pos + part.len(), replace_with);
+
+		// After replacing `...ABC` with `...DEF`, put ourselves as the end of
+		// the string we just replaced, to avoid recursively replacing the same
+		// pattern over and over.
+		cur_idx += pos + replace_with.len();
+		matches = s[cur_idx..].match_indices(pat.clone());
+	}
 }
 
 #[cfg(test)]

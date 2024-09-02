@@ -1,3 +1,13 @@
+# 0.1.9
+
+# Major
+
+- `zbuild` can now use multiple threads to resolve dependencies.
+
+- (BREAKING) Removed ability to use command's stdout as an argument.
+
+- Dependency file parser now supports backslashes at the end of the line to continue the line, as well as multiple dependencies in the same file.
+
 # 0.1.8
 
 # Minor

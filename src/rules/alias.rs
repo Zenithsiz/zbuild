@@ -1,27 +1,27 @@
 //! Pattern
 
 // Imports
-use std::fmt;
+use {crate::util::ArcStr, std::fmt};
 
 /// Alias
-#[derive(PartialEq, Eq, Clone, Hash, Debug)]
-pub struct Alias<'s> {
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Debug)]
+pub struct Alias {
 	/// Alias name
-	pub name: &'s str,
+	pub name: ArcStr,
 
 	/// Operators
 	pub ops: Vec<AliasOp>,
 }
 
 /// Alias operator
-#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
 pub enum AliasOp {
 	/// Directory name
 	DirName,
 }
 
 
-impl fmt::Display for Alias<'_> {
+impl fmt::Display for Alias {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "$({}", self.name)?;
 

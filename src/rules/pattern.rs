@@ -1,26 +1,26 @@
 //! Pattern
 
 // Imports
-use std::fmt;
+use {crate::util::ArcStr, std::fmt};
 
 /// Pattern
-#[derive(PartialEq, Eq, Clone, Hash, Debug)]
-pub struct Pattern<'s> {
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Debug)]
+pub struct Pattern {
 	/// Pattern name
-	pub name: &'s str,
+	pub name: ArcStr,
 
 	/// Operators
 	pub ops: Vec<PatternOp>,
 }
 
 /// Pattern operator
-#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
 pub enum PatternOp {
 	/// Non-empty
 	NonEmpty,
 }
 
-impl fmt::Display for Pattern<'_> {
+impl fmt::Display for Pattern {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "^({}", self.name)?;
 

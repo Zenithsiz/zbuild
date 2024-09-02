@@ -1,84 +1,86 @@
 //! Build
 
 // Modules
-mod expand_visitor;
 mod lock;
-mod match_expr;
+mod reason;
 
 // Exports
-pub use lock::BuildResult;
+pub use self::{lock::BuildResult, reason::BuildReason};
 
 // Imports
 use {
-	self::{
-		expand_visitor::{GlobalVisitor, RuleOutputVisitor, RuleVisitor},
-		lock::{BuildLock, BuildLockDepGuard},
-		match_expr::match_expr,
-	},
+	self::lock::{BuildLock, BuildLockDepGuard},
 	crate::{
 		error::ResultMultiple,
-		rules::{Command, CommandArg, DepItem, Expr, OutItem, Rule, Target},
-		util::{self, CowStr},
+		expand,
+		rules::{Command, DepItem, Expr, ExprTree, OutItem, Rule, Target},
+		util::{self, ArcStr},
 		AppError,
 		Expander,
 		Rules,
 	},
+	anyhow::Context,
 	dashmap::DashMap,
-	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
+	futures::{stream::FuturesUnordered, StreamExt},
+	indexmap::IndexMap,
 	itertools::Itertools,
 	std::{
-		borrow::Cow,
-		collections::HashMap,
-		ffi::{OsStr, OsString},
-		ops::Try,
+		collections::{BTreeMap, HashMap},
+		future::Future,
+		sync::Arc,
 		time::SystemTime,
 	},
-	tokio::{fs, process, sync::Semaphore},
+	tokio::{fs, process, sync::Semaphore, task},
 };
-
-// TODO: If the user zbuild file is not generated properly, it can
-//       make us deadlock, check for cycles somehow
 
 /// Event
 #[derive(Clone, Debug)]
-pub enum Event<'s> {
+pub enum Event {
 	/// Target dependency built
 	TargetDepBuilt {
 		/// Target that was being built
-		target: Target<'s, CowStr<'s>>,
+		target: Target<ArcStr>,
 
 		/// Dependency that was built
-		dep: Target<'s, CowStr<'s>>,
+		dep: Target<ArcStr>,
 	},
 }
 
 /// Target rule
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
-pub struct TargetRule<'s> {
+pub struct TargetRule {
 	/// Name
-	name: &'s str,
+	name: ArcStr,
 
-	/// Patterns (sorted)
-	pats: Vec<(CowStr<'s>, CowStr<'s>)>,
+	/// Patterns
+	pats: Arc<BTreeMap<ArcStr, ArcStr>>,
 }
 
 /// Builder
 #[derive(Debug)]
-pub struct Builder<'s> {
+pub struct Builder {
 	/// Event sender
-	event_tx: async_broadcast::Sender<Event<'s>>,
+	event_tx: async_broadcast::Sender<Event>,
 
 	/// Event receiver
 	// Note: We don't care about the receiver, since we can
 	//       just create them from the sender, but if dropped
 	//       it closes the channel, so we need to keep it around.
-	_event_rx: async_broadcast::InactiveReceiver<Event<'s>>,
+	_event_rx: async_broadcast::InactiveReceiver<Event>,
+
+	/// Rules
+	rules: Rules,
 
 	/// Expander
-	expander: Expander<'s>,
+	expander: Expander,
 
 	/// All rules' build lock
-	rules_lock: DashMap<TargetRule<'s>, BuildLock>,
+	rules_lock: DashMap<TargetRule, BuildLock>,
+
+	/// Rule output tree
+	///
+	/// Used to quickly find rules for a file
+	rule_output_tree: ExprTree<ArcStr>,
 
 	/// Execution semaphore
 	exec_semaphore: Semaphore,
@@ -87,37 +89,75 @@ pub struct Builder<'s> {
 	stop_builds_on_first_err: bool,
 }
 
-impl<'s> Builder<'s> {
+impl Builder {
 	/// Creates a new builder
-	pub fn new(jobs: usize, stop_builds_on_first_err: bool) -> Self {
+	pub fn new(
+		jobs: usize,
+		rules: Rules,
+		expander: Expander,
+		stop_builds_on_first_err: bool,
+	) -> Result<Self, AppError> {
 		let (event_tx, event_rx) = async_broadcast::broadcast(jobs);
 		let event_rx = event_rx.deactivate();
 
-		Self {
+		// Create the rule output tree
+		let mut rule_output_tree = ExprTree::new();
+		for (rule_name, rule) in &rules.rules {
+			for output in &rule.output {
+				// Expand the file first
+				// Expand all expressions in the output file
+				// Note: This doesn't expand patterns, so we can match those later
+				let output_file = match output {
+					OutItem::File { file: output_file, .. } => output_file,
+				};
+				let expand_visitor = expand::Visitor::from_aliases([&rule.aliases, &rules.aliases])
+					.with_default_pat(expand::FlowControl::Keep);
+				let output_file = expander.expand_expr(output_file, &expand_visitor)?;
+
+
+				// Then try to insert it
+				if let Some(prev_rule_name) = rule_output_tree
+					.insert(&output_file, rule_name.clone())
+					.context("Unable to add rule output to tree")
+					.map_err(AppError::Other)?
+				{
+					return Err(AppError::Other(anyhow::anyhow!(
+						"Multiple rules match the same output file: {output_file}\n  first rule: {prev_rule_name}\n  \
+						 second rule: {rule_name}"
+					)));
+				};
+			}
+		}
+
+		Ok(Self {
 			event_tx,
 			_event_rx: event_rx,
-			expander: Expander::new(),
+			rules,
+			expander,
 			rules_lock: DashMap::new(),
+			rule_output_tree,
 			exec_semaphore: Semaphore::new(jobs),
 			stop_builds_on_first_err,
-		}
+		})
 	}
 
 	/// Returns all build results
-	pub fn into_build_results(self) -> HashMap<&'s str, Option<Result<BuildResult, ()>>> {
+	pub async fn build_results(&self) -> IndexMap<TargetRule, Option<Result<BuildResult, ()>>> {
 		self.rules_lock
-			.into_iter()
-			.map(|(rule, lock)| (rule.name, lock.into_res()))
+			.iter()
+			.map(|rule_lock| async move { (rule_lock.key().clone(), rule_lock.value().res().await) })
+			.collect::<FuturesUnordered<_>>()
 			.collect()
+			.await
 	}
 
 	/// Sends an event, if any are subscribers
-	async fn send_event(&self, make_event: impl FnOnce() -> Event<'s> + Send) {
+	async fn send_event(&self, make_event: impl FnOnce() -> Event + Send) {
 		// Note: We only send them if there are any receivers (excluding ours, which is inactive),
 		//       to ensure we don't deadlock waiting for someone to read the events
 		if self.event_tx.receiver_count() > 0 {
 			// Note: We don't care about the event
-			let _: Option<Event<'_>> = self
+			let _: Option<Event> = self
 				.event_tx
 				.broadcast(make_event())
 				.await
@@ -126,60 +166,54 @@ impl<'s> Builder<'s> {
 	}
 
 	/// Subscribes to builder events
-	pub fn subscribe_events(&self) -> async_broadcast::Receiver<Event<'s>> {
+	pub fn subscribe_events(&self) -> async_broadcast::Receiver<Event> {
 		self.event_tx.new_receiver()
 	}
 
 	/// Finds a target's rule
-	fn target_rule(
-		&self,
-		target: &Target<'s, CowStr<'s>>,
-		rules: &Rules<'s>,
-	) -> Result<Option<(Rule<'s, CowStr<'s>>, TargetRule<'s>)>, AppError> {
+	fn target_rule(&self, target: &Target<ArcStr>) -> Result<Option<(Rule<ArcStr>, TargetRule)>, AppError> {
 		let target_rule = match *target {
 			// If we got a file, check which rule can make it
-			Target::File { ref file, .. } => match self.find_rule_for_file(file, rules)? {
-				Some((rule, pats)) => {
-					tracing::trace!(%target, %rule.name, "Found target rule");
-					let target_rule = TargetRule {
-						name: rule.name,
-						pats: pats.into_iter().sorted().collect(),
-					};
-					(rule, target_rule)
+			Target::File { ref file, .. } => match self.rule_output_tree.find(file) {
+				Some((name, pats)) => {
+					tracing::trace!(%target, %name, "Found target rule");
+					TargetRule {
+						name,
+						pats: Arc::new(pats),
+					}
 				},
 
 				None => return Ok(None),
 			},
 
 			// If we got a rule name with patterns, find it and replace all patterns
-			Target::Rule { ref rule, ref pats } => {
-				// Find the rule and expand it
-				let rule = rules.rules.get(&**rule).ok_or_else(|| AppError::UnknownRule {
-					rule_name: (**rule).to_owned(),
-				})?;
-				let rule = self
-					.expander
-					.expand_rule(rule, &mut RuleVisitor::new(&rules.aliases, &rule.aliases, pats))
-					.map_err(AppError::expand_rule(rule.name))?;
-				let target_rule = TargetRule {
-					name: rule.name,
-					pats: pats
-						.iter()
-						.map(|(pat, value)| (pat.clone(), value.clone()))
-						.sorted()
-						.collect(),
-				};
-				(rule, target_rule)
+			Target::Rule { ref rule, ref pats } => TargetRule {
+				name: rule.clone(),
+				pats: Arc::clone(pats),
 			},
 		};
 
-		Ok(Some(target_rule))
+		// Find the rule and expand it
+		let rule = self
+			.rules
+			.rules
+			.get(&*target_rule.name)
+			.ok_or_else(|| AppError::UnknownRule {
+				rule_name: (*target_rule.name).to_owned(),
+			})?;
+		let expand_visitor = expand::Visitor::new([&rule.aliases, &self.rules.aliases], [&target_rule.pats]);
+		let rule = self
+			.expander
+			.expand_rule(rule, &expand_visitor)
+			.map_err(AppError::expand_rule(&*rule.name))?;
+
+		Ok(Some((rule, target_rule)))
 	}
 
 	/// Resets a build
-	pub async fn reset_build(&self, target: &Target<'s, CowStr<'s>>, rules: &Rules<'s>) -> Result<(), AppError> {
+	pub async fn reset_build(&self, target: &Target<ArcStr>) -> Result<(), AppError> {
 		// Get the rule for the target
-		let Some((_, target_rule)) = self.target_rule(target, rules)? else {
+		let Some((_, target_rule)) = self.target_rule(target)? else {
 			return Ok(());
 		};
 
@@ -199,53 +233,57 @@ impl<'s> Builder<'s> {
 
 	/// Builds an expression-encoded target
 	pub async fn build_expr(
-		&self,
-		target: &Target<'s, Expr<'s>>,
-		rules: &Rules<'s>,
+		self: &Arc<Self>,
+		target: &Target<Expr>,
 		ignore_missing: bool,
-		reason: BuildReason<'_, 's>,
+		reason: BuildReason,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
 		// Expand the target
+		let expand_visitor = expand::Visitor::from_aliases([&self.rules.aliases]);
 		let target = self
 			.expander
-			.expand_target(target, &mut GlobalVisitor::new(&rules.aliases))
+			.expand_target(target, &expand_visitor)
 			.map_err(AppError::expand_target(target))?;
 
 		// Then build
-		self.build(&target, rules, ignore_missing, reason).await
+		self.build(&target, ignore_missing, reason).await
 	}
 
 	/// Builds a target
-	pub async fn build(
-		&self,
-		target: &Target<'s, CowStr<'s>>,
-		rules: &Rules<'s>,
+	// TODO: Remove this wrapper function once the compiler behaves.
+	#[expect(
+		clippy::manual_async_fn,
+		reason = "For some reason, without this wrapper, the compiler
+			can't see that `build_inner`'s future is `Send`"
+	)]
+	pub fn build<'a>(
+		self: &'a Arc<Self>,
+		target: &'a Target<ArcStr>,
 		ignore_missing: bool,
-		reason: BuildReason<'_, 's>,
+		reason: BuildReason,
+	) -> impl Future<Output = Result<(BuildResult, Option<BuildLockDepGuard>), AppError>> + Send + 'a {
+		async move { self.build_inner(target, ignore_missing, reason).await }
+	}
+
+	/// Inner function for [`Builder::build`]
+	pub async fn build_inner<'a>(
+		self: &'a Arc<Self>,
+		target: &'a Target<ArcStr>,
+		ignore_missing: bool,
+		reason: BuildReason,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
-		tracing::trace!(%target, reason=?reason.0.as_ref().map(|reason| reason.target), "Building target");
+		tracing::trace!(%target, reason=?reason.target(), "Building target");
 
 		// Normalize file paths
-		let target = match *target {
-			Target::File { ref file, is_static } => Target::File {
-				file: CowStr::Owned(util::normalize_path(file)),
-				is_static,
-			},
-			ref target @ Target::Rule { .. } => target.clone(),
-		};
+		let target = target.clone().normalized();
+		let target = Arc::new(target);
 
 		// Check if we're being built recursively, and if so, return error
-		reason.for_each(|parent_target| match &target == parent_target {
-			true => Err(AppError::FoundRecursiveRule {
-				target:         target.to_string(),
-				parent_targets: reason.collect_all().into_iter().map(Target::to_string).collect(),
-			}),
-			false => Ok(()),
-		})?;
+		reason.check_recursively(&target)?;
 
 		// Get the rule for the target
-		let Some((rule, target_rule)) = self.target_rule(&target, rules)? else {
-			match target {
+		let Some((rule, target_rule)) = self.target_rule(&target)? else {
+			match *target {
 				Target::File { ref file, .. } => match fs::symlink_metadata(&**file).await {
 					Ok(metadata) => {
 						let build_time = metadata.modified().map_err(AppError::get_file_modified_time(&**file))?;
@@ -271,10 +309,10 @@ impl<'s> Builder<'s> {
 						));
 					},
 					Err(err) =>
-						do yeet AppError::MissingFile {
+						return Err(AppError::MissingFile {
 							file_path: (**file).into(),
 							source:    err,
-						},
+						}),
 				},
 				// Note: If `target_rule` returns `Err` if this was a rule, so we can never reach here
 				Target::Rule { .. } => unreachable!(),
@@ -288,36 +326,45 @@ impl<'s> Builder<'s> {
 			.or_insert_with(BuildLock::new)
 			.clone();
 
-		// Then check if we're already built
-		// Note: Tokio doesn't support lock upgrading, so we perform a double-checked lock
-		#[expect(irrefutable_let_patterns, reason = "We want to scope it to the `if` block")]
-		if let build_guard = build_lock.lock_dep().await &&
-			let Some(res) = build_guard.res()
-		{
-			return res
-				.map(|res| (res, Some(build_guard)))
-				.map_err(|()| AppError::BuildTarget {
-					source: None,
-					target: target.to_string(),
-				});
-		}
+		// Then check if we're built, and if not lock for building
+		let mut build_guard = loop {
+			// First check if we're done with a dependency lock
+			let build_guard = build_lock.lock_dep().await;
+			if let Some(res) = build_guard.res() {
+				return res
+					.map(|res| (res, Some(build_guard)))
+					.map_err(|()| AppError::BuildTarget {
+						source: None,
+						target: target.to_string(),
+					});
+			}
 
-		// Else lock it for building and re-check
-		let mut build_guard = build_lock.lock_build().await;
-		if let Some(res) = build_guard.res() {
-			return res
-				.map(|res| (res, Some(build_guard.into_dep())))
-				.map_err(|()| AppError::BuildTarget {
-					source: None,
-					target: target.to_string(),
-				});
-		}
+			// Otherwise, try to upgrade to a build lock
+			// Note: If we were unable to, that means someone else locked, so retry
+			//       and lock for dependency for when they finish
+			// Note: We drop the lock in the `Err` case, and then immediately try to
+			//       get it again at the start of the loop, but since the lock is *fair*,
+			//       the writer should have priority, so this shouldn't result in much
+			//       waiting for them.
+			let res = build_guard.try_upgrade_into_build().await;
+			match res {
+				Ok(build_guard) => break build_guard,
+				Err(_) => continue,
+			}
+		};
 
-		// Else build
-		match self
-			.build_unchecked(&target, &rule, rules, ignore_missing, reason)
-			.await
-		{
+		// TODO: Use `task::Builder` once we don't have issues with the
+		//       `PKGBUILD` not passing `tokio_unstable` to `rustc` for some reason.
+		let res = task::spawn({
+			let this = Arc::clone(self);
+			let target = Arc::clone(&target);
+			async move { this.build_unchecked(&target, &rule, ignore_missing, reason).await }
+		})
+		.await
+		.context("Unable to join task")
+		.map_err(AppError::Other)?;
+
+		match res {
 			Ok(res) => {
 				build_guard.finish(res);
 
@@ -341,24 +388,19 @@ impl<'s> Builder<'s> {
 
 	/// Builds a target without checking if the target is already being built.
 	#[expect(clippy::too_many_lines, reason = "TODO: Split this function onto smaller ones")]
-	#[async_recursion::async_recursion]
-	async fn build_unchecked<'reason>(
-		&self,
-		target: &Target<'s, CowStr<'s>>,
-		rule: &Rule<'s, CowStr<'s>>,
-		rules: &Rules<'s>,
+	async fn build_unchecked(
+		self: &Arc<Self>,
+		target: &Target<ArcStr>,
+		rule: &Rule<ArcStr>,
 		ignore_missing: bool,
-		reason: BuildReason<'reason, 's>,
-	) -> Result<BuildResult, AppError>
-	where
-		'reason: 'async_recursion,
-	{
+		reason: BuildReason,
+	) -> Result<BuildResult, AppError> {
 		/// Dependency
 		#[derive(Clone, Debug)]
-		enum Dep<'s, 'a> {
+		enum Dep {
 			/// File
 			File {
-				file:         CowStr<'s>,
+				file:         ArcStr,
 				is_static:    bool,
 				is_deps_file: bool,
 				is_output:    bool,
@@ -368,8 +410,8 @@ impl<'s> Builder<'s> {
 
 			/// Rule
 			Rule {
-				name: CowStr<'s>,
-				pats: &'a HashMap<CowStr<'s>, CowStr<'s>>,
+				name: ArcStr,
+				pats: Arc<BTreeMap<ArcStr, ArcStr>>,
 			},
 		}
 
@@ -396,7 +438,7 @@ impl<'s> Builder<'s> {
 					}),
 					DepItem::Rule { ref name, ref pats } => Ok(Dep::Rule {
 						name: name.clone(),
-						pats,
+						pats: Arc::clone(pats),
 					}),
 				}
 			})
@@ -445,6 +487,7 @@ impl<'s> Builder<'s> {
 			.map(|dep| {
 				tracing::trace!(%target, ?rule.name, ?dep, "Found target rule dependency");
 				let rule = &rule;
+				let reason = &reason;
 				async move {
 					tracing::trace!(%target, ?rule.name, ?dep, "Building target rule dependency");
 
@@ -462,9 +505,9 @@ impl<'s> Builder<'s> {
 						}),
 
 						// If a rule, always build
-						Dep::Rule { ref name, pats } => Some(Target::Rule {
+						Dep::Rule { ref name, ref pats } => Some(Target::Rule {
 							rule: name.clone(),
-							pats: pats.clone(),
+							pats: Arc::clone(pats),
 						}),
 					};
 
@@ -474,9 +517,8 @@ impl<'s> Builder<'s> {
 							let (res, dep_guard) = self
 								.build(
 									&dep_target,
-									rules,
 									ignore_missing | matches!(dep, Dep::File { is_optional: true, .. }),
-									reason.with_target(target),
+									reason.with_target(target.clone()),
 								)
 								.await
 								.map_err(AppError::build_target(&dep_target))?;
@@ -521,7 +563,7 @@ impl<'s> Builder<'s> {
 							exists: true,
 							..
 						} => self
-							.build_deps_file(target, file, rule, rules, ignore_missing, reason)
+							.build_deps_file(target, file, rule, ignore_missing, reason)
 							.await
 							.map_err(AppError::build_deps_file(&**file))?,
 						_ => vec![],
@@ -568,7 +610,9 @@ impl<'s> Builder<'s> {
 		// Then rebuild, if needed
 		if needs_rebuilt {
 			tracing::trace!(%target, ?rule.name, ?deps_last_build_time, ?rule_last_build_time, "Rebuilding target rule");
-			self.rebuild_rule(rule).await.map_err(AppError::build_rule(rule.name))?;
+			self.rebuild_rule(rule)
+				.await
+				.map_err(AppError::build_rule(&*rule.name))?;
 		}
 
 		// Then get the build time
@@ -586,50 +630,78 @@ impl<'s> Builder<'s> {
 	///
 	/// Returns the latest modification date of the dependencies
 	async fn build_deps_file(
-		&self,
-		parent_target: &Target<'s, CowStr<'s>>,
+		self: &Arc<Self>,
+		parent_target: &Target<ArcStr>,
 		deps_file: &str,
-		rule: &Rule<'s, CowStr<'s>>,
-		rules: &Rules<'s>,
+		rule: &Rule<ArcStr>,
 		ignore_missing: bool,
-		reason: BuildReason<'_, 's>,
-	) -> Result<Vec<(Target<'s, CowStr<'s>>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {
+		reason: &BuildReason,
+	) -> Result<Vec<(Target<ArcStr>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {
 		tracing::trace!(target=?parent_target, ?rule.name, ?deps_file, "Building dependencies of target rule dependency-file");
-		let (output, deps) = self::parse_deps_file(deps_file).await?;
+		let mut deps = self::parse_deps_file(deps_file).await?;
+		tracing::trace!(target=?parent_target, ?rule.name, ?deps_file, ?deps, "Found dependencies of target rule dependency-file");
 
-		match rule.output.is_empty() {
+		// Ensure that at least one dependency output matches the rule
+		let matches_rule = |output: &str| match rule.output.is_empty() {
 			// If there were no outputs, make sure it matches the rule name
 			// TODO: Seems kinda weird for it to match the rule name, but not sure how else to check this here
-			true =>
-				if output != rule.name {
-					return Err(AppError::DepFileMissingRuleName {
-						deps_file_path: deps_file.into(),
-						rule_name:      rule.name.to_owned(),
-						dep_output:     output,
-					});
-				},
+			true => (output == &*rule.name)
+				.then_some(())
+				.ok_or_else(|| AppError::DepFileMissingRuleName {
+					deps_file_path: deps_file.into(),
+					rule_name:      rule.name.to_string(),
+					dep_output:     output.to_owned(),
+				}),
 
 			// If there were any output, make sure the dependency file applies to one of them
-			false => {
-				let any_matches = rule.output.iter().any(|out| match out {
-					OutItem::File { file, .. } => file == &output,
+			false => rule
+				.output
+				.iter()
+				.any(|out| match out {
+					OutItem::File { file, .. } => &**file == output,
+				})
+				.then_some(())
+				.ok_or_else(|| AppError::DepFileMissingOutputs {
+					deps_file_path: deps_file.into(),
+					rule_outputs:   rule.output.iter().map(OutItem::to_string).collect(),
+					dep_output:     output.to_owned(),
+				}),
+		};
+
+		// Find all outputs that match and those that don't match
+		let (oks, errs) = deps
+			.keys()
+			.map(|output| matches_rule(output).map_err(|err| (output.clone(), err)))
+			.partition_result::<Vec<_>, Vec<_>, _, _>();
+		match oks.is_empty() {
+			true => {
+				// If we had no matching outputs, try to return all errors
+				errs.into_iter()
+					.map(|(_, err)| Err(err))
+					.collect::<ResultMultiple<()>>()?;
+
+				// If no errors existed, return an error for that
+				return Err(AppError::DepFileEmpty {
+					deps_file_path: deps_file.into(),
 				});
-				if !any_matches {
-					return Err(AppError::DepFileMissingOutputs {
-						deps_file_path: deps_file.into(),
-						rule_outputs:   rule.output.iter().map(OutItem::to_string).collect(),
-						dep_output:     output,
-					});
-				}
 			},
+
+			// Otherwise, just log and remove all errors
+			false =>
+				for (output, err) in errs {
+					let _: Vec<_> = deps.remove(&output).expect("Dependency should exist");
+
+					tracing::warn!(target=%parent_target, ?rule.name, err=%err.pretty(), "Ignoring unknown output in dependency file");
+				},
 		}
 
 		// Build all dependencies
 		// Note: We don't want to fail-early, see the note on `deps` in `build_unchecked`
 		let deps_res = deps
 			.into_iter()
+			.flat_map(|(_, deps)| deps)
 			.map(|dep| {
-				let dep = CowStr::Owned(util::normalize_path(&dep));
+				let dep = ArcStr::from(util::normalize_path(&dep));
 				tracing::trace!(?rule.name, ?dep, "Found rule dependency");
 				let dep_target = Target::File {
 					file:      dep,
@@ -637,7 +709,7 @@ impl<'s> Builder<'s> {
 				};
 				async move {
 					let (res, dep_guard) = self
-						.build(&dep_target, rules, ignore_missing, reason.with_target(parent_target))
+						.build(&dep_target, ignore_missing, reason.with_target(parent_target.clone()))
 						.await
 						.map_err(AppError::build_target(&dep_target))?;
 
@@ -660,7 +732,7 @@ impl<'s> Builder<'s> {
 	}
 
 	/// Rebuilds a rule
-	pub async fn rebuild_rule(&self, rule: &Rule<'s, CowStr<'s>>) -> Result<(), AppError> {
+	pub async fn rebuild_rule(&self, rule: &Rule<ArcStr>) -> Result<(), AppError> {
 		// Lock the semaphore
 		// Note: If we locked it per-command, we could exit earlier
 		//       when closed, but that would break some executions.
@@ -674,65 +746,21 @@ impl<'s> Builder<'s> {
 		};
 
 		for cmd in &rule.exec.cmds {
-			// Note: We don't care about the stdout here and don't capture it anyway.
-			let _: Vec<u8> = self.exec_cmd(rule.name, cmd, false).await?;
+			self.exec_cmd(rule, cmd).await?;
 		}
 
 		Ok(())
 	}
 
-	/// Executes a command, returning it's stdout
+	/// Executes `cmd`.
 	#[expect(unused_results, reason = "Due to the builder pattern of `Command`")]
-	#[expect(clippy::only_used_in_recursion, reason = "It might be used in the future")]
-	#[async_recursion::async_recursion]
-	async fn exec_cmd(
-		&self,
-		rule_name: &str,
-		cmd: &Command<CowStr<'s>>,
-		capture_stdout: bool,
-	) -> Result<Vec<u8>, AppError> {
-		// Process all arguments
-		// Note: When recursing, always capture stdout
-		let args = cmd
-			.args
-			.iter()
-			.map(move |arg| async move {
-				match arg {
-					CommandArg::Expr(arg) => Ok(Some(Cow::Borrowed(OsStr::new(&**arg)))),
-					CommandArg::Command { strip_on_fail, cmd } => {
-						let res = self.exec_cmd(rule_name, cmd, true).await;
-						match (res, strip_on_fail) {
-							(Ok(arg), _) => {
-								let arg = String::from_utf8(arg).map_err(AppError::command_output_non_utf8(cmd))?;
-								let arg = OsString::from(arg);
-								Ok(Some(Cow::Owned(arg)))
-							},
-							(Err(err), true) => {
-								tracing::debug!(?arg, err=%err.pretty(), "Stripping argument from failure");
-								Ok(None)
-							},
-							(Err(err), false) => Err(err),
-						}
-					},
-				}
-			})
-			.enumerate()
-			.map(|(idx, fut)| fut.map_ok(move |arg| (idx, arg)))
-			.collect::<FuturesUnordered<_>>()
-			.collect::<Vec<_>>()
-			.await
-			.into_iter()
-			.collect::<ResultMultiple<Vec<_>>>()?
-			.into_iter()
-			.sorted_by_key(|&(idx, _)| idx)
-			.filter_map(|(_, arg)| arg)
-			.collect::<Vec<_>>();
-
-		let (program, args) = args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
-			rule_name: rule_name.to_owned(),
+	async fn exec_cmd(&self, rule: &Rule<ArcStr>, cmd: &Command<ArcStr>) -> Result<(), AppError> {
+		// Get the program name
+		let (program, args) = cmd.args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
+			rule_name: rule.name.to_string(),
 		})?;
 
-		// Create the command
+		// Create the command and feed in all the arguments
 		let mut os_cmd = process::Command::new(&**program);
 		os_cmd.args(args.iter().map(|arg| &**arg));
 
@@ -741,93 +769,62 @@ impl<'s> Builder<'s> {
 			os_cmd.current_dir(&**cwd);
 		}
 
-		// If we capture pipe stdout, do it
-		if capture_stdout {
-			#[expect(
-				clippy::absolute_paths,
-				reason = "We're already using a `process` (`tokio::process`)"
-			)]
-			os_cmd.stdout(std::process::Stdio::piped());
-		}
-
 		// Then spawn it and measure
-		tracing::debug!(target: "zbuild_exec", "{} {}",
-			program.to_string_lossy(),
-			args.iter().map(|arg| arg.to_string_lossy()).join(" ")
+		tracing::debug!(target: "zbuild_exec", "{program} {}",
+			args.iter().join(" ")
 		);
-		let (duration, stdout) = util::try_measure_async(async {
-			let output = os_cmd
-				.spawn()
-				.map_err(AppError::spawn_command(cmd))?
-				.wait_with_output()
+		let (duration, ()) = util::try_measure_async(async {
+			os_cmd
+				.status()
 				.await
-				.map_err(AppError::wait_command(cmd))?;
-
-			output.status.exit_ok().map_err(AppError::command_failed(cmd))?;
-			Ok(output.stdout)
+				.map_err(AppError::spawn_command(cmd))?
+				.exit_ok()
+				.map_err(AppError::command_failed(cmd))
 		})
 		.await?;
-		tracing::trace!(target: "zbuild_exec", ?rule_name, ?program, ?args, ?duration, "Execution duration");
+		tracing::trace!(target: "zbuild_exec", rule_name=?rule.name, ?program, ?args, ?duration, "Execution duration");
 
-		Ok(stdout)
-	}
-
-	/// Finds a rule for `file`
-	// TODO: Not make this `O(N)` for the number of rules.
-	#[expect(clippy::type_complexity, reason = "TODO: Add some type aliases / struct")]
-	pub fn find_rule_for_file(
-		&self,
-		file: &str,
-		rules: &Rules<'s>,
-	) -> Result<Option<(Rule<'s, CowStr<'s>>, HashMap<CowStr<'s>, CowStr<'s>>)>, AppError> {
-		for rule in rules.rules.values() {
-			for output in &rule.output {
-				// Expand all expressions in the output file
-				// Note: This doesn't expand patterns, so we can match those later
-				let output_file = match output {
-					OutItem::File { file: output_file, .. } => output_file,
-				};
-				let output_file = self
-					.expander
-					.expand_expr(output_file, &mut RuleOutputVisitor::new(&rules.aliases, &rule.aliases))?;
-
-				// Then try to match the output file to the file we need to create
-				if let Some(rule_pats) = self::match_expr(&output_file, &output_file.cmpts, file)? {
-					let rule = self
-						.expander
-						.expand_rule(rule, &mut RuleVisitor::new(&rules.aliases, &rule.aliases, &rule_pats))
-						.map_err(AppError::expand_rule(rule.name.to_owned()))?;
-					return Ok(Some((rule, rule_pats)));
-				}
-			}
-		}
-
-		// If we got here, there was no matching rule
-		Ok(None)
+		Ok(())
 	}
 }
 
 /// Parses a dependencies file
-// TODO: Support multiple dependencies in each file
-async fn parse_deps_file(file: &str) -> Result<(String, Vec<String>), AppError> {
+async fn parse_deps_file(file: &str) -> Result<HashMap<ArcStr, Vec<ArcStr>>, AppError> {
 	// Read it
-	let contents = fs::read_to_string(file).await.map_err(AppError::read_file(file))?;
+	let mut contents = fs::read_to_string(file).await.map_err(AppError::read_file(file))?;
 
-	// Parse it
-	let (output, deps) = contents.split_once(':').ok_or_else(|| AppError::DepFileMissingColon {
-		deps_file_path: file.into(),
-	})?;
-	let output = output.trim().to_owned();
-	let deps = deps.split_whitespace().map(str::to_owned).collect();
+	// Replace all backslashes at the end of a line with spaces
+	// Note: Although it'd be fine to replace it with a single space, by replacing it
+	//       with two, we avoid having to move the string contents
+	util::string_replace_in_place_with(&mut contents, "\\\n", "  ");
 
-	Ok((output, deps))
+	// Now go through all non-empty lines and parse them
+	let deps = contents
+		.lines()
+		.filter_map(|line| {
+			let line = line.trim();
+			(!line.is_empty()).then_some(line)
+		})
+		.map(|line| {
+			// Parse it
+			let (output, deps) = line.split_once(':').ok_or_else(|| AppError::DepFileMissingColon {
+				deps_file_path: file.into(),
+			})?;
+			let output = ArcStr::from(output.trim());
+			let deps = deps.split_whitespace().map(ArcStr::from).collect();
+
+			Ok((output, deps))
+		})
+		.collect::<ResultMultiple<_>>()?;
+
+	Ok(deps)
 }
 
 /// Returns the last build time of a rule.
 ///
 /// Returns `Err` if any files didn't exist,
 /// Returns `Ok(None)` if rule has no outputs
-async fn rule_last_build_time<'s>(rule: &Rule<'s, CowStr<'s>>) -> Result<Option<SystemTime>, AppError> {
+async fn rule_last_build_time(rule: &Rule<ArcStr>) -> Result<Option<SystemTime>, AppError> {
 	// Note: We get the time of the oldest file in order to ensure all
 	//       files are at-least that old
 	let built_time = rule
@@ -852,58 +849,4 @@ async fn rule_last_build_time<'s>(rule: &Rule<'s, CowStr<'s>>) -> Result<Option<
 		.into_iter()
 		.min();
 	Ok(built_time)
-}
-
-/// Build reason inner
-#[derive(Clone, Copy, Debug)]
-pub struct BuildReasonInner<'a, 's> {
-	/// Target
-	target: &'a Target<'s, CowStr<'s>>,
-
-	/// Previous reason
-	prev: &'a BuildReason<'a, 's>,
-}
-
-/// Build reason
-#[derive(Clone, Copy, Debug)]
-pub struct BuildReason<'a, 's>(Option<BuildReasonInner<'a, 's>>);
-
-impl<'s> BuildReason<'_, 's> {
-	/// Creates an empty build reason
-	pub const fn empty() -> Self {
-		Self(None)
-	}
-
-	/// Adds a target to this build reason
-	pub const fn with_target<'a>(&'a self, target: &'a Target<'s, CowStr<'s>>) -> BuildReason<'a, 's> {
-		BuildReason(Some(BuildReasonInner { target, prev: self }))
-	}
-
-	/// Iterates over all reasons
-	pub fn for_each<F, R>(&self, mut f: F) -> R
-	where
-		F: FnMut(&Target<'s, CowStr<'s>>) -> R,
-		R: Try<Output = ()>,
-	{
-		let mut reason = &self.0;
-		while let Some(inner) = reason {
-			f(inner.target)?;
-			reason = &inner.prev.0;
-		}
-
-		R::from_output(())
-	}
-
-	/// Collects all reasons
-	pub fn collect_all(&self) -> Vec<&Target<'s, CowStr<'s>>> {
-		let mut targets = vec![];
-
-		let mut reason = &self.0;
-		while let Some(inner) = reason {
-			targets.push(inner.target);
-			reason = &inner.prev.0;
-		}
-
-		targets
-	}
 }

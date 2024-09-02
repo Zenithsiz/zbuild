@@ -3,8 +3,8 @@
 // Imports
 use {
 	super::Expr,
-	crate::ast,
-	std::{collections::HashMap, fmt},
+	crate::{ast, util::ArcStr},
+	std::{collections::BTreeMap, fmt, sync::Arc},
 };
 
 
@@ -21,16 +21,16 @@ pub enum OutItem<T> {
 	},
 }
 
-impl<'s> OutItem<Expr<'s>> {
+impl OutItem<Expr> {
 	/// Creates a new item from it's `ast`.
-	pub fn new(item: ast::OutItem<'s>) -> Self {
+	pub fn from_ast(zbuild_file: &ArcStr, item: ast::OutItem<'_>) -> Self {
 		match item {
 			ast::OutItem::File(file) => Self::File {
-				file:         Expr::new(file),
+				file:         Expr::from_ast(zbuild_file, file),
 				is_deps_file: false,
 			},
 			ast::OutItem::DepsFile { deps_file } => Self::File {
-				file:         Expr::new(deps_file),
+				file:         Expr::from_ast(zbuild_file, deps_file),
 				is_deps_file: true,
 			},
 		}
@@ -77,42 +77,45 @@ pub enum DepItem<T> {
 		name: T,
 
 		/// All rule patterns
-		pats: HashMap<T, T>,
+		pats: Arc<BTreeMap<T, T>>,
 	},
 }
 
-impl<'s> DepItem<Expr<'s>> {
+impl DepItem<Expr> {
 	/// Creates a new item from it's `ast`.
-	pub fn new(item: ast::DepItem<'s>) -> Self {
+	pub fn from_ast(zbuild_file: &ArcStr, item: ast::DepItem<'_>) -> Self {
 		match item {
 			ast::DepItem::File(file) => Self::File {
-				file:         Expr::new(file),
+				file:         Expr::from_ast(zbuild_file, file),
 				is_optional:  false,
 				is_static:    false,
 				is_deps_file: false,
 			},
-			ast::DepItem::Rule { rule, pats } => Self::Rule {
-				name: Expr::new(rule),
-				pats: pats
+			ast::DepItem::Rule { rule, pats } => {
+				let pats = pats
 					.into_iter()
-					.map(|(pat, value)| (Expr::new(pat), Expr::new(value)))
-					.collect(),
+					.map(|(pat, value)| (Expr::from_ast(zbuild_file, pat), Expr::from_ast(zbuild_file, value)))
+					.collect();
+				Self::Rule {
+					name: Expr::from_ast(zbuild_file, rule),
+					pats: Arc::new(pats),
+				}
 			},
 			ast::DepItem::DepsFile { deps_file } => Self::File {
-				file:         Expr::new(deps_file),
+				file:         Expr::from_ast(zbuild_file, deps_file),
 				is_optional:  false,
 				is_static:    false,
 				is_deps_file: true,
 			},
 			ast::DepItem::Static { item: static_item } => match static_item {
 				ast::StaticDepItem::File(file) => Self::File {
-					file:         Expr::new(file),
+					file:         Expr::from_ast(zbuild_file, file),
 					is_optional:  false,
 					is_static:    true,
 					is_deps_file: false,
 				},
 				ast::StaticDepItem::DepsFile { deps_file } => Self::File {
-					file:         Expr::new(deps_file),
+					file:         Expr::from_ast(zbuild_file, deps_file),
 					is_optional:  false,
 					is_static:    true,
 					is_deps_file: true,
@@ -120,13 +123,13 @@ impl<'s> DepItem<Expr<'s>> {
 			},
 			ast::DepItem::Opt { item: opt_item } => match opt_item {
 				ast::OptDepItem::File(file) => Self::File {
-					file:         Expr::new(file),
+					file:         Expr::from_ast(zbuild_file, file),
 					is_optional:  true,
 					is_static:    true,
 					is_deps_file: false,
 				},
 				ast::OptDepItem::DepsFile { deps_file } => Self::File {
-					file:         Expr::new(deps_file),
+					file:         Expr::from_ast(zbuild_file, deps_file),
 					is_optional:  true,
 					is_static:    true,
 					is_deps_file: true,
@@ -166,7 +169,7 @@ impl<T: fmt::Display> fmt::Display for DepItem<T> {
 				if !pats.is_empty() {
 					write!(f, " (")?;
 
-					for (pat, value) in pats {
+					for (pat, value) in &**pats {
 						write!(f, "{pat}={value}, ")?;
 					}
 

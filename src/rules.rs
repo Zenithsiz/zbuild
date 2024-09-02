@@ -11,53 +11,64 @@ mod target;
 // Exports
 pub use {
 	alias::AliasOp,
-	expr::{Expr, ExprCmpt},
+	expr::{Expr, ExprCmpt, ExprTree},
 	item::{DepItem, OutItem},
 	pattern::PatternOp,
-	rule::{Command, CommandArg, Exec, Rule},
+	rule::{Command, Exec, Rule},
 	target::Target,
 };
 
 // Imports
-use {crate::Ast, std::collections::HashMap};
+use {
+	crate::{util::ArcStr, Ast},
+	indexmap::IndexMap,
+	std::sync::Arc,
+};
 
 /// Rules.
 ///
 /// Stores all rules, along with associated information, such as
 /// global aliases and the default target.
 #[derive(Clone, Debug)]
-pub struct Rules<'s> {
+pub struct Rules {
 	/// Global aliases.
 	///
 	/// These are available for the whole program to
 	/// use.
-	pub aliases: HashMap<&'s str, Expr<'s>>,
+	pub aliases: Arc<IndexMap<ArcStr, Expr>>,
 
 	/// Default targets to build
-	pub default: Vec<Target<'s, Expr<'s>>>,
+	pub default: Vec<Target<Expr>>,
 
 	/// Rules
-	pub rules: HashMap<&'s str, Rule<'s, Expr<'s>>>,
+	pub rules: IndexMap<ArcStr, Rule<Expr>>,
 }
 
-impl<'s> Rules<'s> {
+impl Rules {
 	/// Creates all rules from the ast
 	#[must_use]
-	pub fn new(ast: Ast<'s>) -> Self {
+	pub fn from_ast(zbuild_file: &ArcStr, ast: Ast<'_>) -> Self {
 		let aliases = ast
 			.aliases
 			.into_iter()
-			.map(|(alias, value)| (alias, Expr::new(value)))
+			.map(|(alias, value)| (zbuild_file.slice_from_str(alias), Expr::from_ast(zbuild_file, value)))
 			.collect();
-		let default = ast.default.into_iter().map(Target::new).collect();
+		let default = ast
+			.default
+			.into_iter()
+			.map(|target| Target::from_ast(zbuild_file, target))
+			.collect();
 		let rules = ast
 			.rules
 			.into_iter()
-			.map(|(name, rule)| (name, Rule::new(name, rule)))
+			.map(|(name, rule)| {
+				let name = zbuild_file.slice_from_str(name);
+				(name.clone(), Rule::from_ast(zbuild_file, name, rule))
+			})
 			.collect();
 
 		Self {
-			aliases,
+			aliases: Arc::new(aliases),
 			default,
 			rules,
 		}

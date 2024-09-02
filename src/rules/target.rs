@@ -3,19 +3,22 @@
 // Imports
 use {
 	super::Expr,
-	crate::{ast, util::CowStr},
-	itertools::Itertools,
+	crate::{
+		ast,
+		util::{self, ArcStr},
+	},
 	std::{
-		collections::HashMap,
+		collections::BTreeMap,
 		fmt,
 		hash::{Hash, Hasher},
 		mem,
+		sync::Arc,
 	},
 };
 
 /// Target
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub enum Target<'s, T> {
+pub enum Target<T> {
 	/// File
 	File {
 		/// Target file
@@ -31,11 +34,11 @@ pub enum Target<'s, T> {
 		rule: T,
 
 		/// Patterns
-		pats: HashMap<CowStr<'s>, T>,
+		pats: Arc<BTreeMap<ArcStr, T>>,
 	},
 }
 
-impl<T> Target<'_, T> {
+impl<T> Target<T> {
 	/// Returns if this target is static
 	pub const fn is_static(&self) -> bool {
 		match *self {
@@ -45,23 +48,38 @@ impl<T> Target<'_, T> {
 	}
 }
 
-impl<'s> Target<'s, Expr<'s>> {
+impl Target<Expr> {
 	/// Creates a new target from it's ast
-	pub fn new(ast: ast::Target<'s>) -> Self {
+	pub fn from_ast(zbuild_file: &ArcStr, ast: ast::Target<'_>) -> Self {
 		match ast {
 			ast::Target::File(file) => Self::File {
-				file:      Expr::new(file),
+				file:      Expr::from_ast(zbuild_file, file),
 				is_static: false,
 			},
 			ast::Target::Rule { rule } => Self::Rule {
-				rule: Expr::new(rule),
-				pats: HashMap::new(),
+				rule: Expr::from_ast(zbuild_file, rule),
+				pats: Arc::new(BTreeMap::new()),
 			},
 		}
 	}
 }
 
-impl<T: Hash + Ord> Hash for Target<'_, T> {
+impl Target<ArcStr> {
+	/// Normalizes this target.
+	///
+	/// If it's a file, the file name is normalized. Otherwise nothing is done.
+	pub fn normalized(self) -> Self {
+		match self {
+			Self::File { file, is_static } => Self::File {
+				file: util::normalize_path(&file).into(),
+				is_static,
+			},
+			target @ Self::Rule { .. } => target,
+		}
+	}
+}
+
+impl<T: Hash + Ord> Hash for Target<T> {
 	fn hash<H: Hasher>(&self, state: &mut H) {
 		mem::discriminant(self).hash(state);
 		match self {
@@ -71,8 +89,7 @@ impl<T: Hash + Ord> Hash for Target<'_, T> {
 			},
 			Self::Rule { rule, pats } => {
 				rule.hash(state);
-				// TODO: Not have to sort the patterns
-				for (pat, value) in pats.iter().sorted() {
+				for (pat, value) in &**pats {
 					pat.hash(state);
 					value.hash(state);
 				}
@@ -82,7 +99,7 @@ impl<T: Hash + Ord> Hash for Target<'_, T> {
 }
 
 
-impl<T: fmt::Display> fmt::Display for Target<'_, T> {
+impl<T: fmt::Display> fmt::Display for Target<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::File { file, is_static } => match is_static {
@@ -95,7 +112,7 @@ impl<T: fmt::Display> fmt::Display for Target<'_, T> {
 				if !pats.is_empty() {
 					write!(f, " (")?;
 
-					for (pat, value) in pats {
+					for (pat, value) in &**pats {
 						write!(f, "{pat}={value}, ")?;
 					}
 

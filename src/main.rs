@@ -11,7 +11,12 @@
 	must_not_suspend,
 	strict_provenance,
 	assert_matches,
-	try_trait_v2
+	try_trait_v2,
+	if_let_guard,
+	pattern,
+	unsigned_signed_diff,
+	vec_into_raw_parts,
+	ptr_metadata
 )]
 // Lints
 #![allow(
@@ -40,26 +45,33 @@ use {
 		expand::Expander,
 		rules::Rules,
 	},
+	anyhow::Context,
 	args::Args,
 	clap::Parser,
 	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
 	std::{
-		borrow::Cow,
-		collections::HashMap,
+		collections::BTreeMap,
 		env,
 		fmt,
 		fs,
 		path::{Path, PathBuf},
+		sync::{
+			atomic::{self, AtomicUsize},
+			Arc,
+		},
 		thread,
 		time::{Duration, SystemTime},
 	},
-	util::CowStr,
+	tokio::runtime,
+	util::ArcStr,
 	watcher::Watcher,
 };
 
-#[tokio::main]
-#[expect(clippy::too_many_lines, reason = "TODO: Split it up more")]
-async fn main() -> ExitResult {
+#[expect(
+	unused_results,
+	reason = "Runtime builder method provides a lot of unused `&mut Builder`"
+)]
+fn main() -> ExitResult {
 	// Get all args
 	let args = Args::parse();
 
@@ -67,6 +79,42 @@ async fn main() -> ExitResult {
 	logger::init(args.log_file.as_deref());
 	tracing::trace!(?args, "Arguments");
 
+	// Build the tokio runtime
+	let mut runtime_builder = runtime::Builder::new_multi_thread();
+	runtime_builder.enable_all().thread_name_fn(|| {
+		static NEXT_THREAD_ID: AtomicUsize = AtomicUsize::new(0);
+		let thread_id = NEXT_THREAD_ID.fetch_add(1, atomic::Ordering::AcqRel);
+		format!("tokio${thread_id}")
+	});
+
+	// Note: Although `worker_threads` can be controlled via `TOKIO_WORKER_THREADS`,
+	//       the max number of blocking threads cannot, but it's possible to cut down
+	//       time in half for some builds with this option, so we supply it.
+	if let Ok(max_blocking_threads) = env::var("TOKIO_MAX_BLOCKING_THREADS") {
+		match max_blocking_threads.parse() {
+			Ok(max_blocking_threads) => {
+				runtime_builder.max_blocking_threads(max_blocking_threads);
+			},
+			Err(err) => {
+				tracing::warn!(
+					?max_blocking_threads,
+					?err,
+					"Unable to parse `TOKIO_MAX_BLOCKING_THREADS`, using default"
+				);
+			},
+		}
+	}
+
+	let runtime = runtime_builder
+		.build()
+		.context("Failed building the Runtime")
+		.map_err(AppError::Other)?;
+
+	runtime.block_on(self::run(args))
+}
+
+#[expect(clippy::too_many_lines, reason = "TODO: Split it up more")]
+async fn run(args: Args) -> ExitResult {
 	// Find the zbuild location and change the current directory to it
 	// TODO: Not adjust the zbuild path and read it before?
 	let zbuild_path = match args.zbuild_path {
@@ -82,12 +130,16 @@ async fn main() -> ExitResult {
 
 	// Parse the ast
 	let zbuild_file = fs::read_to_string(zbuild_path).map_err(AppError::read_file(&zbuild_path))?;
+	let zbuild_file = ArcStr::from(zbuild_file);
 	tracing::trace!(?zbuild_file, "Read zbuild.yaml");
 	let ast = serde_yaml::from_str::<Ast<'_>>(&zbuild_file).map_err(AppError::parse_yaml(&zbuild_path))?;
 	tracing::trace!(?ast, "Parsed ast");
 
+	// Create the expander
+	let expander = Expander::new();
+
 	// Build the rules
-	let rules = Rules::new(ast);
+	let rules = Rules::from_ast(&zbuild_file, ast);
 	tracing::trace!(?rules, "Built rules");
 
 	// Get the max number of jobs we can execute at once
@@ -106,7 +158,7 @@ async fn main() -> ExitResult {
 	// Then get all targets to build
 	let targets_to_build = match args.targets.is_empty() {
 		// If none were specified, use the default rules
-		true => Cow::Borrowed(rules.default.as_slice()),
+		true => rules.default.clone(),
 
 		// Else infer them as either rules or files
 		// TODO: Maybe be explicit about rule-name inferring?
@@ -127,8 +179,8 @@ async fn main() -> ExitResult {
 					// If there was a rule, use it without any patterns
 					// TODO: If it requires patterns maybe error out here?
 					|rule| rules::Target::Rule {
-						rule: rules::Expr::string(rule.name.to_owned()),
-						pats: HashMap::new(),
+						rule: rules::Expr::string(rule.name.clone()),
+						pats: Arc::new(BTreeMap::new()),
 					},
 				)
 			})
@@ -141,7 +193,10 @@ async fn main() -> ExitResult {
 
 	// Create the builder
 	// Note: We should stop builds on the first error if we're *not* watching.
-	let builder = Builder::new(jobs, !args.watch);
+	let builder = Builder::new(jobs, rules, expander, !args.watch)
+		.context("Unable to create builder")
+		.map_err(AppError::Other)?;
+	let builder = Arc::new(builder);
 
 	// Then create the watcher, if we're watching
 	let watcher = args
@@ -161,8 +216,7 @@ async fn main() -> ExitResult {
 			targets_to_build
 				.iter()
 				.map(|target| {
-					self::build_target(&builder, target, &rules, args.ignore_missing)
-						.map_err(|err| (target.clone(), err))
+					self::build_target(&builder, target, args.ignore_missing).map_err(|err| (target.clone(), err))
 				})
 				.collect::<FuturesUnordered<_>>()
 				.collect::<Vec<Result<(), _>>>()
@@ -174,13 +228,13 @@ async fn main() -> ExitResult {
 		async {
 			if let Some(watcher) = watcher {
 				tracing::info!("Starting to watch for all targets");
-				watcher.watch_rebuild(&builder, &rules, args.ignore_missing).await;
+				watcher.watch_rebuild(&builder, args.ignore_missing).await;
 			}
 		}
 	);
 
 	// Finally print some statistics
-	let targets = builder.into_build_results();
+	let targets = builder.build_results().await;
 	let total_targets = targets.len();
 	let built_targets = targets
 		.iter()
@@ -224,17 +278,16 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 }
 
 /// Builds a target.
-async fn build_target<'s, T: BuildableTargetInner<'s> + fmt::Display + fmt::Debug>(
-	builder: &Builder<'s>,
-	target: &rules::Target<'s, T>,
-	rules: &Rules<'s>,
+async fn build_target<T: BuildableTargetInner + fmt::Display + fmt::Debug>(
+	builder: &Arc<Builder>,
+	target: &rules::Target<T>,
 	ignore_missing: bool,
 ) -> Result<(), AppError> {
 	tracing::debug!(%target, "Building target");
 
 	// Try to build the target
 	let build_start_time = SystemTime::now();
-	let res = T::build(target, builder, rules, ignore_missing, BuildReason::empty()).await;
+	let res = T::build(target, builder, ignore_missing, BuildReason::empty()).await;
 
 	// Then check the status
 	match res {
@@ -259,42 +312,39 @@ async fn build_target<'s, T: BuildableTargetInner<'s> + fmt::Display + fmt::Debu
 }
 
 /// A buildable target inner type
-trait BuildableTargetInner<'s>: Sized {
+trait BuildableTargetInner: Sized {
 	/// Builds this target
 	async fn build(
-		target: &rules::Target<'s, Self>,
-		builder: &Builder<'s>,
-		rules: &Rules<'s>,
+		target: &rules::Target<Self>,
+		builder: &Arc<Builder>,
 		ignore_missing: bool,
-		reason: BuildReason<'_, 's>,
+		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError>;
 }
 
-impl<'s> BuildableTargetInner<'s> for rules::Expr<'s> {
+impl BuildableTargetInner for rules::Expr {
 	async fn build(
-		target: &rules::Target<'s, Self>,
-		builder: &Builder<'s>,
-		rules: &Rules<'s>,
+		target: &rules::Target<Self>,
+		builder: &Arc<Builder>,
 		ignore_missing: bool,
-		reason: BuildReason<'_, 's>,
+		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError> {
 		builder
-			.build_expr(target, rules, ignore_missing, reason)
+			.build_expr(target, ignore_missing, reason)
 			.await
 			.map(|(build_res, _)| build_res)
 	}
 }
 
-impl<'s> BuildableTargetInner<'s> for CowStr<'s> {
+impl BuildableTargetInner for ArcStr {
 	async fn build(
-		target: &rules::Target<'s, Self>,
-		builder: &Builder<'s>,
-		rules: &Rules<'s>,
+		target: &rules::Target<Self>,
+		builder: &Arc<Builder>,
 		ignore_missing: bool,
-		reason: BuildReason<'_, 's>,
+		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError> {
 		builder
-			.build(target, rules, ignore_missing, reason)
+			.build(target, ignore_missing, reason)
 			.await
 			.map(|(build_res, _)| build_res)
 	}

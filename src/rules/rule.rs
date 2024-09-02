@@ -3,18 +3,19 @@
 // Imports
 use {
 	super::{DepItem, Expr, OutItem},
-	crate::ast,
-	std::collections::HashMap,
+	crate::{ast, util::ArcStr},
+	indexmap::IndexMap,
+	std::sync::Arc,
 };
 
 /// Rule
 #[derive(Clone, Debug)]
-pub struct Rule<'s, T> {
+pub struct Rule<T> {
 	/// Name
-	pub name: &'s str,
+	pub name: ArcStr,
 
 	/// Aliases
-	pub aliases: HashMap<&'s str, T>,
+	pub aliases: Arc<IndexMap<ArcStr, T>>,
 
 	/// Output items
 	pub output: Vec<OutItem<T>>,
@@ -26,21 +27,29 @@ pub struct Rule<'s, T> {
 	pub exec: Exec<T>,
 }
 
-impl<'s> Rule<'s, Expr<'s>> {
+impl Rule<Expr> {
 	/// Creates a new rule from it's ast
-	pub fn new(name: &'s str, rule: ast::Rule<'s>) -> Self {
+	pub fn from_ast(zbuild_file: &ArcStr, name: ArcStr, rule: ast::Rule<'_>) -> Self {
 		let aliases = rule
 			.aliases
 			.into_iter()
-			.map(|(alias, expr)| (alias, Expr::new(expr)))
+			.map(|(alias, expr)| (zbuild_file.slice_from_str(alias), Expr::from_ast(zbuild_file, expr)))
 			.collect();
-		let output = rule.out.into_iter().map(OutItem::new).collect();
-		let deps = rule.deps.into_iter().map(DepItem::new).collect();
-		let exec = Exec::new(rule.exec);
+		let output = rule
+			.out
+			.into_iter()
+			.map(|out| OutItem::from_ast(zbuild_file, out))
+			.collect();
+		let deps = rule
+			.deps
+			.into_iter()
+			.map(|dep| DepItem::from_ast(zbuild_file, dep))
+			.collect();
+		let exec = Exec::from_ast(zbuild_file, rule.exec);
 
 		Self {
 			name,
-			aliases,
+			aliases: Arc::new(aliases),
 			output,
 			deps,
 			exec,
@@ -56,11 +65,15 @@ pub struct Exec<T> {
 	pub cmds: Vec<Command<T>>,
 }
 
-impl<'s> Exec<Expr<'s>> {
+impl Exec<Expr> {
 	/// Creates a new exec from it's ast
-	pub fn new(exec: ast::Exec<'s>) -> Self {
+	pub fn from_ast(zbuild_file: &ArcStr, exec: ast::Exec<'_>) -> Self {
 		Self {
-			cmds: exec.cmds.into_iter().map(Command::new).collect(),
+			cmds: exec
+				.cmds
+				.into_iter()
+				.map(|cmd| Command::from_ast(zbuild_file, cmd))
+				.collect(),
 		}
 	}
 }
@@ -73,57 +86,20 @@ pub struct Command<T> {
 	pub cwd: Option<T>,
 
 	/// All arguments
-	pub args: Vec<CommandArg<T>>,
+	pub args: Vec<T>,
 }
 
-impl<'s> Command<Expr<'s>> {
+impl Command<Expr> {
 	/// Creates a new command from it's ast
-	pub fn new(cmd: ast::Command<'s>) -> Self {
+	pub fn from_ast(zbuild_file: &ArcStr, cmd: ast::Command<'_>) -> Self {
 		match cmd {
 			ast::Command::OnlyArgs(args) => Self {
 				cwd:  None,
-				args: args.into_iter().map(CommandArg::new).collect(),
+				args: args.into_iter().map(|arg| Expr::from_ast(zbuild_file, arg)).collect(),
 			},
 			ast::Command::Full { cwd, args } => Self {
-				cwd:  cwd.map(Expr::new),
-				args: args.into_iter().map(CommandArg::new).collect(),
-			},
-		}
-	}
-}
-
-/// Command argument
-#[derive(Clone, Debug)]
-pub enum CommandArg<T> {
-	/// Expression
-	Expr(T),
-
-	/// Command
-	Command {
-		/// Strip the command if failed
-		strip_on_fail: bool,
-
-		/// Command
-		cmd: Command<T>,
-	},
-}
-
-impl<'s> CommandArg<Expr<'s>> {
-	/// Creates a new command argument from it's ast
-	pub fn new(arg: ast::CommandArg<'s>) -> Self {
-		match arg {
-			ast::CommandArg::Expr(expr) => Self::Expr(Expr::new(expr)),
-			ast::CommandArg::Command(cmd) => Self::Command {
-				strip_on_fail: false,
-				cmd:           Command::new(cmd),
-			},
-			ast::CommandArg::CommandFull { strip_on_fail, cmd } => Self::Command {
-				strip_on_fail,
-				cmd: Command::new(cmd),
-			},
-			ast::CommandArg::StripOnFail { cmd } => Self::Command {
-				strip_on_fail: true,
-				cmd:           Command::new(cmd),
+				cwd:  cwd.map(|cwd| Expr::from_ast(zbuild_file, cwd)),
+				args: args.into_iter().map(|arg| Expr::from_ast(zbuild_file, arg)).collect(),
 			},
 		}
 	}

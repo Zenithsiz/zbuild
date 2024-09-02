@@ -8,7 +8,7 @@
 
 // Imports
 use {
-	crate::{build, rules::Target, util::CowStr, AppError, Builder, Rules},
+	crate::{build, rules::Target, util::ArcStr, AppError, Builder},
 	anyhow::Context,
 	dashmap::{DashMap, DashSet},
 	futures::{stream::FuturesUnordered, StreamExt},
@@ -26,33 +26,33 @@ use {
 
 /// A reverse dependency
 #[derive(Clone, Debug)]
-struct RevDep<'s> {
+struct RevDep {
 	/// Target of the dependency
-	target: Target<'s, CowStr<'s>>,
+	target: Target<ArcStr>,
 
 	/// All parent targets
-	parents: Arc<DashSet<Target<'s, CowStr<'s>>>>,
+	parents: Arc<DashSet<Target<ArcStr>>>,
 }
 
 /// Target watcher
-pub struct Watcher<'s> {
+pub struct Watcher {
 	/// Watcher
 	watcher: Debouncer<notify::RecommendedWatcher, notify_debouncer_full::FileIdMap>,
 
 	/// Reverse dependencies
-	rev_deps: DashMap<PathBuf, RevDep<'s>>,
+	rev_deps: DashMap<PathBuf, RevDep>,
 
 	/// File event stream
 	fs_event_stream: ReceiverStream<notify_debouncer_full::DebouncedEvent>,
 
 	/// Builder event receiver
-	builder_event_rx: async_broadcast::Receiver<build::Event<'s>>,
+	builder_event_rx: async_broadcast::Receiver<build::Event>,
 }
 
-impl<'s> Watcher<'s> {
+impl Watcher {
 	/// Creates a new watcher
 	pub fn new(
-		builder_event_rx: async_broadcast::Receiver<build::Event<'s>>,
+		builder_event_rx: async_broadcast::Receiver<build::Event>,
 		debouncer_timeout: Duration,
 	) -> Result<Self, AppError> {
 		// Create the watcher
@@ -87,7 +87,7 @@ impl<'s> Watcher<'s> {
 
 	/// Watches over all files and rebuilds any changed files
 	#[expect(clippy::too_many_lines, reason = "TODO: Refactor")]
-	pub async fn watch_rebuild(mut self, builder: &Builder<'s>, rules: &Rules<'s>, ignore_missing: bool) {
+	pub async fn watch_rebuild(mut self, builder: &Arc<Builder>, ignore_missing: bool) {
 		let rev_deps = &self.rev_deps;
 		futures::future::join(
 			async move {
@@ -217,7 +217,7 @@ impl<'s> Watcher<'s> {
 					futures::join!(
 						async move {
 							builder
-								.reset_build(&rev_dep.target, rules)
+								.reset_build(&rev_dep.target)
 								.await
 								.expect("Unable to reset existing build");
 						},
@@ -225,7 +225,7 @@ impl<'s> Watcher<'s> {
 							.iter()
 							.map(move |target| async move {
 								builder
-									.reset_build(target, rules)
+									.reset_build(target)
 									.await
 									.expect("Unable to reset existing build");
 							})
@@ -244,7 +244,7 @@ impl<'s> Watcher<'s> {
 						.iter()
 						.map(|target| async {
 							#[expect(clippy::let_underscore_must_use, reason = "We don't care if the build succeeds")]
-							let _: Result<(), _> = crate::build_target(builder, target, rules, ignore_missing).await;
+							let _: Result<(), _> = crate::build_target(builder, target, ignore_missing).await;
 						})
 						.collect::<FuturesUnordered<_>>()
 						.collect::<()>()
