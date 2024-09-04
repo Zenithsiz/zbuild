@@ -125,7 +125,7 @@ macro_rules! decl_error {
 			)*
 
 			/// Returns an object that can be used for a pretty display of this error
-			pub fn pretty(&self) -> PrettyDisplay<'_> {
+			#[must_use] pub fn pretty(&self) -> PrettyDisplay<'_> {
 				PrettyDisplay::new(self)
 			}
 		}
@@ -663,6 +663,7 @@ impl<T> FromResidual<ResultMultipleResidue> for Result<T, AppError> {
 }
 
 /// Exit result
+#[derive(Debug)]
 pub enum ExitResult {
 	Ok,
 	Err(AppError),
