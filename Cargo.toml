@@ -29,6 +29,11 @@ tokio-stream = "0.1.15"
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
+[dev-dependencies]
+
+tempdir = "0.3.7"
+tracing-test = { version = "0.2.5", features = ["no-env-filter"] }
+
 [features]
 
 tokio-console = ["dep:console-subscriber"]
@@ -73,7 +78,11 @@ rust.trivial_numeric_casts = "warn"
 rust.unused_lifetimes = "warn"
 rust.unused_macro_rules = "warn"
 rust.variant_size_differences = "warn"
-rust.unused_crate_dependencies = "warn"
+
+# False positives when using tests. Turn on every once in a while
+# and check on the main crate if anything is unused that isn't used
+# in the tests.
+rust.unused_crate_dependencies = "allow"
 
 # False positives
 clippy.significant_drop_tightening = "allow"
@@ -135,6 +144,8 @@ clippy.unused_async = "allow"
 # happened and instead just bubbles it up
 clippy.missing_errors_doc = "allow"
 
+# Too noisy with self-contained panics that the caller will never see.
+clippy.missing_panics_doc = "allow"
 
 # We don't expose certain entities that should be documented for internal use.
 rustdoc.private_intra_doc_links = "allow"

@@ -15,6 +15,7 @@
     "PKGBUILD",
     "rwlock",
     "smallvec",
+    "tempdir",
     "thiserror",
     "yeet",
     "Zbuild"

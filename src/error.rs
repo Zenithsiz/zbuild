@@ -694,6 +694,14 @@ impl FromResidual<Result<Infallible, AppError>> for ExitResult {
 	}
 }
 
+// Note: This impl is provided for tests, so they can be quick and dirty with
+//       errors.
+impl FromResidual<Result<Infallible, anyhow::Error>> for ExitResult {
+	fn from_residual(residual: Result<Infallible, anyhow::Error>) -> Self {
+		Self::from_residual(residual.map_err(AppError::Other))
+	}
+}
+
 /// Pretty display for [`AppError`]
 #[derive(Debug)]
 pub struct PrettyDisplay<'a> {

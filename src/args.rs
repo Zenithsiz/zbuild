@@ -62,3 +62,18 @@ pub struct Args {
 	#[clap(long = "log-file")]
 	pub log_file: Option<PathBuf>,
 }
+
+#[expect(clippy::derivable_impls, reason = "We want to be explicit with the defaults")]
+impl Default for Args {
+	fn default() -> Self {
+		Self {
+			targets: vec![],
+			zbuild_path: None,
+			jobs: None,
+			ignore_missing: false,
+			watch: false,
+			watcher_debouncer_timeout_ms: None,
+			log_file: None,
+		}
+	}
+}
