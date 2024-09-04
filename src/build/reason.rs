@@ -39,7 +39,7 @@ struct Inner {
 /// depends on `B` and `C`, while `C` depends on `D`, the following tree
 /// will be created:
 ///
-/// ```
+/// ```no_compile
 /// ┌─┐    ┌─┐
 /// │A│ <- │B│
 /// └─┘    └─┘
