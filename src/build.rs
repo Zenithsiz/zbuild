@@ -87,6 +87,9 @@ pub struct Builder {
 
 	/// If the execution semaphore should be closed on the first error
 	stop_builds_on_first_err: bool,
+
+	/// Whether we should always build rules, even if their outputs are up to date
+	always_build: bool,
 }
 
 impl Builder {
@@ -96,6 +99,7 @@ impl Builder {
 		rules: Rules,
 		expander: Expander,
 		stop_builds_on_first_err: bool,
+		always_build: bool,
 	) -> Result<Self, AppError> {
 		let (event_tx, event_rx) = async_broadcast::broadcast(jobs);
 		let event_rx = event_rx.deactivate();
@@ -138,6 +142,7 @@ impl Builder {
 			rule_output_tree,
 			exec_semaphore: Semaphore::new(jobs),
 			stop_builds_on_first_err,
+			always_build,
 		})
 	}
 
@@ -606,6 +611,7 @@ impl Builder {
 			(Some(deps_last_build_time), Ok(Some(rule_last_build_time))) =>
 				deps_last_build_time > *rule_last_build_time,
 		};
+		let needs_rebuilt = needs_rebuilt || self.always_build;
 
 		// Then rebuild, if needed
 		if needs_rebuilt {
