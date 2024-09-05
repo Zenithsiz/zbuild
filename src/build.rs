@@ -302,7 +302,7 @@ impl Builder {
 						));
 					},
 					Err(_) if ignore_missing => {
-						tracing::debug!(?file, "Ignoring missing target file");
+						tracing::info!(?file, "Ignoring missing target file");
 						return Ok((
 							BuildResult {
 								// Note: We simply pretend the file was built right now
