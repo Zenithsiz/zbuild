@@ -43,6 +43,17 @@ pub struct Args {
 	#[clap(long = "ignore-missing", short = 'i')]
 	pub ignore_missing: bool,
 
+	/// Keeps building files even if an error has occurred.
+	///
+	/// Normally, whenever an error occurs, further rules are forbidden
+	/// to execute, although currently executing rules continue running.
+	///
+	/// This makes it so that whenever an error occurs,
+	/// we continue searching and executing rules until there is nothing
+	/// else we can do
+	#[clap(long = "keep-going")]
+	pub keep_going: bool,
+
 	/// Watch for file changes and rebuild any necessary targets.
 	///
 	/// WARNING: If the log file is situated in the same directory as any watched
@@ -71,6 +82,7 @@ impl Default for Args {
 			zbuild_path: None,
 			jobs: None,
 			ignore_missing: false,
+			keep_going: false,
 			watch: false,
 			watcher_debouncer_timeout_ms: None,
 			log_file: None,

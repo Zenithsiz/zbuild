@@ -1,5 +1,11 @@
 //! Utilities for all integration tests
 
+// Lints
+#![allow(
+	dead_code,
+	reason = "This module is used from many tests, which might not use everything"
+)]
+
 // Imports
 use {anyhow::Context, std::fs, tempdir::TempDir, zbuild::Args};
 
