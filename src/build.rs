@@ -392,7 +392,6 @@ impl Builder {
 	}
 
 	/// Builds a target without checking if the target is already being built.
-	#[expect(clippy::too_many_lines, reason = "TODO: Split this function onto smaller ones")]
 	async fn build_unchecked(
 		self: &Arc<Self>,
 		target: &Target<ArcStr>,
@@ -400,6 +399,61 @@ impl Builder {
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<BuildResult, AppError> {
+		// Build all dependencies
+		let deps = self.build_deps_unchecked(target, rule, ignore_missing, reason).await?;
+
+		let deps_last_build_time = deps
+			.iter()
+			.filter(|(dep_target, ..)| !dep_target.is_static())
+			.map(|(_, dep_res, _)| dep_res.build_time)
+			.max();
+		tracing::trace!(%target, ?rule.name, ?deps_last_build_time, ?deps, "Built target rule dependencies");
+
+		// Afterwards check the last time we've built the rule and compare it with
+		// the dependency build times.
+		let rule_last_build_time = self::rule_last_build_time(rule).await;
+		let needs_rebuilt = match (deps_last_build_time, &rule_last_build_time) {
+			// If any files were missing, or we had no outputs, build
+			(_, Err(_) | Ok(None)) => true,
+
+			// If no dependencies and all outputs exist, don't rebuild
+			(None, Ok(_)) => false,
+
+			// If we have dependencies and outputs, rebuild if the dependencies are
+			// newer than the outputs
+			(Some(deps_last_build_time), Ok(Some(rule_last_build_time))) =>
+				deps_last_build_time > *rule_last_build_time,
+		};
+		let needs_rebuilt = needs_rebuilt || self.always_build;
+
+		// Then rebuild, if needed
+		if needs_rebuilt {
+			tracing::trace!(%target, ?rule.name, ?deps_last_build_time, ?rule_last_build_time, "Rebuilding target rule");
+			self.rebuild_rule(rule)
+				.await
+				.map_err(AppError::build_rule(&*rule.name))?;
+		}
+
+		// Then get the build time
+		// Note: If we don't have any outputs, just use the current time as the build time
+		let cur_build_time = self::rule_last_build_time(rule).await?.unwrap_or_else(SystemTime::now);
+		let res = BuildResult {
+			build_time: cur_build_time,
+			built:      needs_rebuilt,
+		};
+
+		Ok(res)
+	}
+
+	/// Builds all dependencies of `target`
+	#[expect(clippy::too_many_lines, reason = "TODO: Split this function onto smaller ones")]
+	async fn build_deps_unchecked(
+		self: &Arc<Self>,
+		target: &Target<ArcStr>,
+		rule: &Rule<ArcStr>,
+		ignore_missing: bool,
+		reason: BuildReason,
+	) -> Result<Vec<(Target<ArcStr>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {
 		/// Dependency
 		#[derive(Clone, Debug)]
 		enum Dep {
@@ -589,47 +643,7 @@ impl Builder {
 			.flatten()
 			.collect::<Vec<_>>();
 
-		let deps_last_build_time = deps
-			.iter()
-			.filter(|(dep_target, ..)| !dep_target.is_static())
-			.map(|(_, dep_res, _)| dep_res.build_time)
-			.max();
-		tracing::trace!(%target, ?rule.name, ?deps_last_build_time, ?deps, "Built target rule dependencies");
-
-		// Afterwards check the last time we've built the rule and compare it with
-		// the dependency build times.
-		let rule_last_build_time = self::rule_last_build_time(rule).await;
-		let needs_rebuilt = match (deps_last_build_time, &rule_last_build_time) {
-			// If any files were missing, or we had no outputs, build
-			(_, Err(_) | Ok(None)) => true,
-
-			// If no dependencies and all outputs exist, don't rebuild
-			(None, Ok(_)) => false,
-
-			// If we have dependencies and outputs, rebuild if the dependencies are
-			// newer than the outputs
-			(Some(deps_last_build_time), Ok(Some(rule_last_build_time))) =>
-				deps_last_build_time > *rule_last_build_time,
-		};
-		let needs_rebuilt = needs_rebuilt || self.always_build;
-
-		// Then rebuild, if needed
-		if needs_rebuilt {
-			tracing::trace!(%target, ?rule.name, ?deps_last_build_time, ?rule_last_build_time, "Rebuilding target rule");
-			self.rebuild_rule(rule)
-				.await
-				.map_err(AppError::build_rule(&*rule.name))?;
-		}
-
-		// Then get the build time
-		// Note: If we don't have any outputs, just use the current time as the build time
-		let cur_build_time = self::rule_last_build_time(rule).await?.unwrap_or_else(SystemTime::now);
-		let res = BuildResult {
-			build_time: cur_build_time,
-			built:      needs_rebuilt,
-		};
-
-		Ok(res)
+		Ok(deps)
 	}
 
 	/// Builds all dependencies of a `deps` file.
