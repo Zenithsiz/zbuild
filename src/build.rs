@@ -255,23 +255,7 @@ impl Builder {
 	}
 
 	/// Builds a target
-	// TODO: Remove this wrapper function once the compiler behaves.
-	#[expect(
-		clippy::manual_async_fn,
-		reason = "For some reason, without this wrapper, the compiler
-			can't see that `build_inner`'s future is `Send`"
-	)]
-	pub fn build<'a>(
-		self: &'a Arc<Self>,
-		target: &'a Target<ArcStr>,
-		ignore_missing: bool,
-		reason: BuildReason,
-	) -> impl Future<Output = Result<(BuildResult, Option<BuildLockDepGuard>), AppError>> + Send + 'a {
-		async move { self.build_inner(target, ignore_missing, reason).await }
-	}
-
-	/// Inner function for [`Builder::build`]
-	pub async fn build_inner<'a>(
+	pub async fn build<'a>(
 		self: &'a Arc<Self>,
 		target: &'a Target<ArcStr>,
 		ignore_missing: bool,
@@ -363,7 +347,23 @@ impl Builder {
 		let res = task::spawn({
 			let this = Arc::clone(self);
 			let target = Arc::clone(&target);
-			async move { this.build_unchecked(&target, &rule, ignore_missing, reason).await }
+
+			// TODO: Remove this wrapper function once the compiler behaves.
+			#[expect(
+				clippy::manual_async_fn,
+				reason = "For some reason, without this wrapper, the compiler can't see that `build_inner`'s future \
+				          is `Send` without explicitly annotating it in the return type"
+			)]
+			fn build_inner(
+				this: Arc<Builder>,
+				target: Arc<Target<ArcStr>>,
+				rule: Rule<ArcStr>,
+				ignore_missing: bool,
+				reason: BuildReason,
+			) -> impl Future<Output = Result<BuildResult, AppError>> + Send {
+				async move { this.build_unchecked(&target, &rule, ignore_missing, reason).await }
+			}
+			build_inner(this, target, rule, ignore_missing, reason)
 		})
 		.await
 		.context("Unable to join task")
