@@ -21,7 +21,7 @@ use {
 	},
 	anyhow::Context,
 	dashmap::DashMap,
-	futures::{stream::FuturesUnordered, StreamExt},
+	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
 	indexmap::IndexMap,
 	itertools::Itertools,
 	std::{
@@ -622,19 +622,19 @@ impl Builder {
 							.map_err(AppError::build_deps_file(&**file))?,
 						_ => vec![],
 					};
+					tracing::trace!(%target, ?rule.name, ?dep, ?dep_res, ?dep_deps, "Built target rule dependency dependencies");
 
-					let deps = util::chain!(dep_res, dep_deps.into_iter()).collect::<Vec<_>>();
-					tracing::trace!(%target, ?rule.name, ?dep, ?deps, "Built target rule dependency dependencies");
+					let deps = util::chain!(dep_res, dep_deps.into_iter());
 
 					Ok(deps)
 				}
 			})
 			.collect::<FuturesUnordered<_>>()
+			.map_ok(|deps| deps.map(Ok))
+			.map_ok(futures::stream::iter)
+			.try_flatten()
 			.collect::<ResultMultiple<Vec<_>>>()
-			.await?
-			.into_iter()
-			.flatten()
-			.collect::<Vec<_>>();
+			.await?;
 
 		Ok(deps)
 	}
