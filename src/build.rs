@@ -502,10 +502,8 @@ impl Builder {
 				}
 			})
 			.collect::<FuturesUnordered<_>>()
-			.collect::<Vec<_>>()
-			.await
-			.into_iter()
-			.collect::<ResultMultiple<Vec<_>>>()?;
+			.collect::<ResultMultiple<Vec<_>>>()
+			.await?;
 
 		// And all output dependencies
 		#[expect(
@@ -535,13 +533,10 @@ impl Builder {
 			})
 			.collect::<FuturesUnordered<_>>()
 			.filter_map(move |res| async move { res.transpose() })
-			.collect::<Vec<_>>()
-			.await
-			.into_iter()
-			.collect::<ResultMultiple<Vec<_>>>()?;
+			.collect::<ResultMultiple<Vec<_>>>()
+			.await?;
 
 		// Then build all dependencies, as well as any dependency files
-		// TODO: Don't collect like 3 times during this
 		let deps = util::chain!(normal_deps, out_deps)
 			.map(|dep| {
 				tracing::trace!(%target, ?rule.name, ?dep, "Found target rule dependency");
@@ -635,10 +630,8 @@ impl Builder {
 				}
 			})
 			.collect::<FuturesUnordered<_>>()
-			.collect::<Vec<_>>()
-			.await
-			.into_iter()
-			.collect::<ResultMultiple<Vec<_>>>()?
+			.collect::<ResultMultiple<Vec<_>>>()
+			.await?
 			.into_iter()
 			.flatten()
 			.collect::<Vec<_>>();
@@ -743,10 +736,8 @@ impl Builder {
 				}
 			})
 			.collect::<FuturesUnordered<_>>()
-			.collect::<Vec<_>>()
-			.await
-			.into_iter()
-			.collect::<ResultMultiple<_>>()?;
+			.collect::<ResultMultiple<_>>()
+			.await?;
 
 		Ok(deps_res)
 	}
@@ -862,10 +853,8 @@ async fn rule_last_build_time(rule: &Rule<ArcStr>) -> Result<Option<SystemTime>,
 			Ok(modified_time)
 		})
 		.collect::<FuturesUnordered<_>>()
-		.collect::<Vec<_>>()
-		.await
-		.into_iter()
-		.collect::<ResultMultiple<Vec<_>>>()?
+		.collect::<ResultMultiple<Vec<_>>>()
+		.await?
 		.into_iter()
 		.min();
 	Ok(built_time)

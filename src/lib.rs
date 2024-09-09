@@ -16,7 +16,8 @@
 	pattern,
 	unsigned_signed_diff,
 	vec_into_raw_parts,
-	ptr_metadata
+	ptr_metadata,
+	extend_one
 )]
 // Lints
 #![allow(

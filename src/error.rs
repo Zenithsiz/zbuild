@@ -606,6 +606,35 @@ pub enum ResultMultiple<C> {
 	Err(Vec<AppError>),
 }
 
+impl<C> Default for ResultMultiple<C>
+where
+	C: Default,
+{
+	fn default() -> Self {
+		Self::Ok(C::default())
+	}
+}
+impl<C, U> Extend<Result<U, AppError>> for ResultMultiple<C>
+where
+	C: Extend<U>,
+{
+	fn extend<T: IntoIterator<Item = Result<U, AppError>>>(&mut self, iter: T) {
+		// TODO: Do this more efficiently?
+		for res in iter {
+			match (&mut *self, res) {
+				// If we have a collection, and we get an item, extend it
+				(Self::Ok(collection), Ok(item)) => collection.extend_one(item),
+				// If we have a collection, but find an error, switch to errors
+				(Self::Ok(_), Err(err)) => *self = Self::Err(vec![err]),
+				// If we have errors and got an item, ignore it
+				(Self::Err(_), Ok(_)) => (),
+				// If we have errors and got an error, extend it
+				(Self::Err(errs), Err(err)) => errs.push(err),
+			}
+		}
+	}
+}
+
 impl<C, T> FromIterator<Result<T, AppError>> for ResultMultiple<C>
 where
 	C: Default + Extend<T>,
