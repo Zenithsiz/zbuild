@@ -112,7 +112,7 @@ impl<K> ExprTree<K> {
 		//       of the form `(String, Pat, Empty)`, with `Pat` matching
 		//       the rest.
 		if let Some((pat, key)) = suffixes.get("") &&
-			let Some(pats) = Self::find_match_pat("", pat)
+			let Some(pats) = Self::find_match_pat("", pat.as_ref())
 		{
 			return Some((key.clone(), pats));
 		}
@@ -125,7 +125,7 @@ impl<K> ExprTree<K> {
 			};
 
 			// Otherwise, we might have found the final value, so test it
-			if let Some(pats) = Self::find_match_pat(pat_value, pat) {
+			if let Some(pats) = Self::find_match_pat(pat_value, pat.as_ref()) {
 				return Some((key.clone(), pats));
 			}
 		}
@@ -134,17 +134,17 @@ impl<K> ExprTree<K> {
 	}
 
 	/// Matches a pattern against a remaining value after it's prefix and suffix have been stripped
-	fn find_match_pat(value: &str, pat: &Option<Pattern>) -> Option<BTreeMap<ArcStr, ArcStr>> {
+	fn find_match_pat(value: &str, pat: Option<&Pattern>) -> Option<BTreeMap<ArcStr, ArcStr>> {
 		let pats = match pat {
 			// If there is any pattern, try to match it
 			Some(pat) => {
 				for op in &pat.ops {
 					match op {
 						// If it needs to be non-empty, check
-						PatternOp::NonEmpty => match value.is_empty() {
-							true => return None,
-							false => continue,
-						},
+						PatternOp::NonEmpty =>
+							if value.is_empty() {
+								return None;
+							},
 					}
 				}
 

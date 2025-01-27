@@ -1,5 +1,5 @@
 // Features
-#![feature(must_not_suspend, strict_provenance)]
+#![feature(must_not_suspend)]
 // Lints
 #![expect(clippy::tests_outside_test_module, reason = "We're an integration test")]
 

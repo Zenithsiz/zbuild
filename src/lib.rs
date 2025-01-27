@@ -5,11 +5,9 @@
 	exit_status_error,
 	decl_macro,
 	box_patterns,
-	async_closure,
 	let_chains,
 	yeet_expr,
 	must_not_suspend,
-	strict_provenance,
 	assert_matches,
 	try_trait_v2,
 	if_let_guard,
@@ -199,7 +197,7 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 	let built_targets = targets
 		.iter()
 		.filter_map(|(_, res)| res.as_ref())
-		.filter(|res| res.as_ref().map_or(false, |res| res.built))
+		.filter(|res| res.as_ref().is_ok_and(|res| res.built))
 		.count();
 	tracing::info!("Built {built_targets} targets");
 	tracing::info!("Checked {total_targets} targets");

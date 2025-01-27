@@ -70,7 +70,6 @@ rust.missing_debug_implementations = "warn"
 rust.noop_method_call = "warn"
 rust.unused_results = "warn"
 rust.explicit_outlives_requirements = "warn"
-rust.fuzzy_provenance_casts = "deny"
 rust.meta_variable_misuse = "warn"
 rust.must_not_suspend = "warn"
 rust.single_use_lifetimes = "warn"
@@ -78,6 +77,9 @@ rust.trivial_numeric_casts = "warn"
 rust.unused_lifetimes = "warn"
 rust.unused_macro_rules = "warn"
 rust.variant_size_differences = "warn"
+
+# TODO: Warn again once we don't need a special nightly flag to enable it
+#rust.fuzzy_provenance_casts = "deny"
 
 # False positives when using tests. Turn on every once in a while
 # and check on the main crate if anything is unused that isn't used
@@ -175,3 +177,9 @@ clippy.panic_in_result_fn = "allow"
 
 # Sometimes small structs defined inline don't need documentation
 clippy.missing_docs_in_private_items = "allow"
+
+# We don't care to order items alphabetically
+clippy.arbitrary_source_item_ordering = "allow"
+
+# Unless there are name collisions, we don't want to import anonymously
+clippy.unused_trait_names = "allow"

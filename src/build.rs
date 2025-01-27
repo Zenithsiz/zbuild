@@ -336,9 +336,8 @@ impl Builder {
 			//       the writer should have priority, so this shouldn't result in much
 			//       waiting for them.
 			let res = build_guard.try_upgrade_into_build().await;
-			match res {
-				Ok(build_guard) => break build_guard,
-				Err(_) => continue,
+			if let Ok(build_guard) = res {
+				break build_guard;
 			}
 		};
 
