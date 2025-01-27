@@ -69,7 +69,10 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 	// Find the zbuild location and change the current directory to it
 	// TODO: Not adjust the zbuild path and read it before?
 	let zbuild_path = match args.zbuild_path {
-		Some(path) => path,
+		Some(path) => path
+			.canonicalize()
+			.context("Unable to canonicalize zbuild path")
+			.map_err(AppError::Other)?,
 		None => self::find_zbuild().await?,
 	};
 	tracing::debug!(?zbuild_path, "Found zbuild path");
