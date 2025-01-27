@@ -462,7 +462,7 @@ decl_error! {
 
 	/// Unknown rule
 	#[source(None)]
-	#[fmt("Unknown rule {rule_name}")]
+	#[fmt("Unknown rule {rule_name:?}")]
 	UnknownRule {
 		/// Rule name
 		rule_name: String,
@@ -470,7 +470,7 @@ decl_error! {
 
 	/// Unknown alias
 	#[source(None)]
-	#[fmt("Unknown alias {alias_name}")]
+	#[fmt("Unknown alias {alias_name:?}")]
 	UnknownAlias {
 		/// Alias name
 		alias_name: String,
@@ -478,7 +478,7 @@ decl_error! {
 
 	/// Unknown pattern
 	#[source(None)]
-	#[fmt("Unknown pattern {pattern_name}")]
+	#[fmt("Unknown pattern {pattern_name:?}")]
 	UnknownPattern {
 		/// Pattern name
 		pattern_name: String,
