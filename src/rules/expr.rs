@@ -10,7 +10,7 @@ pub use self::expr_tree::ExprTree;
 use {
 	super::{
 		alias::{Alias, AliasOp},
-		pattern::{Pattern, PatternOp},
+		pattern::Pattern,
 	},
 	crate::{ast, util::ArcStr},
 	std::fmt,
@@ -148,14 +148,9 @@ impl Expr {
 			.into_iter()
 			.map(|cmpt| match cmpt {
 				ast::ExprCmpt::String(s) => ExprCmpt::String(zbuild_file.slice_from_str(s)),
-				ast::ExprCmpt::Pattern(ast::Pattern { name, ops }) => ExprCmpt::Pattern(Pattern {
+				ast::ExprCmpt::Pattern(ast::Pattern { name, non_empty }) => ExprCmpt::Pattern(Pattern {
 					name: zbuild_file.slice_from_str(name),
-					ops:  ops
-						.into_iter()
-						.map(|op| match op {
-							ast::PatternOp::NonEmpty => PatternOp::NonEmpty,
-						})
-						.collect(),
+					non_empty,
 				}),
 				ast::ExprCmpt::Alias(ast::Alias { name, ops }) => ExprCmpt::Alias(Alias {
 					name: zbuild_file.slice_from_str(name),

@@ -166,19 +166,8 @@ pub struct Pattern<'a> {
 	/// Pattern name
 	pub name: &'a str,
 
-	/// Pattern operators
-	pub ops: Vec<PatternOp>,
-}
-
-/// Pattern operator
-#[derive(PartialEq, Eq, Clone, Hash, Debug)]
-#[expect(
-	missing_copy_implementations,
-	reason = "We might add non-`Copy` fields in the future"
-)]
-pub enum PatternOp {
 	/// Non-empty
-	NonEmpty,
+	pub non_empty: bool,
 }
 
 /// Alias
@@ -212,14 +201,10 @@ impl serde::Serialize for Expr<'_> {
 			.iter()
 			.map(|cmpt| match *cmpt {
 				ExprCmpt::String(s) => s.to_owned(),
-				ExprCmpt::Pattern(Pattern { name, ref ops }) => format!(
-					"^({name}{})",
-					ops.iter()
-						.map(|op| format!("::{}", match op {
-							PatternOp::NonEmpty => "non_empty",
-						}))
-						.join("")
-				),
+				ExprCmpt::Pattern(Pattern { name, non_empty }) => match non_empty {
+					true => format!("^({name}::non_empty)"),
+					false => format!("^({name})"),
+				},
 				ExprCmpt::Alias(Alias { name, ref ops }) => format!(
 					"$({name}{})",
 					ops.iter()
@@ -300,16 +285,17 @@ impl<'a, 'de: 'a> serde::Deserialize<'de> for Expr<'a> {
 								})
 								.collect::<Result<_, _>>()?,
 						}),
-						Kind::Pattern => ExprCmpt::Pattern(Pattern {
-							name,
-							ops: ops
-								.into_iter()
-								.map(|op| match op.trim() {
-									"non_empty" => Ok(PatternOp::NonEmpty),
-									op => Err(D::Error::custom(format!("Unknown pattern operator {op:?}"))),
-								})
-								.collect::<Result<_, _>>()?,
-						}),
+						Kind::Pattern => {
+							let mut non_empty = false;
+							for op in ops {
+								match op.trim() {
+									"non_empty" => non_empty = true,
+									op => return Err(D::Error::custom(format!("Unknown pattern operator {op:?}"))),
+								}
+							}
+
+							ExprCmpt::Pattern(Pattern { name, non_empty })
+						},
 					};
 					cmpts.push(cmpt);
 				},

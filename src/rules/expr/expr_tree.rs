@@ -2,11 +2,7 @@
 
 use {
 	super::Expr,
-	crate::{
-		error::AppError,
-		rules::{pattern::Pattern, PatternOp},
-		util::ArcStr,
-	},
+	crate::{error::AppError, rules::pattern::Pattern, util::ArcStr},
 	itertools::{Itertools, PeekingNext},
 	std::collections::BTreeMap,
 };
@@ -138,14 +134,8 @@ impl<K> ExprTree<K> {
 		let pats = match pat {
 			// If there is any pattern, try to match it
 			Some(pat) => {
-				for op in &pat.ops {
-					match op {
-						// If it needs to be non-empty, check
-						PatternOp::NonEmpty =>
-							if value.is_empty() {
-								return None;
-							},
-					}
+				if pat.non_empty && value.is_empty() {
+					return None;
 				}
 
 				BTreeMap::from([(pat.name.clone(), value.into())])

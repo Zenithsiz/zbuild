@@ -13,7 +13,6 @@ pub use {
 	alias::AliasOp,
 	expr::{Expr, ExprCmpt, ExprTree},
 	item::{DepItem, OutItem},
-	pattern::PatternOp,
 	rule::{Command, Exec, Rule},
 	target::Target,
 };
