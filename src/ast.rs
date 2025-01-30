@@ -5,9 +5,14 @@
 	unused_results,
 	reason = "Many methods return tokens that we don't care about, only that they were consumed"
 )]
+#![expect(meta_variable_misuse, reason = "False positive")]
 
 // Imports
-use {crate::AppError, std::str::pattern::Pattern, zutil_app_error::Context};
+use {
+	crate::AppError,
+	std::{fmt::Write, ptr, str::pattern::Pattern},
+	zutil_app_error::Context,
+};
 
 /// Zbuild ast
 #[derive(Clone, Debug)]
@@ -47,13 +52,13 @@ impl<'a> Parsable<'a> for Ast<'a> {
 		let mut rules = vec![];
 		while !parser.is_finished()? {
 			match parser
-				.parse::<AnyOf4<AliasStmt<'a>, PatStmt<'a>, DefaultStmt<'a>, RuleStmt<'a>>>()
+				.peek::<AnyOf4<TokenAlias<'a>, TokenPat<'a>, TokenDefault<'a>, TokenRule<'a>>>()
 				.context("Expected an alias, default or rule statement")?
 			{
-				AnyOf4::T0(alias) => aliases.push(alias),
-				AnyOf4::T1(pat) => pats.push(pat),
-				AnyOf4::T2(default) => defaults.push(default),
-				AnyOf4::T3(rule) => rules.push(rule),
+				AnyOf4::T0(_) => aliases.push(parser.parse::<AliasStmt<'a>>()?),
+				AnyOf4::T1(_) => pats.push(parser.parse::<PatStmt<'a>>()?),
+				AnyOf4::T2(_) => defaults.push(parser.parse::<DefaultStmt<'a>>()?),
+				AnyOf4::T3(_) => rules.push(parser.parse::<RuleStmt<'a>>()?),
 			}
 		}
 
@@ -166,20 +171,23 @@ impl<'a> Parsable<'a> for RuleStmt<'a> {
 
 		while parser.try_parse::<TokenBracesClose<'a>>().is_err() {
 			match parser
-				.parse::<AnyOf5<AliasStmt<'a>, PatStmt<'a>, TokenOut<'a>, TokenDeps<'a>, TokenExec<'a>>>()
+				.peek::<AnyOf5<TokenAlias<'a>, TokenPat<'a>, TokenOut<'a>, TokenDeps<'a>, TokenExec<'a>>>()
 				.context("Expected an alias, default or rule statement")?
 			{
-				AnyOf5::T0(alias) => aliases.push(alias),
-				AnyOf5::T1(pat) => pats.push(pat),
+				AnyOf5::T0(_) => aliases.push(parser.parse::<AliasStmt<'_>>()?),
+				AnyOf5::T1(_) => pats.push(parser.parse::<PatStmt<'_>>()?),
 				AnyOf5::T2(_) => {
+					parser.parse::<TokenOut<'a>>()?;
 					out.0.extend(parser.parse::<Array<Expr<'a>>>()?.0);
 					parser.parse::<TokenSemi<'a>>()?;
 				},
 				AnyOf5::T3(_) => {
+					parser.parse::<TokenDeps<'a>>()?;
 					deps.0.extend(parser.parse::<Array<Expr<'a>>>()?.0);
 					parser.parse::<TokenSemi<'a>>()?;
 				},
 				AnyOf5::T4(_) => {
+					parser.parse::<TokenExec<'a>>()?;
 					exec.0.extend(parser.parse::<Array<Command<'a>>>()?.0);
 					parser.parse::<TokenSemi<'a>>()?;
 				},
@@ -351,11 +359,13 @@ impl<'a> ExprCmpt<'a> {
 	/// Parses a list of expression components from a parser
 	pub fn parse_many(parser: &mut Parser<'a>, cmpts: &mut Vec<Self>) -> Result<(), AppError> {
 		match parser
-			.parse::<AnyOf2<Ident<'a>, TokenDoubleQuote<'a>>>()
+			.peek::<AnyOf2<TokenXIDStart<'a>, TokenDoubleQuote<'a>>>()
 			.context("Expected an identifier, or literal")?
 		{
 			// If we get a sole identifier, that's the only component
-			AnyOf2::T0(ident) => {
+			AnyOf2::T0(_) => {
+				let ident = parser.parse::<Ident<'a>>()?;
+
 				// Parse all of the operators
 				let mut ops = vec![];
 				while parser.try_parse::<TokenDot<'a>>().is_ok() {
@@ -370,6 +380,7 @@ impl<'a> ExprCmpt<'a> {
 			},
 			// If we get a literal, split all format strings inside of it.
 			AnyOf2::T1(_) => {
+				parser.parse::<TokenDoubleQuote<'a>>()?;
 				while parser.try_parse::<TokenDoubleQuote<'a>>().is_err() {
 					let Some(end_idx) = parser.remaining().find(['{', '"']) else {
 						zutil_app_error::bail!("Expected closing `\"` after `\"`");
@@ -462,6 +473,18 @@ decl_tokens! {
 	TokenDoubleQuote = '"';
 	TokenEq = '=';
 	TokenSemi = ';';
+}
+
+#[expect(dead_code, reason = "We don't need the token, but it's useful to have it.")]
+struct TokenXIDStart<'a>(pub &'a str);
+
+impl<'a> Parsable<'a> for TokenXIDStart<'a> {
+	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
+		parser
+			.strip_prefix(unicode_ident::is_xid_start)
+			.map(Self)
+			.context("Expected `XID_START`")
+	}
 }
 
 pub trait Parsable<'a>: Sized {
@@ -565,6 +588,11 @@ impl<'a> Parser<'a> {
 		*self = parser;
 		Ok(value)
 	}
+
+	/// Peeks `T` from this parser, without advancing it
+	pub fn peek<T: Parsable<'a>>(&self) -> Result<T, AppError> {
+		self.clone().parse::<T>()
+	}
 }
 
 macro decl_any_of($Name:ident, $($T:ident),* $(,)?) {
@@ -592,18 +620,17 @@ macro decl_any_of($Name:ident, $($T:ident),* $(,)?) {
 				};
 			)*
 
+			let mut err = format!("Expected one of the following {} matches:", ${count($T)});
 			$(
-				let ${concat(at_, $T)} = self::at_most(${concat(parser_, $T)}.remaining(), 50);
+				match ptr::eq(${concat(parser_, $T)}.remaining(), parser.remaining()) {
+					// If the parser hasn't moved, don't print the postion
+					true => write!(err, "\n{}", ${concat(err_, $T)}),
+					// Otherwise, print the error and position
+					false => write!(err, "\n{} at {:?}", ${concat(err_, $T)}, self::at_most(${concat(parser_, $T)}.remaining(), 50)),
+				}.expect("Failed to write into string");
 			)*
 
-			zutil_app_error::bail!(
-				concat!(
-					"Expected one of the following matches:",
-					$( "\n{} at {:?}", ${ignore($T)} )*
-				),
-
-				$(${concat(err_, $T)}, ${concat(at_, $T)},)*
-			)
+			Err(zutil_app_error::AppError::msg(err))
 		}
 	}
 }
