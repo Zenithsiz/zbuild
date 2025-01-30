@@ -8,10 +8,6 @@ pub use self::expr_tree::ExprTree;
 
 // Imports
 use {
-	super::{
-		alias::{Alias, AliasOp},
-		pattern::Pattern,
-	},
 	crate::{ast, util::ArcStr},
 	std::fmt,
 };
@@ -22,11 +18,14 @@ pub enum ExprCmpt {
 	/// String
 	String(ArcStr),
 
-	/// Pattern
-	Pattern(Pattern),
+	/// Identifier
+	Ident {
+		/// Name
+		name: ArcStr,
 
-	/// Alias
-	Alias(Alias),
+		/// Operators
+		ops: Vec<ExprOp>,
+	},
 }
 
 impl ExprCmpt {
@@ -39,35 +38,17 @@ impl ExprCmpt {
 	/// Returns this expression as a string, if it is one.
 	#[must_use]
 	pub const fn as_string(&self) -> Option<&ArcStr> {
-		#[expect(clippy::wildcard_enum_match_arm, reason = "We only care about a specific variant")]
 		match self {
 			Self::String(v) => Some(v),
-			_ => None,
+			Self::Ident { .. } => None,
 		}
 	}
 
 	/// Converts this component into a string, if it's a string.
 	pub fn try_into_string(self) -> Result<ArcStr, Self> {
-		#[expect(clippy::wildcard_enum_match_arm, reason = "We only care about a specific variant")]
 		match self {
 			Self::String(v) => Ok(v),
-			_ => Err(self),
-		}
-	}
-
-	/// Returns `true` if the component is [`ExprCmpt::Pattern`].
-	#[must_use]
-	pub const fn is_pattern(&self) -> bool {
-		matches!(self, Self::Pattern(_))
-	}
-
-	/// Returns this expression as a pattern, if it is one.
-	#[must_use]
-	pub const fn as_pattern(&self) -> Option<&Pattern> {
-		#[expect(clippy::wildcard_enum_match_arm, reason = "We only care about a specific variant")]
-		match self {
-			Self::Pattern(v) => Some(v),
-			_ => None,
+			Self::Ident { .. } => Err(self),
 		}
 	}
 }
@@ -99,7 +80,7 @@ impl Expr {
 			// If it's a string, try to use `push_str` for merging strings.
 			ExprCmpt::String(s) => self.push_str(s),
 
-			cmpt @ (ExprCmpt::Alias(_) | ExprCmpt::Pattern(_)) => self.cmpts.push(cmpt.clone()),
+			cmpt @ ExprCmpt::Ident { .. } => self.cmpts.push(cmpt.clone()),
 		}
 	}
 
@@ -148,19 +129,15 @@ impl Expr {
 			.into_iter()
 			.map(|cmpt| match cmpt {
 				ast::ExprCmpt::String(s) => ExprCmpt::String(zbuild_file.slice_from_str(s)),
-				ast::ExprCmpt::Pattern(ast::Pattern { name, non_empty }) => ExprCmpt::Pattern(Pattern {
-					name: zbuild_file.slice_from_str(name),
-					non_empty,
-				}),
-				ast::ExprCmpt::Alias(ast::Alias { name, ops }) => ExprCmpt::Alias(Alias {
-					name: zbuild_file.slice_from_str(name),
+				ast::ExprCmpt::Ident { ident, ops } => ExprCmpt::Ident {
+					name: zbuild_file.slice_from_str(ident.0),
 					ops:  ops
 						.into_iter()
 						.map(|op| match op {
-							ast::AliasOp::DirName => AliasOp::DirName,
+							ast::ExprOp::DirName => ExprOp::DirName,
 						})
 						.collect(),
-				}),
+				},
 			})
 			.collect();
 
@@ -195,8 +172,30 @@ impl fmt::Display for ExprCmpt {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::String(s) => write!(f, "{s}"),
-			Self::Pattern(pat) => write!(f, "{pat}"),
-			Self::Alias(alias) => write!(f, "{alias}"),
+			Self::Ident { name, ops } => {
+				write!(f, "{name}")?;
+				for op in ops {
+					match op {
+						ExprOp::DirName => write!(f, ".dir_name")?,
+					}
+				}
+				Ok(())
+			},
+		}
+	}
+}
+
+/// Expression operators
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
+pub enum ExprOp {
+	/// Directory name, `.dir_name`.
+	DirName,
+}
+
+impl fmt::Display for ExprOp {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::DirName => write!(f, ".dir_name"),
 		}
 	}
 }

@@ -15,13 +15,13 @@ where
 	T: AsRef<[&'a str]>,
 {
 	let temp_dir = TempDir::new("zbuild").context("Unable to create temporary directory")?;
-	let zbuild_yaml = temp_dir.path().join("zbuild.yaml");
+	let zbuild_zb = temp_dir.path().join("zbuild.zb");
 
-	fs::write(&zbuild_yaml, zbuild_manifest).context("Unable to write zbuild manifest")?;
+	fs::write(&zbuild_zb, zbuild_manifest).context("Unable to write zbuild manifest")?;
 
 	let args = Args {
 		targets: targets.as_ref().iter().copied().map(str::to_owned).collect(),
-		zbuild_path: Some(zbuild_yaml),
+		zbuild_path: Some(zbuild_zb),
 		..Args::default()
 	};
 	tracing::info!(?args, "Arguments");

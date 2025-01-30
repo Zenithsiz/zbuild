@@ -50,16 +50,10 @@ impl<T> Target<T> {
 
 impl Target<Expr> {
 	/// Creates a new target from it's ast
-	pub fn from_ast(zbuild_file: &ArcStr, ast: ast::Target<'_>) -> Self {
-		match ast {
-			ast::Target::File(file) => Self::File {
-				file:      Expr::from_ast(zbuild_file, file),
-				is_static: false,
-			},
-			ast::Target::Rule { rule } => Self::Rule {
-				rule: Expr::from_ast(zbuild_file, rule),
-				pats: Arc::new(BTreeMap::new()),
-			},
+	pub fn from_ast(zbuild_file: &ArcStr, target: ast::Expr<'_>) -> Self {
+		Self::File {
+			is_static: target.is_static,
+			file:      Expr::from_ast(zbuild_file, target),
 		}
 	}
 }

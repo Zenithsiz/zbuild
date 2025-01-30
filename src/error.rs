@@ -2,7 +2,7 @@
 
 // Imports
 use {
-	crate::rules::{AliasOp, Command, Expr, Target},
+	crate::rules::{Command, Expr, ExprOp, Target},
 	itertools::{Itertools, Position as ItertoolsPos},
 	std::{
 		convert::Infallible,
@@ -278,22 +278,6 @@ decl_error! {
 		file_path: PathBuf,
 	},
 
-	/// Parse yaml
-	#[from_fn(
-		fn parse_yaml<P: Into<PathBuf>>(source: serde_yaml::Error)(
-			yaml_path: P => yaml_path.into()
-		)
-	)]
-	#[source(Some(source))]
-	#[fmt("Unable to parse yaml file {yaml_path:?}")]
-	ParseYaml {
-		/// Underlying error
-		source: serde_yaml::Error,
-
-		/// Yaml path
-		yaml_path: PathBuf,
-	},
-
 	/// Spawn command
 	#[from_fn(
 		fn spawn_command<T: fmt::Display>(source: io::Error)(
@@ -353,7 +337,7 @@ decl_error! {
 
 	/// Zbuild not found
 	#[source(None)]
-	#[fmt("No `zbuild.yaml` file found in current or parent directories.\nYou can use `--path {{zbuild-path}}` in order to specify the manifest's path")]
+	#[fmt("No `zbuild.zb` file found in current or parent directories.\nYou can use `--path {{zbuild-path}}` in order to specify the manifest's path")]
 	ZBuildNotFound {},
 
 	/// Path had no parent
@@ -468,12 +452,12 @@ decl_error! {
 		rule_name: String,
 	},
 
-	/// Unknown alias
+	/// Unknown expression
 	#[source(None)]
-	#[fmt("Unknown alias {alias_name:?}")]
-	UnknownAlias {
-		/// Alias name
-		alias_name: String,
+	#[fmt("Unknown expression {expr_ident:?}")]
+	UnknownExpr {
+		/// Expression identifier
+		expr_ident: String,
 	},
 
 	/// Unknown pattern
@@ -484,10 +468,10 @@ decl_error! {
 		pattern_name: String,
 	},
 
-	/// Unresolved alias or patterns
+	/// Unresolved aliases or patterns
 	#[source(None)]
-	#[fmt("Expression had unresolved alias or patterns: {expr} ({expr_cmpts:?})")]
-	UnresolvedAliasOrPats {
+	#[fmt("Expression had unresolved aliases or patterns: {expr} ({expr_cmpts:?})")]
+	UnresolvedAliasesOrPats {
 		/// Formatted expression
 		expr: String,
 
@@ -506,16 +490,16 @@ decl_error! {
 		expr_cmpts: Vec<String>,
 	},
 
-	/// Alias operation
-	#[from_fn( fn alias_op(source: Self => Box::new(source))(op: AliasOp) )]
+	/// Expr operation
+	#[from_fn( fn expr_op(source: Self => Box::new(source))(op: ExprOp) )]
 	#[source(Some(&**source))]
-	#[fmt("Unable to apply alias operation `{op}`")]
-	AliasOp {
+	#[fmt("Unable to apply expr operation `{op}`")]
+	ExprOp {
 		/// Underlying error
 		source: Box<Self>,
 
 		/// Operation
-		op: AliasOp,
+		op: ExprOp,
 	},
 
 	/// Dependencies file missing `:`

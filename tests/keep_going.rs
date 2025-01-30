@@ -48,42 +48,48 @@ async fn keep_going() -> ExitResult {
 /// since `C2` exits after `B` errors, so nothing else should be built.
 async fn inner(keep_going: bool) -> Result<(), anyhow::Error> {
 	let temp_dir = TempDir::new("zbuild").context("Unable to create temporary directory")?;
-	let zbuild_yaml = temp_dir.path().join("zbuild.yaml");
+	let zbuild_zb = temp_dir.path().join("zbuild.zb");
 
 	// TODO: Instead of sleeping, use `inotify` to wait for other
 	//       actions to happen?
 	fs::write(
-		&zbuild_yaml,
-		r#"---
-rules:
-  a:
-    out: [a]
-    deps: [b, c1]
-    exec:
-      - [touch, a]
-  b:
-    out: [b]
-    exec:
-      - [sleep, "0.1"]
-      - ["false"]
-      - [touch, b]
-  c1:
-    out: [c1]
-    deps: [c2]
-    exec:
-      - [touch, c1]
-  c2:
-    out: [c2]
-    exec:
-      - [sleep, "0.2"]
-      - [touch, c2]
-"#,
+		&zbuild_zb,
+		r#"
+rule a {
+	out "a";
+	deps ["b", "c1"];
+	exec ["touch" "a"];
+}
+
+rule b {
+	out "b";
+	exec [
+		"sleep" "0.1",
+		"false",
+		"touch" "b",
+	];
+}
+
+rule c1 {
+	out "c1";
+	deps "c2";
+	exec ["touch" "c1"];
+}
+
+rule c2 {
+	out "c2";
+	exec [
+		"sleep" "0.2",
+		"touch" "c2"
+	];
+}
+		"#,
 	)
 	.context("Unable to write zbuild manifest")?;
 
 	let args = Args {
 		targets: ["a".to_owned()].into(),
-		zbuild_path: Some(zbuild_yaml),
+		zbuild_path: Some(zbuild_zb),
 		keep_going,
 		..Args::default()
 	};

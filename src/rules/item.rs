@@ -4,7 +4,7 @@
 use {
 	super::Expr,
 	crate::{ast, util::ArcStr},
-	std::{collections::BTreeMap, fmt, sync::Arc},
+	std::fmt,
 };
 
 
@@ -23,17 +23,15 @@ pub enum OutItem<T> {
 
 impl OutItem<Expr> {
 	/// Creates a new item from it's `ast`.
-	pub fn from_ast(zbuild_file: &ArcStr, item: ast::OutItem<'_>) -> Self {
-		match item {
-			ast::OutItem::File(file) => Self::File {
-				file:         Expr::from_ast(zbuild_file, file),
-				is_deps_file: false,
-			},
-			ast::OutItem::DepsFile { deps_file } => Self::File {
-				file:         Expr::from_ast(zbuild_file, deps_file),
-				is_deps_file: true,
-			},
-		}
+	pub fn from_ast(zbuild_file: &ArcStr, item: ast::Expr<'_>) -> Result<Self, anyhow::Error> {
+		let is_deps_file = item.is_deps_file;
+		anyhow::ensure!(!item.is_opt, "Output items cannot be optional");
+		anyhow::ensure!(!item.is_static, "Output items cannot be static");
+
+		Ok(Self::File {
+			file: Expr::from_ast(zbuild_file, item),
+			is_deps_file,
+		})
 	}
 }
 
@@ -70,71 +68,20 @@ pub enum DepItem<T> {
 		/// If a dependencies file
 		is_deps_file: bool,
 	},
-
-	/// Rule
-	Rule {
-		/// Rule name
-		name: T,
-
-		/// All rule patterns
-		pats: Arc<BTreeMap<T, T>>,
-	},
 }
 
 impl DepItem<Expr> {
 	/// Creates a new item from it's `ast`.
-	pub fn from_ast(zbuild_file: &ArcStr, item: ast::DepItem<'_>) -> Self {
-		match item {
-			ast::DepItem::File(file) => Self::File {
-				file:         Expr::from_ast(zbuild_file, file),
-				is_optional:  false,
-				is_static:    false,
-				is_deps_file: false,
-			},
-			ast::DepItem::Rule { rule, pats } => {
-				let pats = pats
-					.into_iter()
-					.map(|(pat, value)| (Expr::from_ast(zbuild_file, pat), Expr::from_ast(zbuild_file, value)))
-					.collect();
-				Self::Rule {
-					name: Expr::from_ast(zbuild_file, rule),
-					pats: Arc::new(pats),
-				}
-			},
-			ast::DepItem::DepsFile { deps_file } => Self::File {
-				file:         Expr::from_ast(zbuild_file, deps_file),
-				is_optional:  false,
-				is_static:    false,
-				is_deps_file: true,
-			},
-			ast::DepItem::Static { item: static_item } => match static_item {
-				ast::StaticDepItem::File(file) => Self::File {
-					file:         Expr::from_ast(zbuild_file, file),
-					is_optional:  false,
-					is_static:    true,
-					is_deps_file: false,
-				},
-				ast::StaticDepItem::DepsFile { deps_file } => Self::File {
-					file:         Expr::from_ast(zbuild_file, deps_file),
-					is_optional:  false,
-					is_static:    true,
-					is_deps_file: true,
-				},
-			},
-			ast::DepItem::Opt { item: opt_item } => match opt_item {
-				ast::OptDepItem::File(file) => Self::File {
-					file:         Expr::from_ast(zbuild_file, file),
-					is_optional:  true,
-					is_static:    true,
-					is_deps_file: false,
-				},
-				ast::OptDepItem::DepsFile { deps_file } => Self::File {
-					file:         Expr::from_ast(zbuild_file, deps_file),
-					is_optional:  true,
-					is_static:    true,
-					is_deps_file: true,
-				},
-			},
+	pub fn from_ast(zbuild_file: &ArcStr, item: ast::Expr<'_>) -> Self {
+		let is_optional = item.is_opt;
+		let is_static = item.is_static;
+		let is_deps_file = item.is_deps_file;
+
+		Self::File {
+			file: Expr::from_ast(zbuild_file, item),
+			is_optional,
+			is_static,
+			is_deps_file,
 		}
 	}
 }
@@ -161,21 +108,6 @@ impl<T: fmt::Display> fmt::Display for DepItem<T> {
 				}
 
 				write!(f, "{file}")?;
-				Ok(())
-			},
-			Self::Rule { ref name, ref pats } => {
-				write!(f, "rule: {name}")?;
-
-				if !pats.is_empty() {
-					write!(f, " (")?;
-
-					for (pat, value) in &**pats {
-						write!(f, "{pat}={value}, ")?;
-					}
-
-					write!(f, ")")?;
-				}
-
 				Ok(())
 			},
 		}

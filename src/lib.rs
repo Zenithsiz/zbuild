@@ -15,7 +15,10 @@
 	unsigned_signed_diff,
 	vec_into_raw_parts,
 	ptr_metadata,
-	extend_one
+	extend_one,
+	try_blocks,
+	macro_metavar_expr,
+	macro_metavar_expr_concat
 )]
 // Lints
 #![allow(
@@ -85,15 +88,19 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 	// Parse the ast
 	let zbuild_file = fs::read_to_string(zbuild_path).map_err(AppError::read_file(&zbuild_path))?;
 	let zbuild_file = ArcStr::from(zbuild_file);
-	tracing::trace!(?zbuild_file, "Read zbuild.yaml");
-	let ast = serde_yaml::from_str::<Ast<'_>>(&zbuild_file).map_err(AppError::parse_yaml(&zbuild_path))?;
+	tracing::trace!(?zbuild_file, "Read zbuild.zb");
+	let ast = Ast::parse_full(&zbuild_file)
+		.context("Unable to parse zbuild file")
+		.map_err(AppError::Other)?;
 	tracing::trace!(?ast, "Parsed ast");
 
 	// Create the expander
 	let expander = Expander::new();
 
 	// Build the rules
-	let rules = Rules::from_ast(&zbuild_file, ast);
+	let rules = Rules::from_ast(&zbuild_file, ast)
+		.context("Unable to build rules")
+		.map_err(AppError::Other)?;
 	tracing::trace!(?rules, "Built rules");
 
 	// Get the max number of jobs we can execute at once
@@ -224,7 +231,7 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 	let mut cur_path = cur_path.as_path();
 
 	loop {
-		let zbuild_path = cur_path.join("zbuild.yaml");
+		let zbuild_path = cur_path.join("zbuild.zb");
 		match util::fs_try_exists_symlink(&zbuild_path)
 			.await
 			.map_err(AppError::check_file_exists(&zbuild_path))?

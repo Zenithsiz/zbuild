@@ -1,7 +1,6 @@
 //! Rules
 
 // Modules
-mod alias;
 mod expr;
 mod item;
 mod pattern;
@@ -10,9 +9,9 @@ mod target;
 
 // Exports
 pub use {
-	alias::AliasOp,
-	expr::{Expr, ExprCmpt, ExprTree},
+	expr::{Expr, ExprCmpt, ExprOp, ExprTree},
 	item::{DepItem, OutItem},
+	pattern::Pattern,
 	rule::{Command, Exec, Rule},
 	target::Target,
 };
@@ -36,6 +35,12 @@ pub struct Rules {
 	/// use.
 	pub aliases: Arc<IndexMap<ArcStr, Expr>>,
 
+	/// Patterns.
+	///
+	/// These are available for the whole program to
+	/// use.
+	pub pats: Arc<IndexMap<ArcStr, Pattern>>,
+
 	/// Default targets to build
 	pub default: Vec<Target<Expr>>,
 
@@ -45,31 +50,47 @@ pub struct Rules {
 
 impl Rules {
 	/// Creates all rules from the ast
-	#[must_use]
-	pub fn from_ast(zbuild_file: &ArcStr, ast: Ast<'_>) -> Self {
+	pub fn from_ast(zbuild_file: &ArcStr, ast: Ast<'_>) -> Result<Self, anyhow::Error> {
 		let aliases = ast
 			.aliases
 			.into_iter()
-			.map(|(alias, value)| (zbuild_file.slice_from_str(alias), Expr::from_ast(zbuild_file, value)))
+			.map(|alias| {
+				(
+					zbuild_file.slice_from_str(alias.name.0),
+					Expr::from_ast(zbuild_file, alias.value),
+				)
+			})
+			.collect();
+		let pats = ast
+			.pats
+			.into_iter()
+			.map(|pat| {
+				let name = zbuild_file.slice_from_str(pat.name.0);
+				(name.clone(), Pattern {
+					name,
+					non_empty: pat.non_empty,
+				})
+			})
 			.collect();
 		let default = ast
-			.default
+			.defaults
 			.into_iter()
-			.map(|target| Target::from_ast(zbuild_file, target))
+			.map(|target| Target::from_ast(zbuild_file, target.default))
 			.collect();
 		let rules = ast
 			.rules
 			.into_iter()
-			.map(|(name, rule)| {
-				let name = zbuild_file.slice_from_str(name);
-				(name.clone(), Rule::from_ast(zbuild_file, name, rule))
+			.map(|rule| try {
+				let name = zbuild_file.slice_from_str(rule.name.0);
+				(name, Rule::from_ast(zbuild_file, rule)?)
 			})
-			.collect();
+			.collect::<Result<_, anyhow::Error>>()?;
 
-		Self {
+		Ok(Self {
 			aliases: Arc::new(aliases),
+			pats: Arc::new(pats),
 			default,
 			rules,
-		}
+		})
 	}
 }

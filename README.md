@@ -4,15 +4,15 @@ zbuild is a modern makefile-like build automation tool.
 
 # Guide
 
-Zbuild uses a yaml file to specify all rules. It will look for for the nearest `zbuild.yaml` file in the current or parent directories.
+Zbuild uses a file to specify all rules. It will look for for the nearest `zbuild.zb` file in the current or parent directories.
 
-See the [Guide](./GUIDE.md) for a proper introduction to zbuild.
+<!-- TODO: Re-create the guide and link it here. -->
 
 # Examples
 
 See the `examples/` directory for examples.
 
-In particular the `examples/simple_c/zbuild.yaml` is a fully documented example that helps you understand how zbuild works.
+In particular the `examples/simple_c/zbuild.zb` is a fully documented example that helps you understand how zbuild works.
 
 # Watching
 

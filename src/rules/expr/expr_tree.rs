@@ -3,6 +3,7 @@
 use {
 	super::Expr,
 	crate::{error::AppError, rules::pattern::Pattern, util::ArcStr},
+	indexmap::IndexMap,
 	itertools::{Itertools, PeekingNext},
 	std::collections::BTreeMap,
 };
@@ -33,7 +34,7 @@ impl<K> ExprTree<K> {
 	/// The expression must not contain any aliases.
 	///
 	/// Returns the old key if the expression already existed.
-	pub fn insert(&mut self, expr: &Expr, key: K) -> Result<Option<K>, AppError> {
+	pub fn insert(&mut self, expr: &Expr, key: K, pats: &[&IndexMap<ArcStr, Pattern>]) -> Result<Option<K>, AppError> {
 		let mut cmpts = expr.cmpts.iter();
 
 		// Get all components from the start that are strings
@@ -46,8 +47,22 @@ impl<K> ExprTree<K> {
 
 		// Get the (possible) pattern in the middle
 		let pat = cmpts
-			.peeking_next(|cmpt| cmpt.is_pattern())
-			.map(|cmpt| cmpt.as_pattern().expect("Just checked"))
+			.peeking_next(|cmpt| match cmpt {
+				super::ExprCmpt::String(_) => false,
+				super::ExprCmpt::Ident { name, .. } => pats.iter().any(|pats| pats.contains_key(name)),
+			})
+			.map(|cmpt| match cmpt {
+				super::ExprCmpt::String(_) => unreachable!("Just checked"),
+				super::ExprCmpt::Ident { name, .. } => {
+					for pats in pats {
+						if let Some(pat) = pats.get(name) {
+							return pat;
+						}
+					}
+
+					unreachable!("Just checked")
+				},
+			})
 			.cloned();
 
 		// Then get the rest of the string

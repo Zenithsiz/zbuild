@@ -14,12 +14,12 @@ use {anyhow::Context, zbuild::ExitResult};
 #[tracing_test::traced_test]
 async fn basic_single() -> ExitResult {
 	let temp_dir = util::with_zbuild(
-		"---
-rules:
-  create_file:
-    out: [file.out]
-    exec:
-      - [touch, file.out]",
+		r#"
+rule create_file {
+	out "file.out";
+	exec ["touch" "file.out"];
+}
+		"#,
 		["file.out"],
 	)
 	.await?;

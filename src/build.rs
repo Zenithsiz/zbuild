@@ -114,14 +114,14 @@ impl Builder {
 				let output_file = match output {
 					OutItem::File { file: output_file, .. } => output_file,
 				};
-				let expand_visitor = expand::Visitor::from_aliases([&rule.aliases, &rules.aliases])
-					.with_default_pat(expand::FlowControl::Keep);
+				let expand_visitor =
+					expand::Visitor::new([&rule.aliases, &rules.aliases], [&rule.pats, &rules.pats], []);
 				let output_file = expander.expand_expr(output_file, &expand_visitor)?;
 
 
 				// Then try to insert it
 				if let Some(prev_rule_name) = rule_output_tree
-					.insert(&output_file, rule_name.clone())
+					.insert(&output_file, rule_name.clone(), &[&rule.pats, &rules.pats])
 					.context("Unable to add rule output to tree")
 					.map_err(AppError::Other)?
 				{
@@ -206,7 +206,10 @@ impl Builder {
 			.ok_or_else(|| AppError::UnknownRule {
 				rule_name: (*target_rule.name).to_owned(),
 			})?;
-		let expand_visitor = expand::Visitor::new([&rule.aliases, &self.rules.aliases], [&target_rule.pats]);
+		let expand_visitor =
+			expand::Visitor::new([&rule.aliases, &self.rules.aliases], [&rule.pats, &self.rules.pats], [
+				&target_rule.pats,
+			]);
 		let rule = self
 			.expander
 			.expand_rule(rule, &expand_visitor)
@@ -244,7 +247,7 @@ impl Builder {
 		reason: BuildReason,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
 		// Expand the target
-		let expand_visitor = expand::Visitor::from_aliases([&self.rules.aliases]);
+		let expand_visitor = expand::Visitor::new([&self.rules.aliases], [&self.rules.pats], []);
 		let target = self
 			.expander
 			.expand_target(target, &expand_visitor)
@@ -465,12 +468,6 @@ impl Builder {
 				is_optional:  bool,
 				exists:       bool,
 			},
-
-			/// Rule
-			Rule {
-				name: ArcStr,
-				pats: Arc<BTreeMap<ArcStr, ArcStr>>,
-			},
 		}
 
 		// Gather all normal dependencies
@@ -493,10 +490,6 @@ impl Builder {
 						exists: util::fs_try_exists_symlink(&**file)
 							.await
 							.map_err(AppError::check_file_exists(&**file))?,
-					}),
-					DepItem::Rule { ref name, ref pats } => Ok(Dep::Rule {
-						name: name.clone(),
-						pats: Arc::clone(pats),
 					}),
 				}
 			})
@@ -556,12 +549,6 @@ impl Builder {
 							file: file.clone(),
 							is_static,
 						}),
-
-						// If a rule, always build
-						Dep::Rule { ref name, ref pats } => Some(Target::Rule {
-							rule: name.clone(),
-							pats: Arc::clone(pats),
-						}),
 					};
 
 					// Then build it, if we should
@@ -590,7 +577,6 @@ impl Builder {
 					};
 
 					// If the dependency if a dependency deps file or an output deps file (and exists), build it's dependencies too
-					#[expect(clippy::wildcard_enum_match_arm, reason = "We only care about some variants")]
 					let dep_deps = match &dep {
 						// Non-optional we don't check if they exist, so that an error
 						// pops up if they don't.
@@ -619,7 +605,7 @@ impl Builder {
 							.build_deps_file(target, file, rule, ignore_missing, reason)
 							.await
 							.map_err(AppError::build_deps_file(&**file))?,
-						_ => vec![],
+						Dep::File { .. } => vec![],
 					};
 					tracing::trace!(%target, ?rule.name, ?dep, ?dep_res, ?dep_deps, "Built target rule dependency dependencies");
 
