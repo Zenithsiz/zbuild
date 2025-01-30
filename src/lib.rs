@@ -51,7 +51,6 @@ use {
 		expand::Expander,
 		rules::Rules,
 	},
-	anyhow::Context,
 	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
 	std::{
 		collections::BTreeMap,
@@ -65,6 +64,7 @@ use {
 	},
 	util::ArcStr,
 	watcher::Watcher,
+	zutil_app_error::Context,
 };
 
 #[expect(clippy::too_many_lines, reason = "TODO: Split it up more")]
@@ -72,10 +72,7 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 	// Find the zbuild location and change the current directory to it
 	// TODO: Not adjust the zbuild path and read it before?
 	let zbuild_path = match args.zbuild_path {
-		Some(path) => path
-			.canonicalize()
-			.context("Unable to canonicalize zbuild path")
-			.map_err(AppError::Other)?,
+		Some(path) => path.canonicalize().context("Unable to canonicalize zbuild path")?,
 		None => self::find_zbuild().await?,
 	};
 	tracing::debug!(?zbuild_path, "Found zbuild path");
@@ -83,24 +80,21 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 	let zbuild_path = zbuild_path.file_name().expect("Zbuild path had no file name");
 	let zbuild_path = Path::new(zbuild_path);
 	tracing::debug!(?zbuild_dir, "Moving to zbuild directory");
-	env::set_current_dir(zbuild_dir).map_err(AppError::set_current_dir(zbuild_dir))?;
+	env::set_current_dir(zbuild_dir).with_context(|| format!("Unable to set current directory to {zbuild_dir:?}"))?;
 
 	// Parse the ast
-	let zbuild_file = fs::read_to_string(zbuild_path).map_err(AppError::read_file(&zbuild_path))?;
+	let zbuild_file =
+		fs::read_to_string(zbuild_path).with_context(|| format!("Unable to read zbuild file {zbuild_path:?}"))?;
 	let zbuild_file = ArcStr::from(zbuild_file);
 	tracing::trace!(?zbuild_file, "Read zbuild.zb");
-	let ast = Ast::parse_full(&zbuild_file)
-		.context("Unable to parse zbuild file")
-		.map_err(AppError::Other)?;
+	let ast = Ast::parse_full(&zbuild_file).context("Unable to parse zbuild file")?;
 	tracing::trace!(?ast, "Parsed ast");
 
 	// Create the expander
 	let expander = Expander::new();
 
 	// Build the rules
-	let rules = Rules::from_ast(&zbuild_file, ast)
-		.context("Unable to build rules")
-		.map_err(AppError::Other)?;
+	let rules = Rules::from_ast(&zbuild_file, ast).context("Unable to build rules")?;
 	tracing::trace!(?rules, "Built rules");
 
 	// Get the max number of jobs we can execute at once
@@ -111,7 +105,7 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 		},
 		Some(jobs) => jobs,
 		None => thread::available_parallelism()
-			.map_err(AppError::get_default_jobs())?
+			.context("Unable to query system for available parallelism for default number of jobs")?
 			.into(),
 	};
 	tracing::debug!(?jobs, "Concurrent jobs");
@@ -162,8 +156,7 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 		!args.watch && !args.keep_going,
 		args.always_build,
 	)
-	.context("Unable to create builder")
-	.map_err(AppError::Other)?;
+	.context("Unable to create builder")?;
 	let builder = Arc::new(builder);
 
 	// Then create the watcher, if we're watching
@@ -217,29 +210,32 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 		false => {
 			tracing::error!("One or more builds failed:");
 			for (target, err) in failed_targets {
-				tracing::error!(err=%err.pretty(), "Failed to build target {target}");
+				tracing::error!(err=%error::pretty(&err), "Failed to build target {target}");
 			}
 
-			Err(AppError::ExitDueToFailedBuilds {})
+			Err(AppError::msg("Exiting with non-0 due to failed builds"))
 		},
 	}
 }
 
 /// Finds the nearest zbuild file
 async fn find_zbuild() -> Result<PathBuf, AppError> {
-	let cur_path = env::current_dir().map_err(AppError::get_current_dir())?;
+	let cur_path = env::current_dir().context("Unable to get current directory")?;
 	let mut cur_path = cur_path.as_path();
 
 	loop {
 		let zbuild_path = cur_path.join("zbuild.zb");
 		match util::fs_try_exists_symlink(&zbuild_path)
 			.await
-			.map_err(AppError::check_file_exists(&zbuild_path))?
+			.with_context(|| format!("Unable to check if file exists {zbuild_path:?}"))?
 		{
 			true => return Ok(zbuild_path),
 			false => match cur_path.parent() {
 				Some(parent) => cur_path = parent,
-				None => return Err(AppError::ZBuildNotFound {}),
+				None => zutil_app_error::bail!(
+					"No `zbuild.zb` file found in current or parent directories.\nYou can use `--path \
+					 {{zbuild-path}}` in order to specify the manifest's path"
+				),
 			},
 		}
 	}
@@ -273,7 +269,7 @@ async fn build_target<T: BuildableTargetInner + fmt::Display + fmt::Debug>(
 			Ok(())
 		},
 		Err(err) => {
-			tracing::error!(%target, err=%err.pretty(), "Unable to build target");
+			tracing::error!(%target, err=%error::pretty(&err), "Unable to build target");
 			Err(err)
 		},
 	}

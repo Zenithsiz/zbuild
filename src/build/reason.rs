@@ -3,7 +3,9 @@
 // Imports
 use {
 	crate::{rules::Target, util::ArcStr, AppError},
+	itertools::Itertools,
 	std::{ops::Try, sync::Arc},
+	zutil_app_error::app_error,
 };
 
 /// Inner type for [`BuildReason`].
@@ -131,10 +133,10 @@ impl BuildReason {
 	/// otherwise returns `Ok`.
 	pub fn check_recursively(&self, target: &Target<ArcStr>) -> Result<(), AppError> {
 		self.for_each(|parent_target| match target == parent_target {
-			true => Err(AppError::FoundRecursiveRule {
-				target:         target.to_string(),
-				parent_targets: self.collect_all().iter().map(Target::to_string).collect(),
-			}),
+			true => Err(app_error!(
+				"Found recursive rule: {target} (Parent rules: {})",
+				self.collect_all().iter().map(Target::to_string).join(", ")
+			)),
 			false => Ok(()),
 		})
 	}

@@ -3,7 +3,7 @@
 // Imports
 use {
 	super::{pattern::Pattern, DepItem, Expr, OutItem},
-	crate::{ast, util::ArcStr},
+	crate::{ast, util::ArcStr, AppError},
 	indexmap::IndexMap,
 	std::sync::Arc,
 };
@@ -32,7 +32,7 @@ pub struct Rule<T> {
 
 impl Rule<Expr> {
 	/// Creates a new rule from it's ast
-	pub fn from_ast(zbuild_file: &ArcStr, rule: ast::RuleStmt<'_>) -> Result<Self, anyhow::Error> {
+	pub fn from_ast(zbuild_file: &ArcStr, rule: ast::RuleStmt<'_>) -> Result<Self, AppError> {
 		let aliases = rule
 			.aliases
 			.into_iter()
@@ -56,7 +56,7 @@ impl Rule<Expr> {
 			.0
 			.into_iter()
 			.map(|out| OutItem::from_ast(zbuild_file, out))
-			.collect::<Result<_, anyhow::Error>>()?;
+			.collect::<Result<_, AppError>>()?;
 		let deps = rule
 			.deps
 			.0

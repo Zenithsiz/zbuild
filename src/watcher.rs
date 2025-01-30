@@ -9,7 +9,6 @@
 // Imports
 use {
 	crate::{build, rules::Target, util::ArcStr, AppError, Builder},
-	anyhow::Context,
 	dashmap::{DashMap, DashSet},
 	futures::{stream::FuturesUnordered, StreamExt},
 	notify_debouncer_full::Debouncer,
@@ -21,6 +20,7 @@ use {
 	},
 	tokio::sync::mpsc,
 	tokio_stream::wrappers::ReceiverStream,
+	zutil_app_error::Context,
 };
 
 /// A reverse dependency
@@ -69,12 +69,11 @@ impl Watcher {
 					let _: Result<(), _> = fs_event_tx.blocking_send(fs_event);
 				},
 			Err(errs) =>
-				for err in errs {
-					tracing::warn!(err=?anyhow::Error::from(err), "Error while watching");
+				for err in &errs {
+					tracing::warn!(err=?AppError::from(err), "Error while watching");
 				},
 		})
-		.context("Unable to create file watcher")
-		.map_err(AppError::Other)?;
+		.context("Unable to create file watcher")?;
 
 		Ok(Self {
 			watcher,

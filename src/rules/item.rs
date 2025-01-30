@@ -5,6 +5,7 @@ use {
 	super::Expr,
 	crate::{ast, util::ArcStr},
 	std::fmt,
+	crate::AppError,
 };
 
 
@@ -23,10 +24,10 @@ pub enum OutItem<T> {
 
 impl OutItem<Expr> {
 	/// Creates a new item from it's `ast`.
-	pub fn from_ast(zbuild_file: &ArcStr, item: ast::Expr<'_>) -> Result<Self, anyhow::Error> {
+	pub fn from_ast(zbuild_file: &ArcStr, item: ast::Expr<'_>) -> Result<Self, AppError> {
 		let is_deps_file = item.is_deps_file;
-		anyhow::ensure!(!item.is_opt, "Output items cannot be optional");
-		anyhow::ensure!(!item.is_static, "Output items cannot be static");
+		zutil_app_error::ensure!(!item.is_opt, "Output items cannot be optional");
+		zutil_app_error::ensure!(!item.is_static, "Output items cannot be static");
 
 		Ok(Self::File {
 			file: Expr::from_ast(zbuild_file, item),

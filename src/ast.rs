@@ -7,7 +7,7 @@
 )]
 
 // Imports
-use {anyhow::Context, std::str::pattern::Pattern};
+use {crate::AppError, std::str::pattern::Pattern, zutil_app_error::Context};
 
 /// Zbuild ast
 #[derive(Clone, Debug)]
@@ -27,7 +27,7 @@ pub struct Ast<'a> {
 
 impl<'a> Ast<'a> {
 	/// Parses a full ast from `input`.
-	pub fn parse_full(input: &'a str) -> Result<Self, anyhow::Error> {
+	pub fn parse_full(input: &'a str) -> Result<Self, AppError> {
 		let mut parser = Parser::new(input);
 		let ast = Self::parse_from(&mut parser).with_context(|| {
 			let remaining = parser.remaining();
@@ -36,14 +36,14 @@ impl<'a> Ast<'a> {
 				false => format!("Error at:\n'''\n{remaining}\n'''"),
 			}
 		})?;
-		anyhow::ensure!(parser.is_finished()?, "Unexpected tokens at the end");
+		zutil_app_error::ensure!(parser.is_finished()?, "Unexpected tokens at the end");
 
 		Ok(ast)
 	}
 }
 
 impl<'a> Parsable<'a> for Ast<'a> {
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, anyhow::Error> {
+	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
 		let mut aliases = vec![];
 		let mut pats = vec![];
 		let mut defaults = vec![];
@@ -81,7 +81,7 @@ pub struct AliasStmt<'a> {
 }
 
 impl<'a> Parsable<'a> for AliasStmt<'a> {
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, anyhow::Error> {
+	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
 		parser.parse::<TokenAlias<'a>>()?;
 		let name = parser.parse::<Ident<'a>>().context("Expected alias name")?;
 		parser.parse::<TokenEq<'a>>()?;
@@ -103,7 +103,7 @@ pub struct PatStmt<'a> {
 }
 
 impl<'a> Parsable<'a> for PatStmt<'a> {
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, anyhow::Error> {
+	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
 		parser.parse::<TokenPat<'a>>()?;
 
 		let non_empty = parser.try_parse::<TokenNonEmpty<'a>>().is_ok();
@@ -124,7 +124,7 @@ pub struct DefaultStmt<'a> {
 }
 
 impl<'a> Parsable<'a> for DefaultStmt<'a> {
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, anyhow::Error> {
+	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
 		parser.parse::<TokenDefault<'a>>()?;
 		let default = parser.parse::<Expr<'a>>().context("Expected default expression")?;
 		parser.parse::<TokenSemi<'a>>()?;
@@ -156,7 +156,7 @@ pub struct RuleStmt<'a> {
 }
 
 impl<'a> Parsable<'a> for RuleStmt<'a> {
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, anyhow::Error> {
+	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
 		parser.parse::<TokenRule<'a>>()?;
 		let name = parser.parse::<Ident<'a>>().context("Expected rule name")?;
 		parser.parse::<TokenBracesOpen<'a>>()?;
@@ -211,7 +211,7 @@ pub struct Command<'a> {
 }
 
 impl<'a> Parsable<'a> for Command<'a> {
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, anyhow::Error> {
+	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
 		let mut cwd = None;
 		let mut args = None;
 
@@ -227,7 +227,7 @@ impl<'a> Parsable<'a> for Command<'a> {
 				match key.0 {
 					"cwd" => cwd = Some(parser.parse::<Expr<'a>>()?),
 					"args" => args = Some(parser.parse::<Array<Expr<'a>>>()?),
-					key => anyhow::bail!("Unknown key: `{key:?}`"),
+					key => zutil_app_error::bail!("Unknown key: `{key:?}`"),
 				}
 
 				match parser.parse::<AnyOf2<TokenComma<'a>, TokenBracketClose<'a>>>()? {
@@ -261,7 +261,7 @@ impl<'a, T> Parsable<'a> for Array<T>
 where
 	T: Parsable<'a>,
 {
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, anyhow::Error> {
+	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
 		let mut values = vec![];
 
 		match parser.try_parse::<TokenBracketOpen<'a>>() {
@@ -313,7 +313,7 @@ pub struct Expr<'a> {
 }
 
 impl<'a> Parsable<'a> for Expr<'a> {
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, anyhow::Error> {
+	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
 		let mut is_deps_file = false;
 		let mut is_static = false;
 		let mut is_opt = false;
@@ -352,7 +352,7 @@ pub enum ExprCmpt<'a> {
 
 impl<'a> ExprCmpt<'a> {
 	/// Parses a list of expression components from a parser
-	pub fn parse_many(parser: &mut Parser<'a>, cmpts: &mut Vec<Self>) -> Result<(), anyhow::Error> {
+	pub fn parse_many(parser: &mut Parser<'a>, cmpts: &mut Vec<Self>) -> Result<(), AppError> {
 		match parser
 			.parse::<AnyOf2<Ident<'a>, TokenDoubleQuote<'a>>>()
 			.context("Expected an identifier, or literal")?
@@ -365,7 +365,7 @@ impl<'a> ExprCmpt<'a> {
 					let op = parser.parse::<Ident<'a>>().context("Expected identifier after `.`")?;
 					match op.0 {
 						"dir_name" => ops.push(ExprOp::DirName),
-						op => anyhow::bail!("Unknown expression operator: {op:?}"),
+						op => zutil_app_error::bail!("Unknown expression operator: {op:?}"),
 					}
 				}
 
@@ -375,7 +375,7 @@ impl<'a> ExprCmpt<'a> {
 			AnyOf2::T1(_) => {
 				while parser.try_parse::<TokenDoubleQuote<'a>>().is_err() {
 					let Some(end_idx) = parser.remaining().find(['{', '"']) else {
-						anyhow::bail!("Expected closing `\"` after `\"`");
+						zutil_app_error::bail!("Expected closing `\"` after `\"`");
 					};
 					let prefix = parser.advance_by(end_idx);
 					if !prefix.is_empty() {
@@ -413,7 +413,7 @@ pub enum ExprOp {
 pub struct Ident<'a>(pub &'a str);
 
 impl<'a> Parsable<'a> for Ident<'a> {
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, anyhow::Error> {
+	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
 		let orig_input = parser.remaining();
 		parser
 			.strip_prefix(unicode_ident::is_xid_start)
@@ -431,10 +431,10 @@ pub macro decl_tokens($($TokenName:ident = $Token:expr;)*) {
 		pub struct $TokenName<'a>(pub &'a str);
 
 		impl<'a> Parsable<'a> for $TokenName<'a> {
-			fn parse_from(parser: &mut Parser<'a>) -> Result<Self, anyhow::Error> {
+			fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
 				match parser.strip_prefix($Token) {
 					Some(value) => Ok(Self(value)),
-					None => anyhow::bail!("Expected {:?}", $Token),
+					None => zutil_app_error::bail!("Expected {:?}", $Token),
 				}
 			}
 		}
@@ -469,7 +469,7 @@ decl_tokens! {
 
 pub trait Parsable<'a>: Sized {
 	/// Parses this type from `input`, mutating it in-place.
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, anyhow::Error>;
+	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError>;
 }
 
 /// Parser
@@ -494,12 +494,12 @@ impl<'a> Parser<'a> {
 	///
 	/// Panics if `idx` isn't a utf-8 codepoint boundary.
 	/// Panics if `idx` is out of bounds.
-	pub fn ch_at(&self, idx: usize) -> char {
+	pub fn _ch_at(&self, idx: usize) -> char {
 		self.input[idx..].chars().next().expect("Index was out of bounds")
 	}
 
 	/// Returns if the parser is finished
-	pub fn is_finished(&mut self) -> Result<bool, anyhow::Error> {
+	pub fn is_finished(&mut self) -> Result<bool, AppError> {
 		self.trim()?;
 
 		Ok(self.input.is_empty())
@@ -518,7 +518,7 @@ impl<'a> Parser<'a> {
 	///
 	/// - Whitespace
 	/// - Comments
-	pub fn trim(&mut self) -> Result<(), anyhow::Error> {
+	pub fn trim(&mut self) -> Result<(), AppError> {
 		while self
 			.input
 			.starts_with(|ch: char| ch.is_whitespace() || matches!(ch, '#'))
@@ -553,7 +553,7 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Parses `T` from this parser
-	pub fn parse<T: Parsable<'a>>(&mut self) -> Result<T, anyhow::Error> {
+	pub fn parse<T: Parsable<'a>>(&mut self) -> Result<T, AppError> {
 		self.trim()?;
 		T::parse_from(self)
 	}
@@ -561,7 +561,7 @@ impl<'a> Parser<'a> {
 	/// Tries to parses `T` from this parser.
 	///
 	/// On error, nothing is modified.
-	pub fn try_parse<T: Parsable<'a>>(&mut self) -> Result<T, anyhow::Error> {
+	pub fn try_parse<T: Parsable<'a>>(&mut self) -> Result<T, AppError> {
 		let mut parser = self.clone();
 		let value = parser.parse::<T>()?;
 
@@ -581,7 +581,7 @@ macro decl_any_of($Name:ident, $($T:ident),* $(,)?) {
 			$T: Parsable<'a>,
 		)*
 	{
-		fn parse_from(parser: &mut Parser<'a>) -> Result<Self, anyhow::Error> {
+		fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
 			#![expect(non_snake_case, reason = "Macro generated")]
 
 			$(
@@ -599,7 +599,7 @@ macro decl_any_of($Name:ident, $($T:ident),* $(,)?) {
 				let ${concat(at_, $T)} = self::at_most(${concat(parser_, $T)}.remaining(), 50);
 			)*
 
-			anyhow::bail!(
+			zutil_app_error::bail!(
 				concat!(
 					"Expected one of the following matches:",
 					$( "\n{} at {:?}", ${ignore($T)} )*

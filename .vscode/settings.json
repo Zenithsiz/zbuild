@@ -20,7 +20,8 @@
     "tempdir",
     "thiserror",
     "yeet",
-    "Zbuild"
+    "Zbuild",
+    "zutil"
   ],
   "rust-analyzer.cargo.features": "all"
 }

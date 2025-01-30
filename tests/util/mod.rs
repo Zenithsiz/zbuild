@@ -7,10 +7,15 @@
 )]
 
 // Imports
-use {anyhow::Context, std::fs, tempfile::TempDir, zbuild::Args};
+use {
+	std::fs,
+	tempfile::TempDir,
+	zbuild::{AppError, Args},
+	zutil_app_error::Context,
+};
 
 /// Creates a directory with a zbuild manifest, then runs it, and returns the directory
-pub async fn with_zbuild<'a, T>(zbuild_manifest: &str, targets: T) -> Result<TempDir, anyhow::Error>
+pub async fn with_zbuild<'a, T>(zbuild_manifest: &str, targets: T) -> Result<TempDir, AppError>
 where
 	T: AsRef<[&'a str]>,
 {

@@ -1,5 +1,5 @@
 // Features
-#![feature(must_not_suspend)]
+#![feature(must_not_suspend, yeet_expr)]
 // Lints
 #![expect(clippy::tests_outside_test_module, reason = "We're an integration test")]
 
@@ -8,10 +8,10 @@ mod util;
 
 // Imports
 use {
-	anyhow::Context,
 	std::fs,
 	tempfile::TempDir,
-	zbuild::{Args, ExitResult},
+	zbuild::{AppError, Args, ExitResult},
+	zutil_app_error::Context,
 };
 
 /// Test for `--keep-going`
@@ -46,7 +46,7 @@ async fn keep_going() -> ExitResult {
 ///
 /// When testing with `keep_going = false`, we ensure that `C1` is not built,
 /// since `C2` exits after `B` errors, so nothing else should be built.
-async fn inner(keep_going: bool) -> Result<(), anyhow::Error> {
+async fn inner(keep_going: bool) -> Result<(), AppError> {
 	let temp_dir = TempDir::with_prefix("zbuild").context("Unable to create temporary directory")?;
 	let zbuild_zb = temp_dir.path().join("zbuild.zb");
 
@@ -95,34 +95,34 @@ rule c2 {
 	};
 	tracing::info!(?args, "Arguments");
 	let res = zbuild::run(args).await;
-	anyhow::ensure!(res.is_err(), "Expected zbuild error");
+	zutil_app_error::ensure!(res.is_err(), "Expected zbuild error");
 
 
 	let a = temp_dir.path().join("a");
 	let b = temp_dir.path().join("b");
 	let c1 = temp_dir.path().join("c1");
 	let c2 = temp_dir.path().join("c2");
-	anyhow::ensure!(
+	zutil_app_error::ensure!(
 		!a.try_exists().context("Unable to check if output file exists")?,
 		"Output file {a:?} was created"
 	);
-	anyhow::ensure!(
+	zutil_app_error::ensure!(
 		!b.try_exists().context("Unable to check if output file exists")?,
 		"Output file {b:?} was created"
 	);
 
 	match keep_going {
-		true => anyhow::ensure!(
+		true => zutil_app_error::ensure!(
 			c1.try_exists().context("Unable to check if output file exists")?,
 			"Output file {c1:?} was missing"
 		),
-		false => anyhow::ensure!(
+		false => zutil_app_error::ensure!(
 			!c1.try_exists().context("Unable to check if output file exists")?,
 			"Output file {c1:?} was created"
 		),
 	}
 
-	anyhow::ensure!(
+	zutil_app_error::ensure!(
 		c2.try_exists().context("Unable to check if output file exists")?,
 		"Output file {c2:?} was missing"
 	);

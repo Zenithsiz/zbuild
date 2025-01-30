@@ -2,10 +2,11 @@
 
 use {
 	super::Expr,
-	crate::{error::AppError, rules::pattern::Pattern, util::ArcStr},
+	crate::{rules::pattern::Pattern, util::ArcStr},
 	indexmap::IndexMap,
 	itertools::{Itertools, PeekingNext},
 	std::collections::BTreeMap,
+	crate::AppError,
 };
 
 /// An expression tree.
@@ -74,9 +75,7 @@ impl<K> ExprTree<K> {
 
 		// After this the expression should be empty
 		if let Some(cmpt) = cmpts.next() {
-			return Err(AppError::Other(anyhow::anyhow!(
-				"Unexpected component in expression {expr}: {cmpt}"
-			)));
+			zutil_app_error::bail!("Unexpected component in expression {expr}: {cmpt}");
 		}
 
 		// Finally try to insert and retrieve the old key, if any.

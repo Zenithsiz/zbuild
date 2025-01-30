@@ -18,7 +18,7 @@ pub use {
 
 // Imports
 use {
-	crate::{util::ArcStr, Ast},
+	crate::{util::ArcStr, AppError, Ast},
 	indexmap::IndexMap,
 	std::sync::Arc,
 };
@@ -50,7 +50,7 @@ pub struct Rules {
 
 impl Rules {
 	/// Creates all rules from the ast
-	pub fn from_ast(zbuild_file: &ArcStr, ast: Ast<'_>) -> Result<Self, anyhow::Error> {
+	pub fn from_ast(zbuild_file: &ArcStr, ast: Ast<'_>) -> Result<Self, AppError> {
 		let aliases = ast
 			.aliases
 			.into_iter()
@@ -84,7 +84,7 @@ impl Rules {
 				let name = zbuild_file.slice_from_str(rule.name.0);
 				(name, Rule::from_ast(zbuild_file, rule)?)
 			})
-			.collect::<Result<_, anyhow::Error>>()?;
+			.collect::<Result<_, AppError>>()?;
 
 		Ok(Self {
 			aliases: Arc::new(aliases),

@@ -11,7 +11,7 @@ pub use self::{lock::BuildResult, reason::BuildReason};
 use {
 	self::lock::{BuildLock, BuildLockDepGuard},
 	crate::{
-		error::ResultMultiple,
+		error::{self, AppErrorData},
 		expand,
 		rules::{Command, DepItem, Expr, ExprTree, OutItem, Rule, Target},
 		util::{self, ArcStr},
@@ -19,18 +19,19 @@ use {
 		Expander,
 		Rules,
 	},
-	anyhow::Context,
 	dashmap::DashMap,
 	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
 	indexmap::IndexMap,
 	itertools::Itertools,
 	std::{
 		collections::{BTreeMap, HashMap},
+		fmt,
 		future::Future,
 		sync::Arc,
 		time::SystemTime,
 	},
 	tokio::{fs, process, sync::Semaphore, task},
+	zutil_app_error::{app_error, AllErrs, Context},
 };
 
 /// Event
@@ -122,13 +123,12 @@ impl Builder {
 				// Then try to insert it
 				if let Some(prev_rule_name) = rule_output_tree
 					.insert(&output_file, rule_name.clone(), &[&rule.pats, &rules.pats])
-					.context("Unable to add rule output to tree")
-					.map_err(AppError::Other)?
+					.context("Unable to add rule output to tree")?
 				{
-					return Err(AppError::Other(anyhow::anyhow!(
+					return Err(app_error!(
 						"Multiple rules match the same output file: {output_file}\n  first rule: {prev_rule_name}\n  \
 						 second rule: {rule_name}"
-					)));
+					));
 				};
 			}
 		}
@@ -203,9 +203,7 @@ impl Builder {
 			.rules
 			.rules
 			.get(&*target_rule.name)
-			.ok_or_else(|| AppError::UnknownRule {
-				rule_name: (*target_rule.name).to_owned(),
-			})?;
+			.with_context(|| format!("Unknown rule {:?}", target_rule.name))?;
 		let expand_visitor =
 			expand::Visitor::new([&rule.aliases, &self.rules.aliases], [&rule.pats, &self.rules.pats], [
 				&target_rule.pats,
@@ -213,7 +211,7 @@ impl Builder {
 		let rule = self
 			.expander
 			.expand_rule(rule, &expand_visitor)
-			.map_err(AppError::expand_rule(&*rule.name))?;
+			.with_context(|| format!("Unable to expand rule {:?}", rule.name))?;
 
 		Ok(Some((rule, target_rule)))
 	}
@@ -251,7 +249,7 @@ impl Builder {
 		let target = self
 			.expander
 			.expand_target(target, &expand_visitor)
-			.map_err(AppError::expand_target(target))?;
+			.with_context(|| format!("Unable to expand target {target}"))?;
 
 		// Then build
 		self.build(&target, ignore_missing, reason).await
@@ -278,7 +276,9 @@ impl Builder {
 			match *target {
 				Target::File { ref file, .. } => match fs::symlink_metadata(&**file).await {
 					Ok(metadata) => {
-						let build_time = metadata.modified().map_err(AppError::get_file_modified_time(&**file))?;
+						let build_time = metadata
+							.modified()
+							.with_context(|| format!("Unable to get file modified time: {file:?}"))?;
 						tracing::trace!(%target, ?build_time, "Found target file");
 						return Ok((
 							BuildResult {
@@ -301,10 +301,8 @@ impl Builder {
 						));
 					},
 					Err(err) =>
-						return Err(AppError::MissingFile {
-							file_path: (**file).into(),
-							source:    err,
-						}),
+						do yeet AppError::new(&err)
+							.context(format!("Missing file {file:?} and no rule to build it found")),
 				},
 				// Note: If `target_rule` returns `Err` if this was a rule, so we can never reach here
 				Target::Rule { .. } => unreachable!(),
@@ -323,12 +321,9 @@ impl Builder {
 			// First check if we're done with a dependency lock
 			let build_guard = build_lock.lock_dep().await;
 			if let Some(res) = build_guard.res() {
-				return res
-					.map(|res| (res, Some(build_guard)))
-					.map_err(|()| AppError::BuildTarget {
-						source: None,
-						target: target.to_string(),
-					});
+				return res.map(|res| (res, Some(build_guard))).map_err(|()| {
+					AppError::msg_with_data("Unable to build target {target}", AppErrorData { should_ignore: true })
+				});
 			}
 
 			// Otherwise, try to upgrade to a build lock
@@ -368,8 +363,7 @@ impl Builder {
 			build_inner(this, target, rule, ignore_missing, reason)
 		})
 		.await
-		.context("Unable to join task")
-		.map_err(AppError::Other)?;
+		.context("Unable to join task")?;
 
 		match res {
 			Ok(res) => {
@@ -380,10 +374,10 @@ impl Builder {
 			Err(err) => {
 				// If we should, close the exec semaphore to ensure we exit as early as possible
 				// Note: This check is racy, but it's fine to print this warning multiple times. We just don't want
-				//       to spam the user, since all further errors will likely caused by `AppError::ExecSemaphoreClosed`,
+				//       to spam the user, since all further errors will likely caused by the semaphore closing,
 				//       while the first few are the useful ones with the reason why the execution semaphore is being closed.
 				if self.stop_builds_on_first_err && !self.exec_semaphore.is_closed() {
-					tracing::debug!(err=%err.pretty(), "Stopping all future builds due to failure of target {target}");
+					tracing::debug!(err=%error::pretty(&err), "Stopping all future builds due to failure of target {target}");
 					self.exec_semaphore.close();
 				}
 
@@ -433,7 +427,7 @@ impl Builder {
 			tracing::trace!(%target, ?rule.name, ?deps_last_build_time, ?rule_last_build_time, "Rebuilding target rule");
 			self.rebuild_rule(rule)
 				.await
-				.map_err(AppError::build_rule(&*rule.name))?;
+				.with_context(|| format!("Unable to build rule {:?}", rule.name))?;
 		}
 
 		// Then get the build time
@@ -489,12 +483,12 @@ impl Builder {
 						is_optional,
 						exists: util::fs_try_exists_symlink(&**file)
 							.await
-							.map_err(AppError::check_file_exists(&**file))?,
+							.with_context(|| format!("Unable to check if file exists {file:?}"))?,
 					}),
 				}
 			})
 			.collect::<FuturesUnordered<_>>()
-			.collect::<ResultMultiple<Vec<_>>>()
+			.collect::<AllErrs<Vec<_>, _>>()
 			.await?;
 
 		// And all output dependencies
@@ -518,14 +512,14 @@ impl Builder {
 						is_optional:  false,
 						exists:       util::fs_try_exists_symlink(&**file)
 							.await
-							.map_err(AppError::check_file_exists(&**file))?,
+							.with_context(|| format!("Unable to check if file exists {file:?}"))?,
 					})),
 					_ => Ok(None),
 				}
 			})
 			.collect::<FuturesUnordered<_>>()
 			.filter_map(move |res| async move { res.transpose() })
-			.collect::<ResultMultiple<Vec<_>>>()
+			.collect::<AllErrs<Vec<_>, _>>()
 			.await?;
 
 		// Then build all dependencies, as well as any dependency files
@@ -561,7 +555,7 @@ impl Builder {
 									reason.with_target(target.clone()),
 								)
 								.await
-								.map_err(AppError::build_target(&dep_target))?;
+								.with_context(|| format!("Unable to build target {dep_target}"))?;
 							tracing::trace!(%target, ?rule.name, ?dep, ?res, "Built target rule dependency");
 
 							self.send_event(|| Event::TargetDepBuilt {
@@ -604,21 +598,21 @@ impl Builder {
 						} => self
 							.build_deps_file(target, file, rule, ignore_missing, reason)
 							.await
-							.map_err(AppError::build_deps_file(&**file))?,
+							.with_context(|| format!("Unable to build dependencies file {file:?}"))?,
 						Dep::File { .. } => vec![],
 					};
 					tracing::trace!(%target, ?rule.name, ?dep, ?dep_res, ?dep_deps, "Built target rule dependency dependencies");
 
 					let deps = util::chain!(dep_res, dep_deps.into_iter());
 
-					Ok(deps)
+					Ok::<_, AppError>(deps)
 				}
 			})
 			.collect::<FuturesUnordered<_>>()
 			.map_ok(|deps| deps.map(Ok))
 			.map_ok(futures::stream::iter)
 			.try_flatten()
-			.collect::<ResultMultiple<Vec<_>>>()
+			.collect::<AllErrs<Vec<_>, _>>()
 			.await?;
 
 		Ok(deps)
@@ -643,13 +637,12 @@ impl Builder {
 		let matches_rule = |output: &str| match rule.output.is_empty() {
 			// If there were no outputs, make sure it matches the rule name
 			// TODO: Seems kinda weird for it to match the rule name, but not sure how else to check this here
-			true => (output == &*rule.name)
-				.then_some(())
-				.ok_or_else(|| AppError::DepFileMissingRuleName {
-					deps_file_path: deps_file.into(),
-					rule_name:      rule.name.to_string(),
-					dep_output:     output.to_owned(),
-				}),
+			true => (output == &*rule.name).then_some(()).ok_or_else(|| {
+				app_error!(
+					"Dependencies file {deps_file:?} is missing the rule name {:?}, found {output:?}",
+					rule.name
+				)
+			}),
 
 			// If there were any output, make sure the dependency file applies to one of them
 			false => rule
@@ -659,10 +652,11 @@ impl Builder {
 					OutItem::File { file, .. } => &**file == output,
 				})
 				.then_some(())
-				.ok_or_else(|| AppError::DepFileMissingOutputs {
-					deps_file_path: deps_file.into(),
-					rule_outputs:   rule.output.iter().map(OutItem::to_string).collect(),
-					dep_output:     output.to_owned(),
+				.ok_or_else(|| {
+					app_error!(
+						"Dependencies file {deps_file:?} is missing any output of {:?}, found {output:?}",
+						rule.output.iter().map(OutItem::to_string).collect::<Vec<_>>()
+					)
 				}),
 		};
 
@@ -674,14 +668,10 @@ impl Builder {
 		match oks.is_empty() {
 			true => {
 				// If we had no matching outputs, try to return all errors
-				errs.into_iter()
-					.map(|(_, err)| Err(err))
-					.collect::<ResultMultiple<()>>()?;
+				errs.into_iter().map(|(_, err)| Err(err)).collect::<AllErrs<(), _>>()?;
 
 				// If no errors existed, return an error for that
-				return Err(AppError::DepFileEmpty {
-					deps_file_path: deps_file.into(),
-				});
+				zutil_app_error::bail!("Dependencies file {deps_file:?} had no dependencies");
 			},
 
 			// Otherwise, just log and remove all errors
@@ -689,7 +679,7 @@ impl Builder {
 				for (output, err) in errs {
 					let _: Vec<_> = deps.remove(&output).expect("Dependency should exist");
 
-					tracing::warn!(target=%parent_target, ?rule.name, err=%err.pretty(), "Ignoring unknown output in dependency file");
+					tracing::warn!(target=%parent_target, ?rule.name, err=%error::pretty(&err), "Ignoring unknown output in dependency file");
 				},
 		}
 
@@ -709,7 +699,7 @@ impl Builder {
 					let (res, dep_guard) = self
 						.build(&dep_target, ignore_missing, reason.with_target(parent_target.clone()))
 						.await
-						.map_err(AppError::build_target(&dep_target))?;
+						.with_context(|| format!("Unable to build target {dep_target}"))?;
 
 					self.send_event(|| Event::TargetDepBuilt {
 						target: parent_target.clone(),
@@ -721,7 +711,7 @@ impl Builder {
 				}
 			})
 			.collect::<FuturesUnordered<_>>()
-			.collect::<ResultMultiple<_>>()
+			.collect::<AllErrs<_, _>>()
 			.await?;
 
 		Ok(deps_res)
@@ -738,7 +728,7 @@ impl Builder {
 		//       be in a "bad state", and since all the modification dates
 		//       match it wouldn't be rebuilt.
 		let Ok(_permit) = self.exec_semaphore.acquire().await else {
-			do yeet AppError::ExecSemaphoreClosed {};
+			do yeet AppError::msg_with_data("Execution semaphore was closed", AppErrorData { should_ignore: true });
 		};
 
 		for cmd in &rule.exec.cmds {
@@ -752,9 +742,10 @@ impl Builder {
 	#[expect(unused_results, reason = "Due to the builder pattern of `Command`")]
 	async fn exec_cmd(&self, rule: &Rule<ArcStr>, cmd: &Command<ArcStr>) -> Result<(), AppError> {
 		// Get the program name
-		let (program, args) = cmd.args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
-			rule_name: rule.name.to_string(),
-		})?;
+		let (program, args) = cmd
+			.args
+			.split_first()
+			.ok_or_else(|| app_error!("Rule {:?} executable was empty", rule.name))?;
 
 		// Create the command and feed in all the arguments
 		let mut os_cmd = process::Command::new(&**program);
@@ -773,9 +764,9 @@ impl Builder {
 			os_cmd
 				.status()
 				.await
-				.map_err(AppError::spawn_command(cmd))?
+				.with_context(|| format!("Unable to spawn {}", self::cmd_to_string(cmd)))?
 				.exit_ok()
-				.map_err(AppError::command_failed(cmd))
+				.with_context(|| format!("Command failed {}", self::cmd_to_string(cmd)))
 		})
 		.await?;
 		tracing::trace!(target: "zbuild_exec", rule_name=?rule.name, ?program, ?args, ?duration, "Execution duration");
@@ -787,7 +778,9 @@ impl Builder {
 /// Parses a dependencies file
 async fn parse_deps_file(file: &str) -> Result<HashMap<ArcStr, Vec<ArcStr>>, AppError> {
 	// Read it
-	let mut contents = fs::read_to_string(file).await.map_err(AppError::read_file(file))?;
+	let mut contents = fs::read_to_string(file)
+		.await
+		.with_context(|| format!("Unable to read file {file:?}"))?;
 
 	// Replace all backslashes at the end of a line with spaces
 	// Note: Although it'd be fine to replace it with a single space, by replacing it
@@ -803,15 +796,15 @@ async fn parse_deps_file(file: &str) -> Result<HashMap<ArcStr, Vec<ArcStr>>, App
 		})
 		.map(|line| {
 			// Parse it
-			let (output, deps) = line.split_once(':').ok_or_else(|| AppError::DepFileMissingColon {
-				deps_file_path: file.into(),
-			})?;
+			let (output, deps) = line
+				.split_once(':')
+				.ok_or_else(|| app_error!("Dependencies file {file:?} was missing a `:`"))?;
 			let output = ArcStr::from(output.trim());
 			let deps = deps.split_whitespace().map(ArcStr::from).collect();
 
 			Ok((output, deps))
 		})
-		.collect::<ResultMultiple<_>>()?;
+		.collect::<AllErrs<_, _>>()?;
 
 	Ok(deps)
 }
@@ -832,15 +825,23 @@ async fn rule_last_build_time(rule: &Rule<ArcStr>) -> Result<Option<SystemTime>,
 			};
 			let metadata = fs::symlink_metadata(&**file)
 				.await
-				.map_err(AppError::read_file_metadata(&**file))?;
-			let modified_time = metadata.modified().map_err(AppError::get_file_modified_time(&**file))?;
+				.with_context(|| format!("Unable to read file metadata (not following symlinks) of {file:?}"))?;
+			let modified_time = metadata
+				.modified()
+				.with_context(|| format!("Unable to get file modified time of {file:?}"))?;
 
 			Ok(modified_time)
 		})
 		.collect::<FuturesUnordered<_>>()
-		.collect::<ResultMultiple<Vec<_>>>()
+		.collect::<AllErrs<Vec<_>, _>>()
 		.await?
 		.into_iter()
 		.min();
 	Ok(built_time)
+}
+
+/// Helper function to format a `Command` for errors
+fn cmd_to_string<T: fmt::Display>(cmd: &Command<T>) -> String {
+	let inner = cmd.args.iter().map(|arg| format!("\"{arg}\"")).join(" ");
+	format!("[{inner}]")
 }

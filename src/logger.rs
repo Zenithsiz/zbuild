@@ -7,7 +7,7 @@ mod pre_init;
 
 // Imports
 use {
-	anyhow::Context,
+	crate::AppError,
 	std::{
 		env::{self, VarError},
 		fs,
@@ -17,6 +17,7 @@ use {
 	},
 	tracing::metadata::LevelFilter,
 	tracing_subscriber::{prelude::*, EnvFilter, Registry},
+	zutil_app_error::Context,
 };
 
 /// Initializes the logger
@@ -96,7 +97,7 @@ where
 }
 
 /// Creates the file layer
-fn file_layer<S>(log_path: &Path) -> Result<impl tracing_subscriber::Layer<S>, anyhow::Error>
+fn file_layer<S>(log_path: &Path) -> Result<impl tracing_subscriber::Layer<S>, AppError>
 where
 	S: tracing::Subscriber + for<'span> tracing_subscriber::registry::LookupSpan<'span> + 'static,
 {

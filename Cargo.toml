@@ -10,7 +10,6 @@ publish = ["filipejr"]
 
 [dependencies]
 
-anyhow = "1.0.95"
 async-broadcast = "0.7.2"
 clap = { version = "4.5.27", features = ["derive"] }
 console-subscriber = { version = "0.4.1", optional = true }
@@ -27,6 +26,7 @@ tokio-stream = "0.1.17"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 unicode-ident = "1.0.16"
+zutil-app-error = { git = "https://github.com/Zenithsiz/zutil", rev = "5363bba6ced162185a1eb5a132cce499bfc5d818" }
 
 [dev-dependencies]
 

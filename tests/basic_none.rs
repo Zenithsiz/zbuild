@@ -7,7 +7,10 @@
 mod util;
 
 // Imports
-use {anyhow::Context, zbuild::ExitResult};
+use {
+	zbuild::ExitResult,
+	zutil_app_error::{app_error, Context},
+};
 
 /// Single rule and target
 #[tokio::test]
@@ -28,7 +31,7 @@ rule create_file {
 	// Note: We're making sure it *doesn't* exist, since we didn't want to build it.
 	let file_out = temp_dir.path().join("file.out");
 	if file_out.try_exists().context("Unable to check if output file exists")? {
-		Err(anyhow::anyhow!("Output file {file_out:?} was present"))?;
+		Err(app_error!("Output file {file_out:?} was present"))?;
 	}
 
 	ExitResult::Ok

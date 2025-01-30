@@ -1799,7 +1799,6 @@ dependencies = [
 name = "zbuild"
 version = "0.1.9"
 dependencies = [
- "anyhow",
  "async-broadcast",
  "clap",
  "console-subscriber",
@@ -1818,6 +1817,7 @@ dependencies = [
  "tracing-subscriber",
  "tracing-test",
  "unicode-ident",
+ "zutil-app-error",
 ]
 
 [[package]]
@@ -1839,4 +1839,12 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "zutil-app-error"
+version = "0.1.0"
+source = "git+https://github.com/Zenithsiz/zutil?rev=5363bba6ced162185a1eb5a132cce499bfc5d818#5363bba6ced162185a1eb5a132cce499bfc5d818"
+dependencies = [
+ "itertools 0.14.0",
 ]

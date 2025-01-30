@@ -28,7 +28,6 @@ mod logger;
 
 // Imports
 use {
-	anyhow::Context,
 	clap::Parser,
 	std::{
 		env,
@@ -36,6 +35,7 @@ use {
 	},
 	tokio::runtime,
 	zbuild::{AppError, Args, ExitResult},
+	zutil_app_error::Context,
 };
 
 #[expect(
@@ -76,10 +76,7 @@ fn main() -> ExitResult {
 		}
 	}
 
-	let runtime = runtime_builder
-		.build()
-		.context("Failed building the Runtime")
-		.map_err(AppError::Other)?;
+	let runtime = runtime_builder.build().context("Failed building the Runtime")?;
 
 	runtime.block_on(zbuild::run(args))?;
 	ExitResult::Ok

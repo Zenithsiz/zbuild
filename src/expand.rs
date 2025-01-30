@@ -3,13 +3,14 @@
 // Imports
 use {
 	crate::{
-		error::{AppError, ResultMultiple},
 		rules::{Command, DepItem, Exec, Expr, ExprCmpt, ExprOp, OutItem, Pattern, Rule, Target},
 		util::ArcStr,
+		AppError,
 	},
 	indexmap::IndexMap,
 	smallvec::SmallVec,
 	std::{collections::BTreeMap, marker::PhantomData, mem, path::PathBuf, sync::Arc},
+	zutil_app_error::{app_error, AllErrs, Context},
 };
 
 /// Expander
@@ -59,9 +60,9 @@ impl Expander {
 								let value = ops.iter().try_fold(value, |mut value, &op| {
 									value
 										.with_mut(|s| self.expand_expr_op(op, s))
-										.map_err(AppError::expr_op(op))?;
+										.with_context(|| format!("Unable to apply expression operator `{op}`"))?;
 
-									Ok(value)
+									Ok::<_, AppError>(value)
 								})?;
 
 								expr.push_str(&value);
@@ -70,14 +71,11 @@ impl Expander {
 
 						// Else keep on Keep and error on Error
 						FlowControl::Keep => expr.push(cmpt),
-						FlowControl::Error =>
-							return Err(AppError::UnknownExpr {
-								expr_ident: name.to_string(),
-							}),
+						FlowControl::Error => zutil_app_error::bail!("Unknown expression {name:?}"),
 					},
 				};
 
-				Ok(expr)
+				Ok::<_, AppError>(expr)
 			})?;
 
 		// Then try to parse from the expression
@@ -90,9 +88,7 @@ impl Expander {
 			ExprOp::DirName => {
 				// Get the path and try to pop the last segment
 				let mut path = PathBuf::from(mem::take(value));
-				if !path.pop() {
-					return Err(AppError::PathParent { path });
-				}
+				zutil_app_error::ensure!(path.pop(), "Path had no parent directory {path:?}");
 
 				// Then convert it back to a string
 				// Note: This should technically never fail, since the path was originally
@@ -116,7 +112,7 @@ impl Expander {
 			.aliases
 			.iter()
 			.map(|(name, expr)| Ok((name.clone(), self.expand_expr(expr, visitor)?)))
-			.collect::<ResultMultiple<_>>()?;
+			.collect::<AllErrs<_, _>>()?;
 
 		let output = rule
 			.output
@@ -127,7 +123,7 @@ impl Expander {
 					is_deps_file,
 				}),
 			})
-			.collect::<ResultMultiple<_>>()?;
+			.collect::<AllErrs<_, _>>()?;
 
 		let deps = rule
 			.deps
@@ -145,7 +141,7 @@ impl Expander {
 					is_deps_file,
 				}),
 			})
-			.collect::<ResultMultiple<_>>()?;
+			.collect::<AllErrs<_, _>>()?;
 
 		let exec = Exec {
 			cmds: rule
@@ -153,7 +149,7 @@ impl Expander {
 				.cmds
 				.iter()
 				.map(|cmd| self.expand_cmd(cmd, visitor))
-				.collect::<ResultMultiple<_>>()?,
+				.collect::<AllErrs<_, _>>()?,
 		};
 
 		Ok(Rule {
@@ -177,7 +173,7 @@ impl Expander {
 				.args
 				.iter()
 				.map(|arg| self.expand_expr(arg, visitor))
-				.collect::<ResultMultiple<_>>()?,
+				.collect::<AllErrs<_, _>>()?,
 		})
 	}
 
@@ -188,7 +184,9 @@ impl Expander {
 	{
 		let target = match *target {
 			Target::File { ref file, is_static } => Target::File {
-				file: self.expand_expr(file, visitor).map_err(AppError::expand_expr(file))?,
+				file: self
+					.expand_expr(file, visitor)
+					.with_context(|| format!("Unable to expand expression {file}"))?,
 				is_static,
 			},
 
@@ -198,12 +196,15 @@ impl Expander {
 					.map(|(pat, expr)| {
 						Ok((
 							pat.clone(),
-							self.expand_expr(expr, visitor).map_err(AppError::expand_expr(expr))?,
+							self.expand_expr(expr, visitor)
+								.with_context(|| format!("Unable to expand expression {expr}"))?,
 						))
 					})
-					.collect::<ResultMultiple<_>>()?;
+					.collect::<AllErrs<_, _>>()?;
 				Target::Rule {
-					rule: self.expand_expr(rule, visitor).map_err(AppError::expand_expr(rule))?,
+					rule: self
+						.expand_expr(rule, visitor)
+						.with_context(|| format!("Unable to expand expression {rule}"))?,
 					pats: Arc::new(pats),
 				}
 			},
@@ -250,11 +251,12 @@ impl TryFromExpr for Expr {
 
 impl TryFromExpr for ArcStr {
 	fn try_from_expr(expr: Expr) -> Result<Self, AppError> {
-		expr.try_into_string()
-			.map_err(|expr| AppError::UnresolvedAliasesOrPats {
-				expr:       expr.to_string(),
-				expr_cmpts: expr.cmpts.into_iter().map(|cmpt| cmpt.to_string()).collect(),
-			})
+		expr.try_into_string().map_err(|expr| {
+			app_error!(
+				"Expression had unresolved aliases or patterns: {expr} ({:?})",
+				expr.cmpts.iter().map(ExprCmpt::to_string).collect::<Vec<_>>()
+			)
+		})
 	}
 }
 

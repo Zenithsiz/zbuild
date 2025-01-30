@@ -7,7 +7,10 @@
 mod util;
 
 // Imports
-use {anyhow::Context, zbuild::ExitResult};
+use {
+	zbuild::ExitResult,
+	zutil_app_error::{app_error, Context},
+};
 
 /// Single rule with multiple outputs
 #[tokio::test]
@@ -32,7 +35,7 @@ rule create_file {
 	let file2_out = temp_dir.path().join("file2.out");
 	for file_out in [file1_out, file2_out] {
 		if !file_out.try_exists().context("Unable to check if output file exists")? {
-			Err(anyhow::anyhow!("Output file {file_out:?} was missing"))?;
+			Err(app_error!("Output file {file_out:?} was missing"))?;
 		}
 	}
 
