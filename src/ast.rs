@@ -31,10 +31,7 @@ impl<'a> Ast<'a> {
 		let mut parser = Parser::new(input);
 		let ast = Self::parse_from(&mut parser).with_context(|| {
 			let remaining = parser.remaining();
-			match remaining.len() > 100 {
-				true => format!("Error at:\n'''\n{}[...]\n'''", &remaining[..100]),
-				false => format!("Error at:\n'''\n{remaining}\n'''"),
-			}
+			format!("Error at:\n'''\n{}\n'''", self::at_most(remaining, 100))
 		})?;
 		zutil_app_error::ensure!(parser.is_finished()?, "Unexpected tokens at the end");
 
