@@ -30,7 +30,7 @@ unicode-ident = "1.0.16"
 
 [dev-dependencies]
 
-tempdir = "0.3.7" # TODO: Replace with `tempfile`
+tempfile = "3.16.0"
 tracing-test = { version = "0.2.5", features = ["no-env-filter"] }
 
 [features]

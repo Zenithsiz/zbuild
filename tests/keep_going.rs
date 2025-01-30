@@ -10,7 +10,7 @@ mod util;
 use {
 	anyhow::Context,
 	std::fs,
-	tempdir::TempDir,
+	tempfile::TempDir,
 	zbuild::{Args, ExitResult},
 };
 
@@ -47,7 +47,7 @@ async fn keep_going() -> ExitResult {
 /// When testing with `keep_going = false`, we ensure that `C1` is not built,
 /// since `C2` exits after `B` errors, so nothing else should be built.
 async fn inner(keep_going: bool) -> Result<(), anyhow::Error> {
-	let temp_dir = TempDir::new("zbuild").context("Unable to create temporary directory")?;
+	let temp_dir = TempDir::with_prefix("zbuild").context("Unable to create temporary directory")?;
 	let zbuild_zb = temp_dir.path().join("zbuild.zb");
 
 	// TODO: Instead of sleeping, use `inotify` to wait for other

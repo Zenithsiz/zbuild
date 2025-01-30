@@ -7,14 +7,14 @@
 )]
 
 // Imports
-use {anyhow::Context, std::fs, tempdir::TempDir, zbuild::Args};
+use {anyhow::Context, std::fs, tempfile::TempDir, zbuild::Args};
 
 /// Creates a directory with a zbuild manifest, then runs it, and returns the directory
 pub async fn with_zbuild<'a, T>(zbuild_manifest: &str, targets: T) -> Result<TempDir, anyhow::Error>
 where
 	T: AsRef<[&'a str]>,
 {
-	let temp_dir = TempDir::new("zbuild").context("Unable to create temporary directory")?;
+	let temp_dir = TempDir::with_prefix("zbuild").context("Unable to create temporary directory")?;
 	let zbuild_zb = temp_dir.path().join("zbuild.zb");
 
 	fs::write(&zbuild_zb, zbuild_manifest).context("Unable to write zbuild manifest")?;
