@@ -35,8 +35,8 @@ struct RevDep {
 
 /// Target watcher
 pub struct Watcher {
-	/// Watcher
-	watcher: Debouncer<notify::RecommendedWatcher, notify_debouncer_full::RecommendedCache>,
+	/// Inner watcher
+	inner: Debouncer<notify::RecommendedWatcher, notify_debouncer_full::RecommendedCache>,
 
 	/// Reverse dependencies
 	rev_deps: DashMap<PathBuf, RevDep>,
@@ -76,7 +76,7 @@ impl Watcher {
 		.context("Unable to create file watcher")?;
 
 		Ok(Self {
-			watcher,
+			inner: watcher,
 			rev_deps: DashMap::new(),
 			fs_event_stream: ReceiverStream::new(fs_event_rx),
 			builder_event_rx,
@@ -122,7 +122,7 @@ impl Watcher {
 								// TODO: Is this enough? What if the parent directory also gets deleted?
 								//       should we watch directories until the root?
 								tracing::trace!(?dep_path, "Starting to watch path");
-								if let Err(err) = self.watcher.watch(
+								if let Err(err) = self.inner.watch(
 									dep_path.parent().unwrap_or(&dep_path),
 									notify::RecursiveMode::NonRecursive,
 								) {

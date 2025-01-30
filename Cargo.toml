@@ -44,15 +44,8 @@ rust.unsafe_code = "deny"
 rust.unsafe_op_in_unsafe_fn = "deny"
 
 # Group lints
-# Note: We warn on the full group list, and then `allow` the
-#       lints of each group that don't make sense for this project.
-#       This is so that when new lints are added we can immediatly start
-#       receiving *warnings*, and can then remove them if they're not
-#       relevant.
 clippy.pedantic = { level = "warn", priority = -1 }
 clippy.nursery = { level = "warn", priority = -1 }
-clippy.restriction = { level = "warn", priority = -1 }
-clippy.blanket_clippy_restriction_lints = "allow"
 
 # Prefer `expect` instead of `unwrap`
 clippy.unwrap_used = "deny"
@@ -77,47 +70,8 @@ rust.unused_lifetimes = "warn"
 rust.unused_macro_rules = "warn"
 rust.variant_size_differences = "warn"
 
-# TODO: Warn again once we don't need a special nightly flag to enable it
-#rust.fuzzy_provenance_casts = "deny"
-
-# False positives when using tests. Turn on every once in a while
-# and check on the main crate if anything is unused that isn't used
-# in the tests.
-rust.unused_crate_dependencies = "allow"
-
 # False positives
 clippy.significant_drop_tightening = "allow"
-
-# Can't easily `allow` / `expect` it.
-# TODO: Issue seems to be with the feature `stmt_expr_attributes`?
-clippy.arithmetic_side_effects = "allow"
-
-# We don't need this kind of control over this application
-clippy.pub_use = "allow"
-clippy.question_mark_used = "allow"
-clippy.integer_division = "allow"
-clippy.exhaustive_enums = "allow"
-clippy.exhaustive_structs = "allow"
-clippy.impl_trait_in_params = "allow"
-clippy.unreachable = "allow"
-clippy.mem_forget = "allow"
-clippy.shadow_same = "allow"
-clippy.shadow_reuse = "allow"
-clippy.shadow_unrelated = "allow"     # TODO: Maybe check this one every once in a while? Pretty noisy though
-clippy.min_ident_chars = "allow"      # Useful for generics such as `f: impl FnOnce()`
-clippy.single_call_fn = "allow"       # It's still useful to separate blocks of code into functions
-clippy.float_arithmetic = "allow"
-clippy.struct_field_names = "allow"
-clippy.iter_over_hash_type = "allow"
-clippy.non_ascii_literal = "allow"
-
-# We prefer the short version
-clippy.pub_with_shorthand = "allow"
-clippy.pub_without_shorthand = "warn"
-
-# We prefer the semicolon inside
-clippy.semicolon_inside_block = "allow"
-clippy.semicolon_outside_block = "deny"
 
 # Style
 clippy.implicit_return = "allow"
@@ -133,55 +87,12 @@ clippy.module_inception = "allow"
 clippy.separated_literal_suffix = "allow"
 clippy.ref_patterns = "allow"             # Matching on a vale and adding `ref` is easier than matching on ref and de-referencing values within the body
 
-# Performance of floats isn't paramount
-clippy.suboptimal_flops = "allow"
 
-# Some functions might return an error / be async in the future
-clippy.unnecessary_wraps = "allow"
-clippy.unused_async = "allow"
-
-# We use proper error types when it matters what errors can be returned, else = "allow"
-# such as when using `anyhow`, we just assume the caller won't check *what* error
-# happened and instead just bubbles it up
+# Callers don't care about which error happened.
 clippy.missing_errors_doc = "allow"
 
 # Too noisy with self-contained panics that the caller will never see.
 clippy.missing_panics_doc = "allow"
 
-# We don't expose certain entities that should be documented for internal use.
-rustdoc.private_intra_doc_links = "allow"
-
 # This is too prevalent on generic functions, which we don't want to ALWAYS be `Send`
 clippy.future_not_send = "allow"
-
-# TODO: Use `core` / `alloc` instead of `std` where possible?
-clippy.std_instead_of_core = "allow"
-clippy.std_instead_of_alloc = "allow"
-
-# Single-letter generics / lifetimes are fine when there isn't a specific meaning to the generic
-clippy.single_char_lifetime_names = "allow"
-
-# We don't need to annotate `#[inline]` to every single function
-# TODO: Check if it might be required in some hot functions?
-clippy.missing_inline_in_public_items = "allow"
-
-# For most trait impls, the default is fine.
-# TODO: Turn this off every once in a while and check if there's any
-#       performance improvements from implementing default functions?
-clippy.missing_trait_methods = "allow"
-
-# We only panic when it's an unrecoverable error
-clippy.unwrap_in_result = "allow"
-clippy.panic_in_result_fn = "allow"
-
-# Sometimes small structs defined inline don't need documentation
-clippy.missing_docs_in_private_items = "allow"
-
-# We don't care to order items alphabetically
-clippy.arbitrary_source_item_ordering = "allow"
-
-# Unless there are name collisions, we don't want to import anonymously
-clippy.unused_trait_names = "allow"
-
-# Sometimes we just want to check 2 conditions without an else
-clippy.else_if_without_else = "allow"

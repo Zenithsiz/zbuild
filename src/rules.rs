@@ -45,6 +45,7 @@ pub struct Rules {
 	pub default: Vec<Target<Expr>>,
 
 	/// Rules
+	#[expect(clippy::struct_field_names, reason = "TODO: Rename struct name")]
 	pub rules: IndexMap<ArcStr, Rule<Expr>>,
 }
 
