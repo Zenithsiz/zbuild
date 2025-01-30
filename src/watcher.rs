@@ -12,7 +12,6 @@ use {
 	anyhow::Context,
 	dashmap::{DashMap, DashSet},
 	futures::{stream::FuturesUnordered, StreamExt},
-	notify::Watcher as _,
 	notify_debouncer_full::Debouncer,
 	std::{
 		io,
@@ -37,7 +36,7 @@ struct RevDep {
 /// Target watcher
 pub struct Watcher {
 	/// Watcher
-	watcher: Debouncer<notify::RecommendedWatcher, notify_debouncer_full::FileIdMap>,
+	watcher: Debouncer<notify::RecommendedWatcher, notify_debouncer_full::RecommendedCache>,
 
 	/// Reverse dependencies
 	rev_deps: DashMap<PathBuf, RevDep>,
@@ -124,7 +123,7 @@ impl Watcher {
 								// TODO: Is this enough? What if the parent directory also gets deleted?
 								//       should we watch directories until the root?
 								tracing::trace!(?dep_path, "Starting to watch path");
-								if let Err(err) = self.watcher.watcher().watch(
+								if let Err(err) = self.watcher.watch(
 									dep_path.parent().unwrap_or(&dep_path),
 									notify::RecursiveMode::NonRecursive,
 								) {
