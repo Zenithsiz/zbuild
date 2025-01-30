@@ -103,16 +103,6 @@ impl<K> ExprTree<K> {
 	where
 		K: Clone,
 	{
-		// Try to match against an empty suffix
-		// Note: We always do this, since some expressions could be
-		//       of the form `(String, Pat, Empty)`, with `Pat` matching
-		//       the rest.
-		if let Some((pat, key)) = suffixes.get("") &&
-			let Some(pats) = Self::find_match_pat("", pat.as_ref())
-		{
-			return Some((key.clone(), pats));
-		}
-
 		// Otherwise, match against all other suffixes
 		for (suffix, (pat, key)) in suffixes {
 			// If the prefix no longer matches, try the next
@@ -142,7 +132,7 @@ impl<K> ExprTree<K> {
 			},
 
 			// Otherwise, we match if the value is empty
-			_ => match value.is_empty() {
+			None => match value.is_empty() {
 				true => BTreeMap::new(),
 				false => return None,
 			},
