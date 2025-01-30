@@ -146,13 +146,13 @@ pub struct RuleStmt<'a> {
 	pub pats: Vec<PatStmt<'a>>,
 
 	/// Output
-	pub out: Option<Array<Expr<'a>>>,
+	pub out: Array<Expr<'a>>,
 
 	/// Dependencies
-	pub deps: Option<Array<Expr<'a>>>,
+	pub deps: Array<Expr<'a>>,
 
 	/// Execution
-	pub exec: Option<Array<Command<'a>>>,
+	pub exec: Array<Command<'a>>,
 }
 
 impl<'a> Parsable<'a> for RuleStmt<'a> {
@@ -163,9 +163,9 @@ impl<'a> Parsable<'a> for RuleStmt<'a> {
 
 		let mut aliases = vec![];
 		let mut pats = vec![];
-		let mut out = None;
-		let mut deps = None;
-		let mut exec = None;
+		let mut out = Array(vec![]);
+		let mut deps = Array(vec![]);
+		let mut exec = Array(vec![]);
 
 		while parser.try_parse::<TokenBracesClose<'a>>().is_err() {
 			match parser
@@ -175,15 +175,15 @@ impl<'a> Parsable<'a> for RuleStmt<'a> {
 				AnyOf5::T0(alias) => aliases.push(alias),
 				AnyOf5::T1(pat) => pats.push(pat),
 				AnyOf5::T2(_) => {
-					out = Some(parser.parse::<Array<Expr<'a>>>()?);
+					out.0.extend(parser.parse::<Array<Expr<'a>>>()?.0);
 					parser.parse::<TokenSemi<'a>>()?;
 				},
 				AnyOf5::T3(_) => {
-					deps = Some(parser.parse::<Array<Expr<'a>>>()?);
+					deps.0.extend(parser.parse::<Array<Expr<'a>>>()?.0);
 					parser.parse::<TokenSemi<'a>>()?;
 				},
 				AnyOf5::T4(_) => {
-					exec = Some(parser.parse::<Array<Command<'a>>>()?);
+					exec.0.extend(parser.parse::<Array<Command<'a>>>()?.0);
 					parser.parse::<TokenSemi<'a>>()?;
 				},
 			}
