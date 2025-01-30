@@ -222,3 +222,36 @@ impl From<&str> for ArcStr {
 		s.to_owned().into()
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use {super::*, std::hint::black_box};
+
+	#[test]
+	fn create() {
+		let s = ArcStr::from("Test".to_owned());
+		_ = black_box(&*s);
+	}
+
+	#[test]
+	fn mutate() {
+		let mut s1 = ArcStr::from("Test".to_owned());
+		let s2 = s1.clone();
+		s1.with_mut(|s| {
+			let cap = s.capacity();
+			s.push_str(&"A".repeat(100));
+
+			assert!(s.capacity() > cap, "Did not re-allocate");
+		});
+		_ = black_box(&*s1);
+		_ = black_box(&*s2);
+	}
+
+	#[test]
+	fn slice_from_str() {
+		let s1 = ArcStr::from("Test".to_owned());
+		let s2 = s1.slice_from_str(&s1[1..2]);
+		_ = black_box(&*s1);
+		_ = black_box(&*s2);
+	}
+}
