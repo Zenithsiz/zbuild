@@ -53,20 +53,17 @@ impl Rule<Expr> {
 			.collect();
 		let output = rule
 			.out
-			.0
 			.into_iter()
 			.map(|out| OutItem::from_ast(zbuild_file, out))
 			.collect::<Result<_, AppError>>()?;
 		let deps = rule
 			.deps
-			.0
 			.into_iter()
 			.map(|dep| DepItem::from_ast(zbuild_file, dep))
 			.collect();
 		let exec = Exec {
 			cmds: rule
 				.exec
-				.0
 				.into_iter()
 				.map(|cmd| Command::from_ast(zbuild_file, cmd))
 				.collect(),

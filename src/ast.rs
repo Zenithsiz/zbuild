@@ -155,13 +155,13 @@ pub struct RuleStmt<'a> {
 	pub pats: Vec<PatStmt<'a>>,
 
 	/// Output
-	pub out: Array<Expr<'a>>,
+	pub out: Vec<Expr<'a>>,
 
 	/// Dependencies
-	pub deps: Array<Expr<'a>>,
+	pub deps: Vec<Expr<'a>>,
 
 	/// Execution
-	pub exec: Array<Command<'a>>,
+	pub exec: Vec<Command<'a>>,
 }
 
 impl<'a> Parsable<'a> for RuleStmt<'a> {
@@ -172,30 +172,30 @@ impl<'a> Parsable<'a> for RuleStmt<'a> {
 
 		let mut aliases = vec![];
 		let mut pats = vec![];
-		let mut out = Array(vec![]);
-		let mut deps = Array(vec![]);
-		let mut exec = Array(vec![]);
+		let mut out = vec![];
+		let mut deps = vec![];
+		let mut exec = vec![];
 
 		while parser.try_parse::<TokenBracesClose<'a>>().is_err() {
 			match parser
-				.peek::<AnyOf5<TokenAlias<'a>, TokenPat<'a>, TokenOut<'a>, TokenDeps<'a>, TokenExec<'a>>>()
+				.peek::<AnyOf5<TokenAlias<'a>, TokenPat<'a>, TokenOut<'a>, TokenDep<'a>, TokenExec<'a>>>()
 				.context("Expected an alias, default or rule statement")?
 			{
 				AnyOf5::T0(_) => aliases.push(parser.parse::<AliasStmt<'_>>()?),
 				AnyOf5::T1(_) => pats.push(parser.parse::<PatStmt<'_>>()?),
 				AnyOf5::T2(_) => {
 					parser.parse::<TokenOut<'a>>()?;
-					out.0.extend(parser.parse::<Array<Expr<'a>>>()?.0);
+					out.push(parser.parse::<Expr<'a>>()?);
 					parser.parse::<TokenSemi<'a>>()?;
 				},
 				AnyOf5::T3(_) => {
-					parser.parse::<TokenDeps<'a>>()?;
-					deps.0.extend(parser.parse::<Array<Expr<'a>>>()?.0);
+					parser.parse::<TokenDep<'a>>()?;
+					deps.push(parser.parse::<Expr<'a>>()?);
 					parser.parse::<TokenSemi<'a>>()?;
 				},
 				AnyOf5::T4(_) => {
 					parser.parse::<TokenExec<'a>>()?;
-					exec.0.extend(parser.parse::<Array<Command<'a>>>()?.0);
+					exec.push(parser.parse::<Command<'a>>()?);
 					parser.parse::<TokenSemi<'a>>()?;
 				},
 			}
@@ -459,7 +459,7 @@ pub macro decl_tokens($($TokenName:ident = $Token:expr;)*) {
 decl_tokens! {
 	TokenAlias = "alias";
 	TokenDefault = "default";
-	TokenDeps = "deps";
+	TokenDep = "dep";
 	TokenDepsFile = "deps_file";
 	TokenExec = "exec";
 	TokenNonEmpty = "non_empty";
