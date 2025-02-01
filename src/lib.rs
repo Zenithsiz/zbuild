@@ -18,7 +18,10 @@
 	extend_one,
 	try_blocks,
 	macro_metavar_expr,
-	macro_metavar_expr_concat
+	macro_metavar_expr_concat,
+	substr_range,
+	unwrap_infallible,
+	never_type
 )]
 // Lints
 #![allow(

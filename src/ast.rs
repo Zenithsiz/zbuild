@@ -10,7 +10,7 @@
 // Imports
 use {
 	crate::AppError,
-	std::{fmt::Write, ptr, str::pattern::Pattern},
+	std::{fmt::Write, ops::Try, ptr, str::pattern::Pattern},
 	zutil_app_error::Context,
 };
 
@@ -497,41 +497,69 @@ pub trait Parsable<'a>: Sized {
 pub struct Parser<'a> {
 	/// Input
 	input: &'a str,
+
+	/// Current position
+	cur_pos: usize,
 }
 
 impl<'a> Parser<'a> {
 	/// Creates a new parser
 	pub const fn new(input: &'a str) -> Self {
-		Self { input }
+		Self { input, cur_pos: 0 }
 	}
 
 	/// Returns the remaining string for the parser
-	pub const fn remaining(&self) -> &'a str {
-		self.input
-	}
-
-	/// Returns the character at `idx`.
-	///
-	/// Panics if `idx` isn't a utf-8 codepoint boundary.
-	/// Panics if `idx` is out of bounds.
-	pub fn _ch_at(&self, idx: usize) -> char {
-		self.input[idx..].chars().next().expect("Index was out of bounds")
+	pub fn remaining(&self) -> &'a str {
+		&self.input[self.cur_pos..]
 	}
 
 	/// Returns if the parser is finished
 	pub fn is_finished(&mut self) -> Result<bool, AppError> {
 		self.trim()?;
 
-		Ok(self.input.is_empty())
+		Ok(self.remaining().is_empty())
 	}
 
 	/// Advances the parser by `len` bytes.
 	///
 	/// Panics if `idx` isn't a utf-8 codepoint boundary.
 	pub fn advance_by(&mut self, len: usize) -> &'a str {
-		let value = &self.input[..len];
-		self.input = &self.input[len..];
-		value
+		let prev_pos = self.cur_pos;
+		self.cur_pos += len;
+		assert!(self.input.is_char_boundary(self.cur_pos));
+
+		&self.input[prev_pos..self.cur_pos]
+	}
+
+	/// Updates this parser from a string.
+	///
+	/// The output must be a substring of the input.
+	/// Regardless of it's length, everything from it's
+	/// start to the end will be set as the remaining.
+	pub fn update_with<F>(&mut self, f: F) -> &'a str
+	where
+		F: FnOnce(&'a str) -> &'a str,
+	{
+		self.try_update_with(|remaining| Ok::<_, !>(f(remaining))).into_ok()
+	}
+
+	/// Updates this parser from a string.
+	///
+	/// See [`Self::update_with`] for more details.
+	pub fn try_update_with<F, T>(&mut self, f: F) -> T
+	where
+		F: FnOnce(&'a str) -> T,
+		T: Try<Output = &'a str>,
+	{
+		let output = f(self.remaining())?;
+
+		let range = self
+			.remaining()
+			.substr_range(output)
+			.expect("Result was not a substring of the input");
+		self.cur_pos += range.start;
+
+		T::from_output(output)
 	}
 
 	/// Trims non-parsable input, such as:
@@ -540,20 +568,24 @@ impl<'a> Parser<'a> {
 	/// - Comments
 	pub fn trim(&mut self) -> Result<(), AppError> {
 		while self
-			.input
+			.remaining()
 			.starts_with(|ch: char| ch.is_whitespace() || matches!(ch, '#'))
 		{
 			// Trim whitespace
-			self.input = self.input.trim_start();
+			self.update_with(|remaining| remaining.trim_start());
 
 			// Then trim comments
-			if let Some(rest) = self.input.strip_prefix("###") {
-				let end_idx = rest.find("###").context("Expected `###` after `###`")?;
-				self.input = &rest[end_idx + 3..];
-			} else if let Some(rest) = self.input.strip_prefix('#') {
-				let end_idx = rest.find('\n').unwrap_or(rest.len());
-				self.input = &rest[end_idx + 1..];
-			}
+			self.try_update_with(|remaining| {
+				if let Some(rest) = remaining.strip_prefix("###") {
+					let end_idx = rest.find("###").context("Expected `###` after `###`")?;
+					Ok(&rest[end_idx + 3..])
+				} else if let Some(rest) = remaining.strip_prefix('#') {
+					let end_idx = rest.find('\n').unwrap_or(rest.len());
+					Ok(&rest[end_idx + 1..])
+				} else {
+					Ok::<_, AppError>(remaining)
+				}
+			})?;
 		}
 
 		Ok(())
@@ -561,15 +593,12 @@ impl<'a> Parser<'a> {
 
 	/// Strips a prefix from the parser
 	pub fn strip_prefix<P: Pattern>(&mut self, prefix: P) -> Option<&'a str> {
-		let rest = self.input.strip_prefix(prefix)?;
-		let value = &self.input[..self.input.len() - rest.len()];
-		self.input = rest;
-		Some(value)
+		self.try_update_with(|remaining| remaining.strip_prefix(prefix))
 	}
 
 	/// Trims all matching prefixes from the parser
 	pub fn trim_start_matches<P: Pattern>(&mut self, pat: P) {
-		self.input = self.input.trim_start_matches(pat);
+		self.update_with(|remaining| remaining.trim_start_matches(pat));
 	}
 
 	/// Parses `T` from this parser
@@ -623,7 +652,7 @@ macro decl_any_of($Name:ident, $($T:ident),* $(,)?) {
 			let mut err = format!("Expected one of the following {} matches:", ${count($T)});
 			$(
 				match ptr::eq(${concat(parser_, $T)}.remaining(), parser.remaining()) {
-					// If the parser hasn't moved, don't print the postion
+					// If the parser hasn't moved, don't print the position
 					true => write!(err, "\n{}", ${concat(err_, $T)}),
 					// Otherwise, print the error and position
 					false => write!(err, "\n{} at {:?}", ${concat(err_, $T)}, self::at_most(${concat(parser_, $T)}.remaining(), 50)),
