@@ -35,8 +35,15 @@ impl<'a> Ast<'a> {
 	pub fn parse_full(input: &'a str) -> Result<Self, AppError> {
 		let mut parser = Parser::new(input);
 		let ast = Self::parse_from(&mut parser).with_context(|| {
-			let remaining = parser.remaining();
-			format!("Error at:\n'''\n{}\n'''", self::at_most(remaining, 100))
+			// TODO: Deal with tabs better here?
+
+			let line = parser.cur_line().replace('\t', "    ");
+			let line_pos = parser.cur_line_pos() + 1;
+			let col_pos = parser.cur_col_pos() + 1;
+
+			let tabs = parser.cur_line().chars().filter(|&ch| ch == '\t').count();
+			let ident = " ".repeat(parser.cur_col_pos() + tabs * 3);
+			format!("Error at {line_pos}:{col_pos}:\n{line}\n{ident}^")
 		})?;
 		zutil_app_error::ensure!(parser.is_finished()?, "Unexpected tokens at the end");
 
@@ -513,6 +520,31 @@ impl<'a> Parser<'a> {
 		&self.input[self.cur_pos..]
 	}
 
+	/// Returns the current line of the parser, not including the end
+	pub fn cur_line(&self) -> &'a str {
+		let start = self.input[..self.cur_pos].rfind('\n').map_or(0, |idx| idx + 1);
+		let end = self.cur_pos +
+			self.input[self.cur_pos..]
+				.find('\n')
+				.unwrap_or(self.input.len() - self.cur_pos);
+
+		&self.input[start..end]
+	}
+
+	/// Gets the current line (0-indexed) of the parser
+	// TODO: Make this less expensive?
+	pub fn cur_line_pos(&self) -> usize {
+		self.input[..self.cur_pos].chars().filter(|&ch| ch == '\n').count()
+	}
+
+	/// Gets the current column (0-indexed) of the parser
+	pub fn cur_col_pos(&self) -> usize {
+		match self.input[..self.cur_pos].rfind('\n') {
+			Some(newline_pos) => self.cur_pos - newline_pos - 1,
+			None => self.cur_pos,
+		}
+	}
+
 	/// Returns if the parser is finished
 	pub fn is_finished(&mut self) -> Result<bool, AppError> {
 		self.trim()?;
@@ -611,6 +643,7 @@ impl<'a> Parser<'a> {
 	///
 	/// On error, nothing is modified.
 	pub fn try_parse<T: Parsable<'a>>(&mut self) -> Result<T, AppError> {
+		self.trim()?;
 		let mut parser = self.clone();
 		let value = parser.parse::<T>()?;
 
@@ -619,7 +652,8 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Peeks `T` from this parser, without advancing it
-	pub fn peek<T: Parsable<'a>>(&self) -> Result<T, AppError> {
+	pub fn peek<T: Parsable<'a>>(&mut self) -> Result<T, AppError> {
+		self.trim()?;
 		self.clone().parse::<T>()
 	}
 }
@@ -655,7 +689,11 @@ macro decl_any_of($Name:ident, $($T:ident),* $(,)?) {
 					// If the parser hasn't moved, don't print the position
 					true => write!(err, "\n{}", ${concat(err_, $T)}),
 					// Otherwise, print the error and position
-					false => write!(err, "\n{} at {:?}", ${concat(err_, $T)}, self::at_most(${concat(parser_, $T)}.remaining(), 50)),
+					false => write!(err, "\n{} at {}:{}",
+						${concat(err_, $T)},
+						${concat(parser_, $T)}.cur_line_pos(),
+						${concat(parser_, $T)}.cur_col_pos(),
+					),
 				}.expect("Failed to write into string");
 			)*
 
@@ -668,10 +706,3 @@ decl_any_of!(AnyOf2, T0, T1);
 decl_any_of!(AnyOf3, T0, T1, T2);
 decl_any_of!(AnyOf4, T0, T1, T2, T3);
 decl_any_of!(AnyOf5, T0, T1, T2, T3, T4);
-
-fn at_most(s: &str, max: usize) -> String {
-	match s.len() > max {
-		true => format!("{}[...]", &s[..max]),
-		false => s.to_owned(),
-	}
-}
