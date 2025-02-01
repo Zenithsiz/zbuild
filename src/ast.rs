@@ -227,31 +227,28 @@ impl<'a> Parsable<'a> for Command<'a> {
 		let mut cwd = None;
 		let mut args = None;
 
-		type TokenBracketOpen<'a> = TokenBracesOpen<'a>;
-		type TokenBracketClose<'a> = TokenBracesClose<'a>;
-
-		match parser.try_parse::<TokenBracketOpen<'a>>() {
+		match parser.try_parse::<TokenBracesOpen<'a>>() {
 			// If it starts with a `{`, it's a full
-			Ok(_) => loop {
-				let key = parser.try_parse::<Ident<'a>>()?;
-				parser.parse::<TokenColon<'a>>()?;
-
-				match key.0 {
-					"cwd" => cwd = Some(parser.parse::<Expr<'a>>()?),
-					"args" => args = Some(parser.parse::<Array<Expr<'a>>>()?),
-					key => zutil_app_error::bail!("Unknown key: `{key:?}`"),
-				}
-
-				match parser.parse::<AnyOf2<TokenComma<'a>, TokenBracketClose<'a>>>()? {
-					// `,` or `,}`
-					AnyOf2::T0(_) =>
-						if parser.try_parse::<TokenBracketClose<'a>>().is_ok() {
-							break;
+			Ok(_) =>
+				while parser.try_parse::<TokenBracesClose<'a>>().is_err() {
+					match parser
+						.peek::<AnyOf2<TokenCwd<'a>, TokenArgs<'a>>>()
+						.context("Expected an alias, default or rule statement")?
+					{
+						AnyOf2::T0(_) => {
+							parser.parse::<TokenCwd<'a>>()?;
+							zutil_app_error::ensure!(cwd.is_none(), "Working directory was already specified");
+							cwd = Some(parser.parse::<Expr<'a>>()?);
+							parser.parse::<TokenSemi<'a>>()?;
 						},
-					// `}`
-					AnyOf2::T1(_) => break,
-				}
-			},
+						AnyOf2::T1(_) => {
+							parser.parse::<TokenArgs<'a>>()?;
+							zutil_app_error::ensure!(args.is_none(), "Arguments were already specified");
+							args = Some(parser.parse::<Array<Expr<'a>>>()?);
+							parser.parse::<TokenSemi<'a>>()?;
+						},
+					}
+				},
 
 			// Otherwise, just parse an array of expressions
 			Err(_) => {
@@ -259,7 +256,7 @@ impl<'a> Parsable<'a> for Command<'a> {
 			},
 		};
 
-		let args = args.context("Missing `args:` for command")?;
+		let args = args.context("Missing command `args`")?;
 
 		Ok(Self { cwd, args })
 	}
@@ -367,7 +364,7 @@ impl<'a> ExprCmpt<'a> {
 	pub fn parse_many(parser: &mut Parser<'a>, cmpts: &mut Vec<Self>) -> Result<(), AppError> {
 		match parser
 			.peek::<AnyOf2<TokenXIDStart<'a>, TokenDoubleQuote<'a>>>()
-			.context("Expected an identifier, or literal")?
+			.context("Expected an identifier or literal")?
 		{
 			// If we get a sole identifier, that's the only component
 			AnyOf2::T0(_) => {
@@ -458,6 +455,8 @@ pub macro decl_tokens($($TokenName:ident = $Token:expr;)*) {
 
 decl_tokens! {
 	TokenAlias = "alias";
+	TokenArgs = "args";
+	TokenCwd = "cwd";
 	TokenDefault = "default";
 	TokenDep = "dep";
 	TokenDepsFile = "deps_file";
@@ -474,7 +473,6 @@ decl_tokens! {
 	TokenBracketOpen = '[';
 	TokenBracketClose = ']';
 
-	TokenColon = ':';
 	TokenComma = ',';
 	TokenDot = '.';
 	TokenDoubleQuote = '"';
