@@ -50,10 +50,10 @@ impl<T> Target<T> {
 
 impl Target<Expr> {
 	/// Creates a new target from it's ast
-	pub fn from_ast(zbuild_file: &ArcStr, target: ast::Expr<'_>) -> Self {
+	pub fn from_ast(target: ast::Expr) -> Self {
 		Self::File {
 			is_static: target.is_static,
-			file:      Expr::from_ast(zbuild_file, target),
+			file:      Expr::from_ast(target),
 		}
 	}
 }

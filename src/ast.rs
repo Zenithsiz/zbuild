@@ -9,30 +9,30 @@
 
 // Imports
 use {
-	crate::AppError,
-	std::{fmt::Write, ops::Try, ptr, str::pattern::Pattern},
+	crate::{util::ArcStr, AppError},
+	std::{fmt::Write, ptr, str::pattern::Pattern},
 	zutil_app_error::Context,
 };
 
 /// Zbuild ast
 #[derive(Clone, Debug)]
-pub struct Ast<'a> {
+pub struct Ast {
 	/// Aliases
-	pub aliases: Vec<AliasStmt<'a>>,
+	pub aliases: Vec<AliasStmt>,
 
 	/// Patterns
-	pub pats: Vec<PatStmt<'a>>,
+	pub pats: Vec<PatStmt>,
 
 	/// Default targets
-	pub defaults: Vec<DefaultStmt<'a>>,
+	pub defaults: Vec<DefaultStmt>,
 
 	/// Rules
-	pub rules: Vec<RuleStmt<'a>>,
+	pub rules: Vec<RuleStmt>,
 }
 
-impl<'a> Ast<'a> {
+impl Ast {
 	/// Parses a full ast from `input`.
-	pub fn parse_full(input: &'a str) -> Result<Self, AppError> {
+	pub fn parse_full(input: ArcStr) -> Result<Self, AppError> {
 		let mut parser = Parser::new(input);
 		let ast = Self::parse_from(&mut parser).with_context(|| {
 			// TODO: Deal with tabs better here?
@@ -51,21 +51,21 @@ impl<'a> Ast<'a> {
 	}
 }
 
-impl<'a> Parsable<'a> for Ast<'a> {
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
+impl Parsable for Ast {
+	fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
 		let mut aliases = vec![];
 		let mut pats = vec![];
 		let mut defaults = vec![];
 		let mut rules = vec![];
 		while !parser.is_finished()? {
 			match parser
-				.peek::<AnyOf4<TokenAlias<'a>, TokenPat<'a>, TokenDefault<'a>, TokenRule<'a>>>()
+				.peek::<AnyOf4<TokenAlias, TokenPat, TokenDefault, TokenRule>>()
 				.context("Expected an alias, default or rule statement")?
 			{
-				AnyOf4::T0(_) => aliases.push(parser.parse::<AliasStmt<'a>>()?),
-				AnyOf4::T1(_) => pats.push(parser.parse::<PatStmt<'a>>()?),
-				AnyOf4::T2(_) => defaults.push(parser.parse::<DefaultStmt<'a>>()?),
-				AnyOf4::T3(_) => rules.push(parser.parse::<RuleStmt<'a>>()?),
+				AnyOf4::T0(_) => aliases.push(parser.parse::<AliasStmt>()?),
+				AnyOf4::T1(_) => pats.push(parser.parse::<PatStmt>()?),
+				AnyOf4::T2(_) => defaults.push(parser.parse::<DefaultStmt>()?),
+				AnyOf4::T3(_) => rules.push(parser.parse::<RuleStmt>()?),
 			}
 		}
 
@@ -81,21 +81,21 @@ impl<'a> Parsable<'a> for Ast<'a> {
 
 /// Alias statement
 #[derive(Clone, Debug)]
-pub struct AliasStmt<'a> {
+pub struct AliasStmt {
 	/// Alias name
-	pub name: Ident<'a>,
+	pub name: Ident,
 
 	/// Alias value
-	pub value: Expr<'a>,
+	pub value: Expr,
 }
 
-impl<'a> Parsable<'a> for AliasStmt<'a> {
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
-		parser.parse::<TokenAlias<'a>>()?;
-		let name = parser.parse::<Ident<'a>>().context("Expected alias name")?;
-		parser.parse::<TokenEq<'a>>()?;
-		let value = parser.parse::<Expr<'a>>().context("Expected alias value")?;
-		parser.parse::<TokenSemi<'a>>()?;
+impl Parsable for AliasStmt {
+	fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
+		parser.parse::<TokenAlias>()?;
+		let name = parser.parse::<Ident>().context("Expected alias name")?;
+		parser.parse::<TokenEq>()?;
+		let value = parser.parse::<Expr>().context("Expected alias value")?;
+		parser.parse::<TokenSemi>()?;
 
 		Ok(Self { name, value })
 	}
@@ -103,22 +103,22 @@ impl<'a> Parsable<'a> for AliasStmt<'a> {
 
 /// Pattern statement
 #[derive(Clone, Debug)]
-pub struct PatStmt<'a> {
+pub struct PatStmt {
 	/// Pattern name
-	pub name: Ident<'a>,
+	pub name: Ident,
 
 	/// Non empty
 	pub non_empty: bool,
 }
 
-impl<'a> Parsable<'a> for PatStmt<'a> {
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
-		parser.parse::<TokenPat<'a>>()?;
+impl Parsable for PatStmt {
+	fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
+		parser.parse::<TokenPat>()?;
 
-		let non_empty = parser.try_parse::<TokenNonEmpty<'a>>().is_ok();
+		let non_empty = parser.try_parse::<TokenNonEmpty>().is_ok();
 
-		let name = parser.parse::<Ident<'a>>().context("Expected pattern name")?;
-		parser.parse::<TokenSemi<'a>>()?;
+		let name = parser.parse::<Ident>().context("Expected pattern name")?;
+		parser.parse::<TokenSemi>()?;
 
 
 		Ok(Self { name, non_empty })
@@ -127,16 +127,16 @@ impl<'a> Parsable<'a> for PatStmt<'a> {
 
 /// Default statement
 #[derive(Clone, Debug)]
-pub struct DefaultStmt<'a> {
+pub struct DefaultStmt {
 	/// Default
-	pub default: Expr<'a>,
+	pub default: Expr,
 }
 
-impl<'a> Parsable<'a> for DefaultStmt<'a> {
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
-		parser.parse::<TokenDefault<'a>>()?;
-		let default = parser.parse::<Expr<'a>>().context("Expected default expression")?;
-		parser.parse::<TokenSemi<'a>>()?;
+impl Parsable for DefaultStmt {
+	fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
+		parser.parse::<TokenDefault>()?;
+		let default = parser.parse::<Expr>().context("Expected default expression")?;
+		parser.parse::<TokenSemi>()?;
 
 		Ok(Self { default })
 	}
@@ -144,31 +144,31 @@ impl<'a> Parsable<'a> for DefaultStmt<'a> {
 
 /// Rule statement
 #[derive(Clone, Debug)]
-pub struct RuleStmt<'a> {
+pub struct RuleStmt {
 	/// Rule name
-	pub name: Ident<'a>,
+	pub name: Ident,
 
 	/// Aliases
-	pub aliases: Vec<AliasStmt<'a>>,
+	pub aliases: Vec<AliasStmt>,
 
 	/// Patterns
-	pub pats: Vec<PatStmt<'a>>,
+	pub pats: Vec<PatStmt>,
 
 	/// Output
-	pub out: Vec<Expr<'a>>,
+	pub out: Vec<Expr>,
 
 	/// Dependencies
-	pub deps: Vec<Expr<'a>>,
+	pub deps: Vec<Expr>,
 
 	/// Execution
-	pub exec: Vec<Command<'a>>,
+	pub exec: Vec<Command>,
 }
 
-impl<'a> Parsable<'a> for RuleStmt<'a> {
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
-		parser.parse::<TokenRule<'a>>()?;
-		let name = parser.parse::<Ident<'a>>().context("Expected rule name")?;
-		parser.parse::<TokenBracesOpen<'a>>()?;
+impl Parsable for RuleStmt {
+	fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
+		parser.parse::<TokenRule>()?;
+		let name = parser.parse::<Ident>().context("Expected rule name")?;
+		parser.parse::<TokenBracesOpen>()?;
 
 		let mut aliases = vec![];
 		let mut pats = vec![];
@@ -176,27 +176,27 @@ impl<'a> Parsable<'a> for RuleStmt<'a> {
 		let mut deps = vec![];
 		let mut exec = vec![];
 
-		while parser.try_parse::<TokenBracesClose<'a>>().is_err() {
+		while parser.try_parse::<TokenBracesClose>().is_err() {
 			match parser
-				.peek::<AnyOf5<TokenAlias<'a>, TokenPat<'a>, TokenOut<'a>, TokenDep<'a>, TokenExec<'a>>>()
+				.peek::<AnyOf5<TokenAlias, TokenPat, TokenOut, TokenDep, TokenExec>>()
 				.context("Expected an alias, default or rule statement")?
 			{
-				AnyOf5::T0(_) => aliases.push(parser.parse::<AliasStmt<'_>>()?),
-				AnyOf5::T1(_) => pats.push(parser.parse::<PatStmt<'_>>()?),
+				AnyOf5::T0(_) => aliases.push(parser.parse::<AliasStmt>()?),
+				AnyOf5::T1(_) => pats.push(parser.parse::<PatStmt>()?),
 				AnyOf5::T2(_) => {
-					parser.parse::<TokenOut<'a>>()?;
-					out.push(parser.parse::<Expr<'a>>()?);
-					parser.parse::<TokenSemi<'a>>()?;
+					parser.parse::<TokenOut>()?;
+					out.push(parser.parse::<Expr>()?);
+					parser.parse::<TokenSemi>()?;
 				},
 				AnyOf5::T3(_) => {
-					parser.parse::<TokenDep<'a>>()?;
-					deps.push(parser.parse::<Expr<'a>>()?);
-					parser.parse::<TokenSemi<'a>>()?;
+					parser.parse::<TokenDep>()?;
+					deps.push(parser.parse::<Expr>()?);
+					parser.parse::<TokenSemi>()?;
 				},
 				AnyOf5::T4(_) => {
-					parser.parse::<TokenExec<'a>>()?;
-					exec.push(parser.parse::<Command<'a>>()?);
-					parser.parse::<TokenSemi<'a>>()?;
+					parser.parse::<TokenExec>()?;
+					exec.push(parser.parse::<Command>()?);
+					parser.parse::<TokenSemi>()?;
 				},
 			}
 		}
@@ -214,45 +214,45 @@ impl<'a> Parsable<'a> for RuleStmt<'a> {
 
 /// Command
 #[derive(Clone, Debug)]
-pub struct Command<'a> {
+pub struct Command {
 	/// Working directory
-	pub cwd: Option<Expr<'a>>,
+	pub cwd: Option<Expr>,
 
 	/// Arguments
-	pub args: Array<Expr<'a>>,
+	pub args: Array<Expr>,
 }
 
-impl<'a> Parsable<'a> for Command<'a> {
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
+impl Parsable for Command {
+	fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
 		let mut cwd = None;
 		let mut args = None;
 
-		match parser.try_parse::<TokenBracesOpen<'a>>() {
+		match parser.try_parse::<TokenBracesOpen>() {
 			// If it starts with a `{`, it's a full
 			Ok(_) =>
-				while parser.try_parse::<TokenBracesClose<'a>>().is_err() {
+				while parser.try_parse::<TokenBracesClose>().is_err() {
 					match parser
-						.peek::<AnyOf2<TokenCwd<'a>, TokenArgs<'a>>>()
+						.peek::<AnyOf2<TokenCwd, TokenArgs>>()
 						.context("Expected an alias, default or rule statement")?
 					{
 						AnyOf2::T0(_) => {
-							parser.parse::<TokenCwd<'a>>()?;
+							parser.parse::<TokenCwd>()?;
 							zutil_app_error::ensure!(cwd.is_none(), "Working directory was already specified");
-							cwd = Some(parser.parse::<Expr<'a>>()?);
-							parser.parse::<TokenSemi<'a>>()?;
+							cwd = Some(parser.parse::<Expr>()?);
+							parser.parse::<TokenSemi>()?;
 						},
 						AnyOf2::T1(_) => {
-							parser.parse::<TokenArgs<'a>>()?;
+							parser.parse::<TokenArgs>()?;
 							zutil_app_error::ensure!(args.is_none(), "Arguments were already specified");
-							args = Some(parser.parse::<Array<Expr<'a>>>()?);
-							parser.parse::<TokenSemi<'a>>()?;
+							args = Some(parser.parse::<Array<Expr>>()?);
+							parser.parse::<TokenSemi>()?;
 						},
 					}
 				},
 
 			// Otherwise, just parse an array of expressions
 			Err(_) => {
-				args = Some(parser.parse::<Array<Expr<'a>>>()?);
+				args = Some(parser.parse::<Array<Expr>>()?);
 			},
 		};
 
@@ -266,22 +266,22 @@ impl<'a> Parsable<'a> for Command<'a> {
 #[derive(Clone, Debug)]
 pub struct Array<T>(pub Vec<T>);
 
-impl<'a, T> Parsable<'a> for Array<T>
+impl<T> Parsable for Array<T>
 where
-	T: Parsable<'a>,
+	T: Parsable,
 {
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
+	fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
 		let mut values = vec![];
 
-		match parser.try_parse::<TokenBracketOpen<'a>>() {
+		match parser.try_parse::<TokenBracketOpen>() {
 			Ok(_) => {
 				loop {
 					let value = parser.parse::<T>()?;
 					values.push(value);
-					match parser.parse::<AnyOf2<TokenComma<'a>, TokenBracketClose<'a>>>()? {
+					match parser.parse::<AnyOf2<TokenComma, TokenBracketClose>>()? {
 						// `,` or `,]`
 						AnyOf2::T0(_) =>
-							if parser.try_parse::<TokenBracketClose<'a>>().is_ok() {
+							if parser.try_parse::<TokenBracketClose>().is_ok() {
 								break;
 							},
 						// `]`
@@ -307,7 +307,7 @@ where
 
 /// Expression
 #[derive(Clone, Debug)]
-pub struct Expr<'a> {
+pub struct Expr {
 	/// Dependencies file
 	pub is_deps_file: bool,
 
@@ -318,17 +318,17 @@ pub struct Expr<'a> {
 	pub is_opt: bool,
 
 	/// Components
-	pub cmpts: Vec<ExprCmpt<'a>>,
+	pub cmpts: Vec<ExprCmpt>,
 }
 
-impl<'a> Parsable<'a> for Expr<'a> {
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
+impl Parsable for Expr {
+	fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
 		let mut is_deps_file = false;
 		let mut is_static = false;
 		let mut is_opt = false;
 
 		// Parse modifiers
-		while let Ok(modifier) = parser.parse::<AnyOf3<TokenDepsFile<'a>, TokenStatic<'a>, TokenOpt<'a>>>() {
+		while let Ok(modifier) = parser.parse::<AnyOf3<TokenDepsFile, TokenStatic, TokenOpt>>() {
 			match modifier {
 				AnyOf3::T0(_) => is_deps_file = true,
 				AnyOf3::T1(_) => is_static = true,
@@ -351,56 +351,56 @@ impl<'a> Parsable<'a> for Expr<'a> {
 
 /// Expression component
 #[derive(Clone, Debug)]
-pub enum ExprCmpt<'a> {
+pub enum ExprCmpt {
 	/// Identifier
-	Ident { ident: Ident<'a>, ops: Vec<ExprOp> },
+	Ident { ident: Ident, ops: Vec<ExprOp> },
 
 	/// String literal
-	String(&'a str),
+	String(ArcStr),
 }
 
-impl<'a> ExprCmpt<'a> {
+impl ExprCmpt {
 	/// Parses a list of expression components from a parser
-	pub fn parse_many(parser: &mut Parser<'a>, cmpts: &mut Vec<Self>) -> Result<(), AppError> {
+	pub fn parse_many(parser: &mut Parser, cmpts: &mut Vec<Self>) -> Result<(), AppError> {
 		match parser
-			.peek::<AnyOf2<TokenXIDStart<'a>, TokenDoubleQuote<'a>>>()
+			.peek::<AnyOf2<TokenXIDStart, TokenDoubleQuote>>()
 			.context("Expected an identifier or literal")?
 		{
 			// If we get a sole identifier, that's the only component
 			AnyOf2::T0(_) => {
-				let ident = parser.parse::<Ident<'a>>()?;
+				let ident = parser.parse::<Ident>()?;
 
 				// Parse all of the operators
 				let mut ops = vec![];
-				while parser.try_parse::<TokenDot<'a>>().is_ok() {
-					let op = parser.parse::<Ident<'a>>().context("Expected identifier after `.`")?;
-					match op.0 {
+				while parser.try_parse::<TokenDot>().is_ok() {
+					let op = parser.parse::<Ident>().context("Expected identifier after `.`")?;
+					match &*op.0 {
 						"dir_name" => ops.push(ExprOp::DirName),
 						op => zutil_app_error::bail!("Unknown expression operator: {op:?}"),
 					}
 				}
 
-				cmpts.push(ExprCmpt::Ident { ident, ops });
+				cmpts.push(Self::Ident { ident, ops });
 			},
 			// If we get a literal, split all format strings inside of it.
 			AnyOf2::T1(_) => {
-				parser.parse::<TokenDoubleQuote<'a>>()?;
-				while parser.try_parse::<TokenDoubleQuote<'a>>().is_err() {
+				parser.parse::<TokenDoubleQuote>()?;
+				while parser.try_parse::<TokenDoubleQuote>().is_err() {
 					let Some(end_idx) = parser.remaining().find(['{', '"']) else {
 						zutil_app_error::bail!("Expected closing `\"` after `\"`");
 					};
 					let prefix = parser.advance_by(end_idx);
 					if !prefix.is_empty() {
-						cmpts.push(ExprCmpt::String(prefix));
+						cmpts.push(Self::String(prefix));
 					}
 
 					match parser
-						.parse::<AnyOf2<TokenBracesOpen<'a>, TokenDoubleQuote<'a>>>()
+						.parse::<AnyOf2<TokenBracesOpen, TokenDoubleQuote>>()
 						.expect("Just checked that one should parse")
 					{
 						AnyOf2::T0(_) => {
 							Self::parse_many(parser, cmpts)?;
-							parser.parse::<TokenBracesClose<'a>>()?;
+							parser.parse::<TokenBracesClose>()?;
 						},
 						// If the next special character we got was a `"`, we're done
 						AnyOf2::T1(_) => break,
@@ -422,17 +422,17 @@ pub enum ExprOp {
 
 /// Identifier
 #[derive(Clone, Debug)]
-pub struct Ident<'a>(pub &'a str);
+pub struct Ident(pub ArcStr);
 
-impl<'a> Parsable<'a> for Ident<'a> {
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
+impl Parsable for Ident {
+	fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
 		let orig_input = parser.remaining();
 		parser
 			.strip_prefix(unicode_ident::is_xid_start)
 			.context("Expected `XID_START`")?;
 		parser.trim_start_matches(unicode_ident::is_xid_continue);
 
-		let ident = &orig_input[..orig_input.len() - parser.remaining().len()];
+		let ident = orig_input.slice(..orig_input.len() - parser.remaining().len());
 		Ok(Self(ident))
 	}
 }
@@ -440,12 +440,12 @@ impl<'a> Parsable<'a> for Ident<'a> {
 pub macro decl_tokens($($TokenName:ident = $Token:expr;)*) {
 	$(
 		#[expect(dead_code, reason = "We don't need the token, but it's useful to have it.")]
-		pub struct $TokenName<'a>(pub &'a str);
+		pub struct $TokenName(pub ArcStr);
 
-		impl<'a> Parsable<'a> for $TokenName<'a> {
-			fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
+		impl Parsable for $TokenName {
+			fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
 				match parser.strip_prefix($Token) {
-					Some(value) => Ok(Self(value)),
+					Some(value) => Ok(Self(value.into())),
 					None => zutil_app_error::bail!("Expected {:?}", $Token),
 				}
 			}
@@ -481,10 +481,10 @@ decl_tokens! {
 }
 
 #[expect(dead_code, reason = "We don't need the token, but it's useful to have it.")]
-struct TokenXIDStart<'a>(pub &'a str);
+struct TokenXIDStart(pub ArcStr);
 
-impl<'a> Parsable<'a> for TokenXIDStart<'a> {
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
+impl Parsable for TokenXIDStart {
+	fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
 		parser
 			.strip_prefix(unicode_ident::is_xid_start)
 			.map(Self)
@@ -492,41 +492,41 @@ impl<'a> Parsable<'a> for TokenXIDStart<'a> {
 	}
 }
 
-pub trait Parsable<'a>: Sized {
+pub trait Parsable: Sized {
 	/// Parses this type from `input`, mutating it in-place.
-	fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError>;
+	fn parse_from(parser: &mut Parser) -> Result<Self, AppError>;
 }
 
 /// Parser
 #[derive(Clone, Debug)]
-pub struct Parser<'a> {
+pub struct Parser {
 	/// Input
-	input: &'a str,
+	input: ArcStr,
 
 	/// Current position
 	cur_pos: usize,
 }
 
-impl<'a> Parser<'a> {
+impl Parser {
 	/// Creates a new parser
-	pub const fn new(input: &'a str) -> Self {
+	pub const fn new(input: ArcStr) -> Self {
 		Self { input, cur_pos: 0 }
 	}
 
 	/// Returns the remaining string for the parser
-	pub fn remaining(&self) -> &'a str {
-		&self.input[self.cur_pos..]
+	pub fn remaining(&self) -> ArcStr {
+		self.input.slice(self.cur_pos..)
 	}
 
 	/// Returns the current line of the parser, not including the end
-	pub fn cur_line(&self) -> &'a str {
+	pub fn cur_line(&self) -> ArcStr {
 		let start = self.input[..self.cur_pos].rfind('\n').map_or(0, |idx| idx + 1);
 		let end = self.cur_pos +
 			self.input[self.cur_pos..]
 				.find('\n')
 				.unwrap_or(self.input.len() - self.cur_pos);
 
-		&self.input[start..end]
+		self.input.slice(start..end)
 	}
 
 	/// Gets the current line (0-indexed) of the parser
@@ -553,12 +553,12 @@ impl<'a> Parser<'a> {
 	/// Advances the parser by `len` bytes.
 	///
 	/// Panics if `idx` isn't a utf-8 codepoint boundary.
-	pub fn advance_by(&mut self, len: usize) -> &'a str {
+	pub fn advance_by(&mut self, len: usize) -> ArcStr {
 		let prev_pos = self.cur_pos;
 		self.cur_pos += len;
 		assert!(self.input.is_char_boundary(self.cur_pos));
 
-		&self.input[prev_pos..self.cur_pos]
+		self.input.slice(prev_pos..self.cur_pos)
 	}
 
 	/// Updates this parser from a string.
@@ -566,9 +566,9 @@ impl<'a> Parser<'a> {
 	/// The output must be a substring of the input.
 	/// Regardless of it's length, everything from it's
 	/// start to the end will be set as the remaining.
-	pub fn update_with<F>(&mut self, f: F) -> &'a str
+	pub fn update_with<F>(&mut self, f: F) -> ArcStr
 	where
-		F: FnOnce(&'a str) -> &'a str,
+		F: FnOnce(&str) -> &str,
 	{
 		self.try_update_with(|remaining| Ok::<_, !>(f(remaining))).into_ok()
 	}
@@ -576,20 +576,21 @@ impl<'a> Parser<'a> {
 	/// Updates this parser from a string.
 	///
 	/// See [`Self::update_with`] for more details.
-	pub fn try_update_with<F, T>(&mut self, f: F) -> T
+	pub fn try_update_with<F, E>(&mut self, f: F) -> Result<ArcStr, E>
 	where
-		F: FnOnce(&'a str) -> T,
-		T: Try<Output = &'a str>,
+		// TODO: Make this GATs once we can create a `TryFnOnce(&str) -> &str` that
+		//       we can change the output type of.
+		F: FnOnce(&str) -> Result<&str, E>,
 	{
-		let output = f(self.remaining())?;
+		let remaining = self.remaining();
+		let output = f(&remaining)?;
 
-		let range = self
-			.remaining()
+		let range = remaining
 			.substr_range(output)
 			.expect("Result was not a substring of the input");
 		self.cur_pos += range.start;
 
-		T::from_output(output)
+		Ok(self.input.slice_from_str(output))
 	}
 
 	/// Trims non-parsable input, such as:
@@ -622,8 +623,9 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Strips a prefix from the parser
-	pub fn strip_prefix<P: Pattern>(&mut self, prefix: P) -> Option<&'a str> {
-		self.try_update_with(|remaining| remaining.strip_prefix(prefix))
+	pub fn strip_prefix<P: Pattern>(&mut self, prefix: P) -> Option<ArcStr> {
+		self.try_update_with(|remaining| remaining.strip_prefix(prefix).ok_or(()))
+			.ok()
 	}
 
 	/// Trims all matching prefixes from the parser
@@ -632,7 +634,7 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Parses `T` from this parser
-	pub fn parse<T: Parsable<'a>>(&mut self) -> Result<T, AppError> {
+	pub fn parse<T: Parsable>(&mut self) -> Result<T, AppError> {
 		self.trim()?;
 		T::parse_from(self)
 	}
@@ -640,7 +642,7 @@ impl<'a> Parser<'a> {
 	/// Tries to parses `T` from this parser.
 	///
 	/// On error, nothing is modified.
-	pub fn try_parse<T: Parsable<'a>>(&mut self) -> Result<T, AppError> {
+	pub fn try_parse<T: Parsable>(&mut self) -> Result<T, AppError> {
 		self.trim()?;
 		let mut parser = self.clone();
 		let value = parser.parse::<T>()?;
@@ -650,7 +652,7 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Peeks `T` from this parser, without advancing it
-	pub fn peek<T: Parsable<'a>>(&mut self) -> Result<T, AppError> {
+	pub fn peek<T: Parsable>(&mut self) -> Result<T, AppError> {
 		self.trim()?;
 		self.clone().parse::<T>()
 	}
@@ -661,13 +663,13 @@ macro decl_any_of($Name:ident, $($T:ident),* $(,)?) {
 		$( $T($T) ),*
 	}
 
-	impl<'a, $($T),*> Parsable<'a> for $Name<$($T),*>
+	impl<$($T),*> Parsable for $Name<$($T),*>
 	where
 		$(
-			$T: Parsable<'a>,
+			$T: Parsable,
 		)*
 	{
-		fn parse_from(parser: &mut Parser<'a>) -> Result<Self, AppError> {
+		fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
 			#![expect(non_snake_case, reason = "Macro generated")]
 
 			$(
@@ -683,7 +685,7 @@ macro decl_any_of($Name:ident, $($T:ident),* $(,)?) {
 
 			let mut err = format!("Expected one of the following {} matches:", ${count($T)});
 			$(
-				match ptr::eq(${concat(parser_, $T)}.remaining(), parser.remaining()) {
+				match ptr::eq(&*${concat(parser_, $T)}.remaining(), &*parser.remaining()) {
 					// If the parser hasn't moved, don't print the position
 					true => write!(err, "\n{}", ${concat(err_, $T)}),
 					// Otherwise, print the error and position

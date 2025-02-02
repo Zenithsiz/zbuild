@@ -32,45 +32,34 @@ pub struct Rule<T> {
 
 impl Rule<Expr> {
 	/// Creates a new rule from it's ast
-	pub fn from_ast(zbuild_file: &ArcStr, rule: ast::RuleStmt<'_>) -> Result<Self, AppError> {
+	pub fn from_ast(rule: ast::RuleStmt) -> Result<Self, AppError> {
 		let aliases = rule
 			.aliases
 			.into_iter()
-			.map(|alias| {
-				(
-					zbuild_file.slice_from_str(alias.name.0),
-					Expr::from_ast(zbuild_file, alias.value),
-				)
-			})
+			.map(|alias| (alias.name.0, Expr::from_ast(alias.value)))
 			.collect();
 		let pats = rule
 			.pats
 			.into_iter()
 			.map(|pat| {
-				let name = zbuild_file.slice_from_str(pat.name.0);
-				(name.clone(), Pattern { name, non_empty: false })
+				(pat.name.0.clone(), Pattern {
+					name:      pat.name.0,
+					non_empty: false,
+				})
 			})
 			.collect();
 		let output = rule
 			.out
 			.into_iter()
-			.map(|out| OutItem::from_ast(zbuild_file, out))
+			.map(OutItem::from_ast)
 			.collect::<Result<_, AppError>>()?;
-		let deps = rule
-			.deps
-			.into_iter()
-			.map(|dep| DepItem::from_ast(zbuild_file, dep))
-			.collect();
+		let deps = rule.deps.into_iter().map(DepItem::from_ast).collect();
 		let exec = Exec {
-			cmds: rule
-				.exec
-				.into_iter()
-				.map(|cmd| Command::from_ast(zbuild_file, cmd))
-				.collect(),
+			cmds: rule.exec.into_iter().map(Command::from_ast).collect(),
 		};
 
 		Ok(Self {
-			name: zbuild_file.slice_from_str(rule.name.0),
+			name: rule.name.0,
 			aliases: Arc::new(aliases),
 			pats: Arc::new(pats),
 			output,
@@ -100,15 +89,10 @@ pub struct Command<T> {
 
 impl Command<Expr> {
 	/// Creates a new command from it's ast
-	pub fn from_ast(zbuild_file: &ArcStr, cmd: ast::Command<'_>) -> Self {
+	pub fn from_ast(cmd: ast::Command) -> Self {
 		Self {
-			cwd:  cmd.cwd.map(|cwd| Expr::from_ast(zbuild_file, cwd)),
-			args: cmd
-				.args
-				.0
-				.into_iter()
-				.map(|arg| Expr::from_ast(zbuild_file, arg))
-				.collect(),
+			cwd:  cmd.cwd.map(Expr::from_ast),
+			args: cmd.args.0.into_iter().map(Expr::from_ast).collect(),
 		}
 	}
 }

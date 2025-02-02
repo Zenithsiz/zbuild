@@ -109,6 +109,14 @@ impl ArcStr {
 		}
 	}
 
+	/// Slices this string
+	pub fn slice<S>(&self, slice: S) -> Self
+	where
+		str: std::ops::Index<S, Output = str>,
+	{
+		self.slice_from_str(&self[slice])
+	}
+
 	/// Wrapper for [`str::strip_prefix`]
 	pub fn strip_prefix<P: Pattern>(&self, prefix: P) -> Option<Self> {
 		(**self).strip_prefix(prefix).map(|s| self.slice_from_str(s))

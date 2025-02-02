@@ -123,14 +123,14 @@ impl Expr {
 	}
 
 	/// Creates a new expression from it's ast
-	pub fn from_ast(zbuild_file: &ArcStr, expr: ast::Expr<'_>) -> Self {
+	pub fn from_ast(expr: ast::Expr) -> Self {
 		let cmpts = expr
 			.cmpts
 			.into_iter()
 			.map(|cmpt| match cmpt {
-				ast::ExprCmpt::String(s) => ExprCmpt::String(zbuild_file.slice_from_str(s)),
+				ast::ExprCmpt::String(s) => ExprCmpt::String(s),
 				ast::ExprCmpt::Ident { ident, ops } => ExprCmpt::Ident {
-					name: zbuild_file.slice_from_str(ident.0),
+					name: ident.0,
 					ops:  ops
 						.into_iter()
 						.map(|op| match op {

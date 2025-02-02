@@ -3,9 +3,8 @@
 // Imports
 use {
 	super::Expr,
-	crate::{ast, util::ArcStr},
+	crate::{ast, AppError},
 	std::fmt,
-	crate::AppError,
 };
 
 
@@ -24,13 +23,13 @@ pub enum OutItem<T> {
 
 impl OutItem<Expr> {
 	/// Creates a new item from it's `ast`.
-	pub fn from_ast(zbuild_file: &ArcStr, item: ast::Expr<'_>) -> Result<Self, AppError> {
+	pub fn from_ast(item: ast::Expr) -> Result<Self, AppError> {
 		let is_deps_file = item.is_deps_file;
 		zutil_app_error::ensure!(!item.is_opt, "Output items cannot be optional");
 		zutil_app_error::ensure!(!item.is_static, "Output items cannot be static");
 
 		Ok(Self::File {
-			file: Expr::from_ast(zbuild_file, item),
+			file: Expr::from_ast(item),
 			is_deps_file,
 		})
 	}
@@ -73,13 +72,13 @@ pub enum DepItem<T> {
 
 impl DepItem<Expr> {
 	/// Creates a new item from it's `ast`.
-	pub fn from_ast(zbuild_file: &ArcStr, item: ast::Expr<'_>) -> Self {
+	pub fn from_ast(item: ast::Expr) -> Self {
 		let is_optional = item.is_opt;
 		let is_static = item.is_static;
 		let is_deps_file = item.is_deps_file;
 
 		Self::File {
-			file: Expr::from_ast(zbuild_file, item),
+			file: Expr::from_ast(item),
 			is_optional,
 			is_static,
 			is_deps_file,

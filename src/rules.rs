@@ -51,24 +51,18 @@ pub struct Rules {
 
 impl Rules {
 	/// Creates all rules from the ast
-	pub fn from_ast(zbuild_file: &ArcStr, ast: Ast<'_>) -> Result<Self, AppError> {
+	pub fn from_ast(ast: Ast) -> Result<Self, AppError> {
 		let aliases = ast
 			.aliases
 			.into_iter()
-			.map(|alias| {
-				(
-					zbuild_file.slice_from_str(alias.name.0),
-					Expr::from_ast(zbuild_file, alias.value),
-				)
-			})
+			.map(|alias| (alias.name.0, Expr::from_ast(alias.value)))
 			.collect();
 		let pats = ast
 			.pats
 			.into_iter()
 			.map(|pat| {
-				let name = zbuild_file.slice_from_str(pat.name.0);
-				(name.clone(), Pattern {
-					name,
+				(pat.name.0.clone(), Pattern {
+					name:      pat.name.0,
 					non_empty: pat.non_empty,
 				})
 			})
@@ -76,15 +70,12 @@ impl Rules {
 		let default = ast
 			.defaults
 			.into_iter()
-			.map(|target| Target::from_ast(zbuild_file, target.default))
+			.map(|target| Target::from_ast(target.default))
 			.collect();
 		let rules = ast
 			.rules
 			.into_iter()
-			.map(|rule| try {
-				let name = zbuild_file.slice_from_str(rule.name.0);
-				(name, Rule::from_ast(zbuild_file, rule)?)
-			})
+			.map(|rule| try { (rule.name.0.clone(), Rule::from_ast(rule)?) })
 			.collect::<Result<_, AppError>>()?;
 
 		Ok(Self {

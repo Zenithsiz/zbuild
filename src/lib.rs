@@ -90,14 +90,14 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 		fs::read_to_string(zbuild_path).with_context(|| format!("Unable to read zbuild file {zbuild_path:?}"))?;
 	let zbuild_file = ArcStr::from(zbuild_file);
 	tracing::trace!(?zbuild_file, "Read zbuild.zb");
-	let ast = Ast::parse_full(&zbuild_file).context("Unable to parse zbuild file")?;
+	let ast = Ast::parse_full(zbuild_file).context("Unable to parse zbuild file")?;
 	tracing::trace!(?ast, "Parsed ast");
 
 	// Create the expander
 	let expander = Expander::new();
 
 	// Build the rules
-	let rules = Rules::from_ast(&zbuild_file, ast).context("Unable to build rules")?;
+	let rules = Rules::from_ast(ast).context("Unable to build rules")?;
 	tracing::trace!(?rules, "Built rules");
 
 	// Get the max number of jobs we can execute at once
