@@ -2,8 +2,9 @@ default "a.out";
 
 rule a {
 	out "a.out";
-	deps "b1.out" "b2.out";
-	exec [
-		"touch" "a.out",
-	];
+
+	dep "b1.out";
+	dep "b2.out";
+
+	exec "touch" "a.out";
 }

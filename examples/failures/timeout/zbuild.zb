@@ -2,28 +2,30 @@ default "a.out";
 
 rule a {
 	out "a.out";
-	deps ["b.out", "c1.out"];
-	exec ["touch" "a.out"];
+
+	dep "b.out";
+	dep "c1.out";
+
+	exec "touch" "a.out";
 }
 
 rule b {
 	out "b.out";
-	exec [
-		"sleep" "0.1",
-		"false",
-	];
+
+	exec "sleep" "0.1";
+	exec "false";
 }
 
 rule c1 {
 	out "c1.out";
-	deps "c2.out";
-	exec ["touch" "c1.out"];
+	dep "c2.out";
+
+	exec "touch" "c1.out";
 }
 
 rule c2 {
 	out "c2.out";
-	exec [
-		"sleep" "0.2",
-		"touch" "c2.out"
-	];
+
+	exec "sleep" "0.2";
+	exec "touch" "c2.out";
 }

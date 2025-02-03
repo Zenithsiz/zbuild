@@ -1,17 +1,18 @@
 default "a.out";
 
 rule a {
-	out ["a.out"];
-	deps ["b1.out", "b2.out"];
-	exec [
-		"touch" "a.out"
-	];
+	out "a.out";
+
+	dep "b1.out";
+	dep "b2.out";
+
+	exec "touch" "a.out";
 }
 
 rule b {
-	out ["b1.out", "b2.out"];
-	exec [
-		"touch" "b1.out",
-		"touch" "b2.out",
-	];
+	out "b1.out";
+	out "b2.out";
+
+	exec "touch" "b1.out";
+	exec "touch" "b2.out";
 }
