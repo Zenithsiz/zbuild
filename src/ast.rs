@@ -10,7 +10,7 @@
 // Imports
 use {
 	crate::{util::ArcStr, AppError},
-	std::{fmt::Write, fs, path::Path, ptr, str::pattern::Pattern},
+	std::{fmt::Write, fs, mem, path::Path, ptr, str::pattern::Pattern},
 	zutil_app_error::Context,
 };
 
@@ -28,6 +28,9 @@ pub struct Ast {
 
 	/// Rules
 	pub rules: Vec<RuleStmt>,
+
+	/// Includes
+	pub includes: Vec<IncludeStmt>,
 }
 
 impl Parsable for Ast {
@@ -36,15 +39,14 @@ impl Parsable for Ast {
 		let mut pats = vec![];
 		let mut defaults = vec![];
 		let mut rules = vec![];
+		let mut includes = vec![];
 		while !parser.is_finished()? {
-			match parser
-				.peek::<AnyOf4<TokenAlias, TokenPat, TokenDefault, TokenRule>>()
-				.context("Expected an alias, default or rule statement")?
-			{
-				AnyOf4::T0(_) => aliases.push(parser.parse::<AliasStmt>()?),
-				AnyOf4::T1(_) => pats.push(parser.parse::<PatStmt>()?),
-				AnyOf4::T2(_) => defaults.push(parser.parse::<DefaultStmt>()?),
-				AnyOf4::T3(_) => rules.push(parser.parse::<RuleStmt>()?),
+			match parser.peek::<AnyOf5<TokenAlias, TokenPat, TokenDefault, TokenRule, TokenInclude>>()? {
+				AnyOf5::T0(_) => aliases.push(parser.parse::<AliasStmt>()?),
+				AnyOf5::T1(_) => pats.push(parser.parse::<PatStmt>()?),
+				AnyOf5::T2(_) => defaults.push(parser.parse::<DefaultStmt>()?),
+				AnyOf5::T3(_) => rules.push(parser.parse::<RuleStmt>()?),
+				AnyOf5::T4(_) => includes.push(parser.parse::<IncludeStmt>()?),
 			}
 		}
 
@@ -53,6 +55,7 @@ impl Parsable for Ast {
 			pats,
 			defaults,
 			rules,
+			includes,
 		};
 		Ok(ast)
 	}
@@ -241,6 +244,23 @@ impl Parsable for Command {
 	}
 }
 
+/// Include statement
+#[derive(Clone, Debug)]
+pub struct IncludeStmt {
+	/// Path
+	pub path: StringLiteral,
+}
+
+impl Parsable for IncludeStmt {
+	fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
+		parser.parse::<TokenInclude>()?;
+		let path = parser.parse::<StringLiteral>().context("Expected include path")?;
+		parser.parse::<TokenSemi>()?;
+
+		Ok(Self { path })
+	}
+}
+
 /// Array
 #[derive(Clone, Debug)]
 pub struct Array<T>(pub Vec<T>);
@@ -416,6 +436,21 @@ impl Parsable for Ident {
 	}
 }
 
+/// String literal
+#[derive(Clone, Debug)]
+pub struct StringLiteral(ArcStr);
+
+impl Parsable for StringLiteral {
+	fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
+		parser.parse::<TokenDoubleQuote>()?;
+		let len = parser.remaining().find('"').context("Expected `\"` after `\"`")?;
+		let s = parser.advance_by(len);
+		parser.parse::<TokenDoubleQuote>()?;
+
+		Ok(Self(s))
+	}
+}
+
 pub macro decl_tokens($($TokenName:ident = $Token:expr;)*) {
 	$(
 		#[expect(dead_code, reason = "We don't need the token, but it's useful to have it.")]
@@ -440,6 +475,7 @@ decl_tokens! {
 	TokenDep = "dep";
 	TokenDepsFile = "deps_file";
 	TokenExec = "exec";
+	TokenInclude = "include";
 	TokenNonEmpty = "non_empty";
 	TokenOpt = "opt";
 	TokenOut = "out";
@@ -690,7 +726,9 @@ decl_any_of!(AnyOf5, T0, T1, T2, T3, T4);
 pub fn parse(path: &Path) -> Result<Ast, AppError> {
 	let input = fs::read_to_string(path).with_context(|| format!("Unable to read zbuild file {path:?}"))?;
 	let mut parser = Parser::new(ArcStr::from(input));
-	Ast::parse_from(&mut parser).with_context(|| {
+
+	// Parse the initial AST
+	let mut ast = Ast::parse_from(&mut parser).with_context(|| {
 		// TODO: Deal with tabs better here?
 
 		let line = parser.cur_line().replace('\t', "    ");
@@ -700,5 +738,24 @@ pub fn parse(path: &Path) -> Result<Ast, AppError> {
 		let tabs = parser.cur_line().chars().filter(|&ch| ch == '\t').count();
 		let ident = " ".repeat(parser.cur_col_pos() + tabs * 3);
 		format!("Error at {}:{line_pos}:{col_pos}:\n{line}\n{ident}^", path.display())
-	})
+	})?;
+
+	// Then recursively parse any imports and merge them into the ast
+	// TODO: Should these be scoped?
+	for include in mem::take(&mut ast.includes) {
+		let include_path = path
+			.parent()
+			.expect("File had no parent directory")
+			.join(&*include.path.0);
+		let mut include_ast =
+			self::parse(&include_path).with_context(|| format!("Unable to parse {include_path:?}"))?;
+
+		ast.aliases.append(&mut include_ast.aliases);
+		ast.pats.append(&mut include_ast.pats);
+		ast.defaults.append(&mut include_ast.defaults);
+		ast.rules.append(&mut include_ast.rules);
+		assert!(ast.includes.is_empty(), "Includes were not recursively handled");
+	}
+
+	Ok(ast)
 }
