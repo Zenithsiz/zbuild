@@ -30,27 +30,6 @@ pub struct Ast {
 	pub rules: Vec<RuleStmt>,
 }
 
-impl Ast {
-	/// Parses a full ast from `input`.
-	pub fn parse_full(input: ArcStr) -> Result<Self, AppError> {
-		let mut parser = Parser::new(input);
-		let ast = Self::parse_from(&mut parser).with_context(|| {
-			// TODO: Deal with tabs better here?
-
-			let line = parser.cur_line().replace('\t', "    ");
-			let line_pos = parser.cur_line_pos() + 1;
-			let col_pos = parser.cur_col_pos() + 1;
-
-			let tabs = parser.cur_line().chars().filter(|&ch| ch == '\t').count();
-			let ident = " ".repeat(parser.cur_col_pos() + tabs * 3);
-			format!("Error at {line_pos}:{col_pos}:\n{line}\n{ident}^")
-		})?;
-		zutil_app_error::ensure!(parser.is_finished()?, "Unexpected tokens at the end");
-
-		Ok(ast)
-	}
-}
-
 impl Parsable for Ast {
 	fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
 		let mut aliases = vec![];
@@ -706,3 +685,19 @@ decl_any_of!(AnyOf2, T0, T1);
 decl_any_of!(AnyOf3, T0, T1, T2);
 decl_any_of!(AnyOf4, T0, T1, T2, T3);
 decl_any_of!(AnyOf5, T0, T1, T2, T3, T4);
+
+/// Fully parses the ast from `input`.
+pub fn parse(input: ArcStr) -> Result<Ast, AppError> {
+	let mut parser = Parser::new(input);
+	Ast::parse_from(&mut parser).with_context(|| {
+		// TODO: Deal with tabs better here?
+
+		let line = parser.cur_line().replace('\t', "    ");
+		let line_pos = parser.cur_line_pos() + 1;
+		let col_pos = parser.cur_col_pos() + 1;
+
+		let tabs = parser.cur_line().chars().filter(|&ch| ch == '\t').count();
+		let ident = " ".repeat(parser.cur_col_pos() + tabs * 3);
+		format!("Error at {line_pos}:{col_pos}:\n{line}\n{ident}^")
+	})
+}
