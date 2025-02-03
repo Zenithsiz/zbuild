@@ -9,22 +9,19 @@ use {
 	},
 	indexmap::IndexMap,
 	smallvec::SmallVec,
-	std::{collections::BTreeMap, marker::PhantomData, mem, path::PathBuf, sync::Arc},
+	std::{collections::BTreeMap, mem, path::PathBuf, sync::Arc},
 	zutil_app_error::{app_error, AllErrs, Context},
 };
 
 /// Expander
 #[derive(Debug)]
-pub struct Expander {
-	/// Phantom for `'s`
-	_phantom: PhantomData<&'static ()>,
-}
+pub struct Expander {}
 
 #[expect(clippy::unused_self, reason = "Currently expander doesn't do anything")]
 impl Expander {
 	/// Creates a new expander
 	pub const fn new() -> Self {
-		Self { _phantom: PhantomData }
+		Self {}
 	}
 
 	/// Expands an expression to it's components
