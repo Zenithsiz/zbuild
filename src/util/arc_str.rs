@@ -91,21 +91,9 @@ impl ArcStr {
 	/// # Panics
 	/// `s` must be derived from this string, else this method panics.
 	pub fn slice_from_str(&self, s: &str) -> Self {
-		// Get pointer ranges
-		let self_range = self.as_bytes().as_ptr_range();
-		let s_range = s.as_bytes().as_ptr_range();
-
-		assert!(
-			self_range.contains(&s_range.start) || s_range.start == self_range.end,
-			"String start was before this string"
-		);
-		assert!(
-			self_range.contains(&s_range.end) || s_range.end == self_range.end,
-			"String end was past this string"
-		);
-
+		let range = self.substr_range(s).expect("Input was not a substring of this string");
 		Self {
-			ptr:   unsafe { self::extend_static(s) },
+			ptr:   &self.ptr[range],
 			inner: Arc::clone(&self.inner),
 		}
 	}
