@@ -788,6 +788,7 @@ async fn parse_deps_file(file: &str) -> Result<HashMap<ArcStr, Vec<ArcStr>>, App
 	util::string_replace_in_place_with(&mut contents, "\\\n", "  ");
 
 	// Now go through all non-empty lines and parse them
+	let contents = ArcStr::from(contents);
 	let deps = contents
 		.lines()
 		.filter_map(|line| {
@@ -799,8 +800,11 @@ async fn parse_deps_file(file: &str) -> Result<HashMap<ArcStr, Vec<ArcStr>>, App
 			let (output, deps) = line
 				.split_once(':')
 				.ok_or_else(|| app_error!("Dependencies file {file:?} was missing a `:`"))?;
-			let output = ArcStr::from(output.trim());
-			let deps = deps.split_whitespace().map(ArcStr::from).collect();
+			let output = contents.slice_from_str(output.trim());
+			let deps = deps
+				.split_whitespace()
+				.map(|dep| contents.slice_from_str(dep))
+				.collect();
 
 			Ok((output, deps))
 		})
