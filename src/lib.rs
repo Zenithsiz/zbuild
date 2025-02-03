@@ -59,7 +59,6 @@ use {
 		collections::BTreeMap,
 		env,
 		fmt,
-		fs,
 		path::{Path, PathBuf},
 		sync::Arc,
 		thread,
@@ -86,11 +85,7 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 	env::set_current_dir(zbuild_dir).with_context(|| format!("Unable to set current directory to {zbuild_dir:?}"))?;
 
 	// Parse the ast
-	let zbuild_file =
-		fs::read_to_string(zbuild_path).with_context(|| format!("Unable to read zbuild file {zbuild_path:?}"))?;
-	let zbuild_file = ArcStr::from(zbuild_file);
-	tracing::trace!(?zbuild_file, "Read zbuild.zb");
-	let ast = ast::parse(zbuild_file).context("Unable to parse zbuild file")?;
+	let ast = ast::parse(zbuild_path).context("Unable to parse zbuild file")?;
 	tracing::trace!(?ast, "Parsed ast");
 
 	// Create the expander

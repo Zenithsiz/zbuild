@@ -10,7 +10,7 @@
 // Imports
 use {
 	crate::{util::ArcStr, AppError},
-	std::{fmt::Write, ptr, str::pattern::Pattern},
+	std::{fmt::Write, fs, path::Path, ptr, str::pattern::Pattern},
 	zutil_app_error::Context,
 };
 
@@ -686,9 +686,10 @@ decl_any_of!(AnyOf3, T0, T1, T2);
 decl_any_of!(AnyOf4, T0, T1, T2, T3);
 decl_any_of!(AnyOf5, T0, T1, T2, T3, T4);
 
-/// Fully parses the ast from `input`.
-pub fn parse(input: ArcStr) -> Result<Ast, AppError> {
-	let mut parser = Parser::new(input);
+/// Fully parses the ast from `path`.
+pub fn parse(path: &Path) -> Result<Ast, AppError> {
+	let input = fs::read_to_string(path).with_context(|| format!("Unable to read zbuild file {path:?}"))?;
+	let mut parser = Parser::new(ArcStr::from(input));
 	Ast::parse_from(&mut parser).with_context(|| {
 		// TODO: Deal with tabs better here?
 
@@ -698,6 +699,6 @@ pub fn parse(input: ArcStr) -> Result<Ast, AppError> {
 
 		let tabs = parser.cur_line().chars().filter(|&ch| ch == '\t').count();
 		let ident = " ".repeat(parser.cur_col_pos() + tabs * 3);
-		format!("Error at {line_pos}:{col_pos}:\n{line}\n{ident}^")
+		format!("Error at {}:{line_pos}:{col_pos}:\n{line}\n{ident}^", path.display())
 	})
 }
