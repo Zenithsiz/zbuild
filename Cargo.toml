@@ -26,6 +26,7 @@ tokio-stream = "0.1.17"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 unicode-ident = "1.0.16"
+yoke = "0.7.5"
 zutil-app-error = { git = "https://github.com/Zenithsiz/zutil", rev = "5363bba6ced162185a1eb5a132cce499bfc5d818" }
 
 [dev-dependencies]
