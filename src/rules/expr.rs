@@ -107,7 +107,7 @@ impl Expr {
 		// Otherwise, get the first string, if any, then push all other strings
 		let mut cmpts = self.cmpts.into_iter();
 		let Some(output) = cmpts.next() else {
-			return Ok("".into());
+			return Ok(String::new().into());
 		};
 		let mut output = output.try_into_string().expect("Component wasn't a string");
 

@@ -225,12 +225,6 @@ impl From<ArcStr> for String {
 	}
 }
 
-impl From<&str> for ArcStr {
-	fn from(s: &str) -> Self {
-		s.to_owned().into()
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use {super::*, std::hint::black_box};
