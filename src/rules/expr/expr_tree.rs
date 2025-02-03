@@ -2,11 +2,10 @@
 
 use {
 	super::Expr,
-	crate::{rules::pattern::Pattern, util::ArcStr},
+	crate::{rules::pattern::Pattern, util::ArcStr, AppError},
 	indexmap::IndexMap,
 	itertools::{Itertools, PeekingNext},
 	std::collections::BTreeMap,
-	crate::AppError,
 };
 
 /// An expression tree.
@@ -93,7 +92,7 @@ impl<K> ExprTree<K> {
 	///
 	/// Returns the first match with patterns resolved.
 	// TODO: Since we only support a single pattern, return `Option<ArcStr>` for it instead.
-	pub fn find(&self, value: &str) -> Option<(K, BTreeMap<ArcStr, ArcStr>)>
+	pub fn find(&self, value: &ArcStr) -> Option<(K, BTreeMap<ArcStr, ArcStr>)>
 	where
 		K: Clone,
 	{
@@ -104,7 +103,7 @@ impl<K> ExprTree<K> {
 			};
 
 			// Try to find match the suffixes
-			if let Some((key, pats)) = Self::find_match_suffix(value_rest, suffixes) {
+			if let Some((key, pats)) = Self::find_match_suffix(&value_rest, suffixes) {
 				return Some((key, pats));
 			}
 		}
@@ -113,7 +112,7 @@ impl<K> ExprTree<K> {
 	}
 
 	/// Finds a matching suffix for `value` from the suffix map.
-	fn find_match_suffix(value: &str, suffixes: &SuffixTree<K>) -> Option<(K, BTreeMap<ArcStr, ArcStr>)>
+	fn find_match_suffix(value: &ArcStr, suffixes: &SuffixTree<K>) -> Option<(K, BTreeMap<ArcStr, ArcStr>)>
 	where
 		K: Clone,
 	{
@@ -125,7 +124,7 @@ impl<K> ExprTree<K> {
 			};
 
 			// Otherwise, we might have found the final value, so test it
-			if let Some(pats) = Self::find_match_pat(pat_value, pat.as_ref()) {
+			if let Some(pats) = Self::find_match_pat(&pat_value, pat.as_ref()) {
 				return Some((key.clone(), pats));
 			}
 		}
@@ -134,7 +133,7 @@ impl<K> ExprTree<K> {
 	}
 
 	/// Matches a pattern against a remaining value after it's prefix and suffix have been stripped
-	fn find_match_pat(value: &str, pat: Option<&Pattern>) -> Option<BTreeMap<ArcStr, ArcStr>> {
+	fn find_match_pat(value: &ArcStr, pat: Option<&Pattern>) -> Option<BTreeMap<ArcStr, ArcStr>> {
 		let pats = match pat {
 			// If there is any pattern, try to match it
 			Some(pat) => {
@@ -142,7 +141,7 @@ impl<K> ExprTree<K> {
 					return None;
 				}
 
-				BTreeMap::from([(pat.name.clone(), value.into())])
+				BTreeMap::from([(pat.name.clone(), value.clone())])
 			},
 
 			// Otherwise, we match if the value is empty
