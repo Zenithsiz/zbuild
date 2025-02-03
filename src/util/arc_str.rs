@@ -225,7 +225,10 @@ impl From<ArcStr> for String {
 
 #[cfg(test)]
 mod tests {
-	use {super::*, std::hint::black_box};
+	use {
+		super::*,
+		std::{hint::black_box, sync::Mutex},
+	};
 
 	#[test]
 	fn create() {
@@ -253,5 +256,22 @@ mod tests {
 		let s2 = s1.slice_from_str(&s1[1..2]);
 		_ = black_box(&*s1);
 		_ = black_box(&*s2);
+	}
+
+	#[test]
+	fn panic() {
+		let s1 = Mutex::new(ArcStr::from("Test".to_owned()));
+
+		let _: Box<_> = std::panic::catch_unwind(|| {
+			s1.lock().expect("Poisoned").with_mut(|s| {
+				s.push_str(&"A".repeat(100));
+				panic!();
+			});
+		})
+		.expect_err("Did not panic");
+
+		s1.clear_poison();
+		let s = s1.lock().expect("Poisoned");
+		_ = black_box(&**s);
 	}
 }
