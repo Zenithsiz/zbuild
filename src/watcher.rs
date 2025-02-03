@@ -61,11 +61,6 @@ impl Watcher {
 				for fs_event in fs_events {
 					tracing::trace!(?fs_event, "Watcher fs event");
 
-					#[expect(
-						let_underscore_drop,
-						clippy::let_underscore_must_use,
-						reason = "We don't care if it succeeded or not"
-					)]
 					let _: Result<(), _> = fs_event_tx.blocking_send(fs_event);
 				},
 			Err(errs) =>
@@ -241,7 +236,6 @@ impl Watcher {
 					dep_parents
 						.iter()
 						.map(|target| async {
-							#[expect(clippy::let_underscore_must_use, reason = "We don't care if the build succeeds")]
 							let _: Result<(), _> = crate::build_target(builder, target, ignore_missing).await;
 						})
 						.collect::<FuturesUnordered<_>>()

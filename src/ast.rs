@@ -1,6 +1,5 @@
 //! Ast `.zb`.
 
-#![expect(clippy::string_slice, reason = "We carefully check all indexes in this module")]
 #![expect(
 	unused_results,
 	reason = "Many methods return tokens that we don't care about, only that they were consumed"

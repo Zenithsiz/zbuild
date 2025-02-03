@@ -69,6 +69,7 @@ rust.trivial_numeric_casts = "warn"
 rust.unused_lifetimes = "warn"
 rust.unused_macro_rules = "warn"
 rust.variant_size_differences = "warn"
+clippy.let_underscore_untyped = "warn"
 
 # False positives
 clippy.significant_drop_tightening = "allow"

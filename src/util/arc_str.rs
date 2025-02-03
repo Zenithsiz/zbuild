@@ -32,7 +32,7 @@ pub struct ArcStr {
 	ptr: NonNull<str>,
 
 	/// Inner
-	#[expect(clippy::rc_buffer, reason = "We need it for efficient conversion to/from `String`")]
+	// Note: We need an `Arc<String>` for efficient conversion to/from `String`
 	inner: Arc<String>,
 }
 
