@@ -9,7 +9,7 @@ use std::{
 	cmp,
 	fmt,
 	hash::{Hash, Hasher},
-	ops::Deref,
+	ops::{Deref, Range},
 	ptr::NonNull,
 	str::pattern::{Pattern, ReverseSearcher},
 	sync::Arc,
@@ -37,11 +37,11 @@ pub struct ArcStr {
 }
 
 impl ArcStr {
-	/// Returns the offset of this string compared to the base
-	fn base_offset(&self) -> usize {
-		// SAFETY: `self.ptr` was derived from `inner.base_ptr`
-		let start = unsafe { self.ptr.as_ptr().byte_offset_from(self.inner.as_ptr()) };
-		usize::try_from(start).expect("String pointer was before base pointer")
+	/// Returns the range of this string compared to the base
+	fn base_range(&self) -> Range<usize> {
+		self.inner
+			.substr_range(self)
+			.expect("String pointer should be within allocation")
 	}
 
 	/// Updates this string as a `&mut String`.
@@ -52,15 +52,14 @@ impl ArcStr {
 		F: FnOnce(&mut String) -> R,
 	{
 		// Get the offset and length of our specific string
-		let start = self.base_offset();
-		let len = self.len();
+		let range = self.base_range();
 
 		// Get the inner string
 		let s = match Arc::get_mut(&mut self.inner) {
 			// If we're unique, slice the parts we don't care about and return
 			Some(s) => {
-				s.truncate(start + len);
-				let _ = s.drain(..start);
+				s.truncate(range.end);
+				let _ = s.drain(..range.start);
 
 				s
 			},
@@ -207,14 +206,13 @@ impl From<String> for ArcStr {
 impl From<ArcStr> for String {
 	fn from(s: ArcStr) -> Self {
 		// Get the offset and length of our specific string
-		let start = s.base_offset();
-		let len = s.len();
+		let range = s.base_range();
 
 		match Arc::try_unwrap(s.inner) {
 			// If we're unique, slice the parts we don't care about and return
 			Ok(mut inner) => {
-				inner.truncate(start + len);
-				let _ = inner.drain(..start);
+				inner.truncate(range.end);
+				let _ = inner.drain(..range.start);
 
 				inner
 			},
