@@ -186,6 +186,9 @@ impl Borrow<str> for ArcStr {
 impl From<String> for ArcStr {
 	fn from(s: String) -> Self {
 		Self {
+			// SAFETY: We never hand out the `'static` string, and we ensure
+			//         it's kept alive, as it's derived from our `inner` field,
+			//         which we own.
 			ptr:   unsafe { self::extend_static(s.as_str()) },
 			inner: Arc::new(s),
 		}
