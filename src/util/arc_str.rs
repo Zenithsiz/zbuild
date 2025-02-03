@@ -9,8 +9,8 @@ use std::{
 	cmp,
 	fmt,
 	hash::{Hash, Hasher},
+	mem,
 	ops::{Deref, Range},
-	ptr::NonNull,
 	str::pattern::{Pattern, ReverseSearcher},
 	sync::Arc,
 };
@@ -27,9 +27,9 @@ use std::{
 pub struct ArcStr {
 	/// This string's pointer
 	///
-	/// The string must *never* be mutated through this pointer,
-	/// due to it being possibly derived from a `&str`.
-	ptr: NonNull<str>,
+	/// The `'static` lifetime is a lie, but we never hand it out as `'static`,
+	/// only as `'self`, so this is fine.
+	ptr: &'static str,
 
 	/// Inner
 	// Note: We need an `Arc<String>` for efficient conversion to/from `String`
@@ -71,15 +71,17 @@ impl ArcStr {
 			},
 		};
 
-		// Since we're invalidating `self.inner`, replace `ptr`
-		// with a dummy value in case of panics.
-		self.ptr = NonNull::from("");
+		// Invalidate our string pointer in case of a panic.
+		self.ptr = "";
 
 		// Then mutate
 		let output = f(s);
 
 		// And finally, reconstruct ourselves
-		self.ptr = NonNull::from(s.as_str());
+		// SAFETY: We never hand out the `'static` string, and we ensure
+		//         it's kept alive, as it's derived from our `inner` field,
+		//         which we own.
+		self.ptr = unsafe { self::extend_static(s.as_str()) };
 
 		output
 	}
@@ -103,7 +105,7 @@ impl ArcStr {
 		);
 
 		Self {
-			ptr:   NonNull::from(s),
+			ptr:   unsafe { self::extend_static(s) },
 			inner: Arc::clone(&self.inner),
 		}
 	}
@@ -130,13 +132,13 @@ impl ArcStr {
 	}
 }
 
-// SAFETY: We're a self-referential `(&str, Arc<String>)`,
-//         which is comprised of `Send + Sync` types.
-unsafe impl Send for ArcStr {}
-
-// SAFETY: See above in [`Send`] impl
-unsafe impl Sync for ArcStr {}
-
+/// Extends the lifetime of `s` to be static.
+///
+/// # Safety
+/// This can only be used for strings that are assigned to `ArcStr::ptr`
+unsafe fn extend_static(s: &str) -> &'static str {
+	unsafe { mem::transmute::<&str, &'static str>(s) }
+}
 
 impl PartialEq for ArcStr {
 	fn eq(&self, other: &Self) -> bool {
@@ -183,8 +185,7 @@ impl Deref for ArcStr {
 	type Target = str;
 
 	fn deref(&self) -> &Self::Target {
-		// SAFETY: `self.ptr` always contains a valid `str`.
-		unsafe { self.ptr.as_ref() }
+		self.ptr
 	}
 }
 
@@ -197,7 +198,7 @@ impl Borrow<str> for ArcStr {
 impl From<String> for ArcStr {
 	fn from(s: String) -> Self {
 		Self {
-			ptr:   NonNull::from(s.as_str()),
+			ptr:   unsafe { self::extend_static(s.as_str()) },
 			inner: Arc::new(s),
 		}
 	}
