@@ -5,7 +5,6 @@ use {
 	super::{pattern::Pattern, DepItem, Expr, OutItem},
 	crate::{ast, util::ArcStr, AppError},
 	indexmap::IndexMap,
-	std::sync::Arc,
 };
 
 /// Rule
@@ -15,10 +14,10 @@ pub struct Rule<T> {
 	pub name: ArcStr,
 
 	/// Aliases
-	pub aliases: Arc<IndexMap<ArcStr, T>>,
+	pub aliases: IndexMap<ArcStr, T>,
 
 	/// Patterns
-	pub pats: Arc<IndexMap<ArcStr, Pattern>>,
+	pub pats: IndexMap<ArcStr, Pattern>,
 
 	/// Output items
 	pub output: Vec<OutItem<T>>,
@@ -60,8 +59,8 @@ impl Rule<Expr> {
 
 		Ok(Self {
 			name: rule.name.0,
-			aliases: Arc::new(aliases),
-			pats: Arc::new(pats),
+			aliases,
+			pats,
 			output,
 			deps,
 			exec,

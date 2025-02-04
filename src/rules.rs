@@ -20,7 +20,6 @@ pub use {
 use {
 	crate::{util::ArcStr, AppError, Ast},
 	indexmap::IndexMap,
-	std::sync::Arc,
 };
 
 /// Rules.
@@ -33,13 +32,13 @@ pub struct Rules {
 	///
 	/// These are available for the whole program to
 	/// use.
-	pub aliases: Arc<IndexMap<ArcStr, Expr>>,
+	pub aliases: IndexMap<ArcStr, Expr>,
 
 	/// Patterns.
 	///
 	/// These are available for the whole program to
 	/// use.
-	pub pats: Arc<IndexMap<ArcStr, Pattern>>,
+	pub pats: IndexMap<ArcStr, Pattern>,
 
 	/// Default targets to build
 	pub default: Vec<Target<Expr>>,
@@ -79,8 +78,8 @@ impl Rules {
 			.collect::<Result<_, AppError>>()?;
 
 		Ok(Self {
-			aliases: Arc::new(aliases),
-			pats: Arc::new(pats),
+			aliases,
+			pats,
 			default,
 			rules,
 		})

@@ -9,7 +9,7 @@ use {
 	},
 	indexmap::IndexMap,
 	smallvec::SmallVec,
-	std::{mem, path::PathBuf, sync::Arc},
+	std::{mem, path::PathBuf},
 	zutil_app_error::{app_error, AllErrs, Context},
 };
 
@@ -25,7 +25,7 @@ impl Expander {
 	}
 
 	/// Expands an expression to it's components
-	pub fn expand_expr<T>(&self, expr: &Expr, visitor: &Visitor) -> Result<T, AppError>
+	pub fn expand_expr<T>(&self, expr: &Expr, visitor: &Visitor<'_>) -> Result<T, AppError>
 	where
 		T: TryFromExpr,
 	{
@@ -101,7 +101,7 @@ impl Expander {
 	}
 
 	/// Expands a rule of all it's aliases and patterns
-	pub fn expand_rule<T>(&self, rule: &Rule<Expr>, visitor: &Visitor) -> Result<Rule<T>, AppError>
+	pub fn expand_rule<T>(&self, rule: &Rule<Expr>, visitor: &Visitor<'_>) -> Result<Rule<T>, AppError>
 	where
 		T: TryFromExpr + Ord,
 	{
@@ -151,8 +151,8 @@ impl Expander {
 
 		Ok(Rule {
 			name: rule.name.clone(),
-			aliases: Arc::new(aliases),
-			pats: Arc::clone(&rule.pats),
+			aliases,
+			pats: rule.pats.clone(),
 			output,
 			deps,
 			exec,
@@ -160,7 +160,7 @@ impl Expander {
 	}
 
 	/// Expands a command
-	pub fn expand_cmd<T>(&self, cmd: &Command<Expr>, visitor: &Visitor) -> Result<Command<T>, AppError>
+	pub fn expand_cmd<T>(&self, cmd: &Command<Expr>, visitor: &Visitor<'_>) -> Result<Command<T>, AppError>
 	where
 		T: TryFromExpr,
 	{
@@ -175,7 +175,7 @@ impl Expander {
 	}
 
 	/// Expands a target expression
-	pub fn expand_target<T>(&self, target: &Target<Expr>, visitor: &Visitor) -> Result<Target<T>, AppError>
+	pub fn expand_target<T>(&self, target: &Target<Expr>, visitor: &Visitor<'_>) -> Result<Target<T>, AppError>
 	where
 		T: TryFromExpr,
 	{
@@ -259,28 +259,28 @@ impl TryFromExpr for ArcStr {
 
 /// Visitor for [`Expander`]
 #[derive(Clone, Debug)]
-pub struct Visitor {
+pub struct Visitor<'a> {
 	/// All aliases, in order to check
-	aliases: SmallVec<[Arc<IndexMap<ArcStr, Expr>>; 2]>,
+	aliases: SmallVec<[&'a IndexMap<ArcStr, Expr>; 2]>,
 
 	/// All unresolved patterns, in order to check
-	unresolved_pats: SmallVec<[Arc<IndexMap<ArcStr, Pattern>>; 2]>,
+	unresolved_pats: SmallVec<[&'a IndexMap<ArcStr, Pattern>; 2]>,
 
 	/// All resolved patterns
 	resolved_pats: SmallVec<[(ArcStr, ArcStr); 1]>,
 }
 
-impl Visitor {
+impl<'a> Visitor<'a> {
 	/// Creates a new visitor with aliases and patterns
-	pub fn new<'a, A, UP, RP>(aliases: A, unresolved_pats: UP, resolved_pats: RP) -> Self
+	pub fn new<A, UP, RP>(aliases: A, unresolved_pats: UP, resolved_pats: RP) -> Self
 	where
-		A: IntoIterator<Item = &'a Arc<IndexMap<ArcStr, Expr>>>,
-		UP: IntoIterator<Item = &'a Arc<IndexMap<ArcStr, Pattern>>>,
+		A: IntoIterator<Item = &'a IndexMap<ArcStr, Expr>>,
+		UP: IntoIterator<Item = &'a IndexMap<ArcStr, Pattern>>,
 		RP: IntoIterator<Item = SmallVec<[(ArcStr, ArcStr); 1]>>,
 	{
 		Self {
-			aliases:         aliases.into_iter().map(Arc::clone).collect(),
-			unresolved_pats: unresolved_pats.into_iter().map(Arc::clone).collect(),
+			aliases:         aliases.into_iter().collect(),
+			unresolved_pats: unresolved_pats.into_iter().collect(),
 			resolved_pats:   resolved_pats.into_iter().flatten().collect(),
 		}
 	}
