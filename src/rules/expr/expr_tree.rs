@@ -13,23 +13,19 @@ use {
 //       Try to actually create a fast, non `O(n)`, algorithm?
 #[derive(Debug)]
 pub struct ExprTree<K> {
-	/// Prefixes
-	prefixes: PrefixTree<K>,
+	/// Matches
+	matches: HashMap<(ArcStr, ArcStr), (K, Option<Pattern>)>,
 }
-
-// TODO: Flatten this?
-type PrefixTree<K> = HashMap<ArcStr, SuffixTree<K>>;
-type SuffixTree<K> = HashMap<ArcStr, (Option<Pattern>, K)>;
 
 impl<K> ExprTree<K> {
 	/// Creates a new, empty, expression tree
 	pub fn new() -> Self {
 		Self {
-			prefixes: HashMap::new(),
+			matches: HashMap::new(),
 		}
 	}
 
-	/// Adds an expression to the suffix tree, associated with a key.
+	/// Adds an expression to the expression tree, associated with a key.
 	///
 	/// The expression must not contain any aliases.
 	///
@@ -78,11 +74,9 @@ impl<K> ExprTree<K> {
 
 		// Finally try to insert and retrieve the old key, if any.
 		let old_key = self
-			.prefixes
-			.entry(prefix)
-			.or_default()
-			.insert(suffix, (pat, key))
-			.map(|(_, old_key)| old_key);
+			.matches
+			.insert((prefix, suffix), (key, pat))
+			.map(|(old_key, _)| old_key);
 
 		Ok(old_key)
 	}
@@ -94,35 +88,19 @@ impl<K> ExprTree<K> {
 	where
 		K: Clone,
 	{
-		for (prefix, suffixes) in &self.prefixes {
+		for ((prefix, suffix), (key, pat)) in &self.matches {
 			// If the prefix no longer matches, try the next
-			let Some(value_rest) = value.strip_prefix(&**prefix) else {
+			let Some(value) = value.strip_prefix(&**prefix) else {
 				continue;
 			};
 
-			// Try to find match the suffixes
-			if let Some((key, pats)) = Self::find_match_suffix(&value_rest, suffixes) {
-				return Some((key, pats));
-			}
-		}
-
-		None
-	}
-
-	/// Finds a matching suffix for `value` from the suffix map.
-	fn find_match_suffix(value: &ArcStr, suffixes: &SuffixTree<K>) -> Option<(K, Patterns)>
-	where
-		K: Clone,
-	{
-		// Otherwise, match against all other suffixes
-		for (suffix, (pat, key)) in suffixes {
 			// If the prefix no longer matches, try the next
-			let Some(pat_value) = value.strip_suffix(&**suffix) else {
+			let Some(value) = value.strip_suffix(&**suffix) else {
 				continue;
 			};
 
 			// Otherwise, we might have found the final value, so test it
-			if let Some(pats) = Self::find_match_pat(&pat_value, pat.as_ref()) {
+			if let Some(pats) = Self::find_match_pat(&value, pat.as_ref()) {
 				return Some((key.clone(), pats));
 			}
 		}
