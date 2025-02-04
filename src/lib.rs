@@ -55,8 +55,8 @@ use {
 		rules::Rules,
 	},
 	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
+	smallvec::SmallVec,
 	std::{
-		collections::BTreeMap,
 		env,
 		fmt,
 		path::{Path, PathBuf},
@@ -133,7 +133,7 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 					// TODO: If it requires patterns maybe error out here?
 					|rule| rules::Target::Rule {
 						rule: rules::Expr::string(rule.name.clone()),
-						pats: Arc::new(BTreeMap::new()),
+						pats: SmallVec::new(),
 					},
 				)
 			})

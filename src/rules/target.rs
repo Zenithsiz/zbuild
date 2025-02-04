@@ -7,12 +7,11 @@ use {
 		ast,
 		util::{self, ArcStr},
 	},
+	smallvec::SmallVec,
 	std::{
-		collections::BTreeMap,
 		fmt,
 		hash::{Hash, Hasher},
 		mem,
-		sync::Arc,
 	},
 };
 
@@ -34,7 +33,7 @@ pub enum Target<T> {
 		rule: T,
 
 		/// Patterns
-		pats: Arc<BTreeMap<ArcStr, T>>,
+		pats: SmallVec<[(ArcStr, T); 1]>,
 	},
 }
 

@@ -23,13 +23,8 @@ use {
 	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
 	indexmap::IndexMap,
 	itertools::Itertools,
-	std::{
-		collections::{BTreeMap, HashMap},
-		fmt,
-		future::Future,
-		sync::Arc,
-		time::SystemTime,
-	},
+	smallvec::SmallVec,
+	std::{collections::HashMap, fmt, future::Future, sync::Arc, time::SystemTime},
 	tokio::{fs, process, sync::Semaphore, task},
 	zutil_app_error::{app_error, AllErrs, Context},
 };
@@ -54,7 +49,7 @@ pub struct TargetRule {
 	name: ArcStr,
 
 	/// Patterns
-	pats: Arc<BTreeMap<ArcStr, ArcStr>>,
+	pats: SmallVec<[(ArcStr, ArcStr); 1]>,
 }
 
 /// Builder
@@ -182,10 +177,7 @@ impl Builder {
 			Target::File { ref file, .. } => match self.rule_output_tree.find(file) {
 				Some((name, pats)) => {
 					tracing::trace!(%target, %name, "Found target rule");
-					TargetRule {
-						name,
-						pats: Arc::new(pats),
-					}
+					TargetRule { name, pats }
 				},
 
 				None => return Ok(None),
@@ -194,7 +186,7 @@ impl Builder {
 			// If we got a rule name with patterns, find it and replace all patterns
 			Target::Rule { ref rule, ref pats } => TargetRule {
 				name: rule.clone(),
-				pats: Arc::clone(pats),
+				pats: pats.clone(),
 			},
 		};
 
@@ -206,7 +198,7 @@ impl Builder {
 			.with_context(|| format!("Unknown rule {:?}", target_rule.name))?;
 		let expand_visitor =
 			expand::Visitor::new([&rule.aliases, &self.rules.aliases], [&rule.pats, &self.rules.pats], [
-				&target_rule.pats,
+				target_rule.pats.clone(),
 			]);
 		let rule = self
 			.expander

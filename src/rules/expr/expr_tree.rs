@@ -5,6 +5,7 @@ use {
 	crate::{rules::pattern::Pattern, util::ArcStr, AppError},
 	indexmap::IndexMap,
 	itertools::{Itertools, PeekingNext},
+	smallvec::SmallVec,
 	std::collections::BTreeMap,
 };
 
@@ -91,8 +92,7 @@ impl<K> ExprTree<K> {
 	/// Matches a string against this expression tree.
 	///
 	/// Returns the first match with patterns resolved.
-	// TODO: Since we only support a single pattern, return `Option<ArcStr>` for it instead.
-	pub fn find(&self, value: &ArcStr) -> Option<(K, BTreeMap<ArcStr, ArcStr>)>
+	pub fn find(&self, value: &ArcStr) -> Option<(K, Patterns)>
 	where
 		K: Clone,
 	{
@@ -112,7 +112,7 @@ impl<K> ExprTree<K> {
 	}
 
 	/// Finds a matching suffix for `value` from the suffix map.
-	fn find_match_suffix(value: &ArcStr, suffixes: &SuffixTree<K>) -> Option<(K, BTreeMap<ArcStr, ArcStr>)>
+	fn find_match_suffix(value: &ArcStr, suffixes: &SuffixTree<K>) -> Option<(K, Patterns)>
 	where
 		K: Clone,
 	{
@@ -133,7 +133,7 @@ impl<K> ExprTree<K> {
 	}
 
 	/// Matches a pattern against a remaining value after it's prefix and suffix have been stripped
-	fn find_match_pat(value: &ArcStr, pat: Option<&Pattern>) -> Option<BTreeMap<ArcStr, ArcStr>> {
+	fn find_match_pat(value: &ArcStr, pat: Option<&Pattern>) -> Option<Patterns> {
 		let pats = match pat {
 			// If there is any pattern, try to match it
 			Some(pat) => {
@@ -141,12 +141,12 @@ impl<K> ExprTree<K> {
 					return None;
 				}
 
-				BTreeMap::from([(pat.name.clone(), value.clone())])
+				SmallVec::from([(pat.name.clone(), value.clone())])
 			},
 
 			// Otherwise, we match if the value is empty
 			None => match value.is_empty() {
-				true => BTreeMap::new(),
+				true => SmallVec::new(),
 				false => return None,
 			},
 		};
@@ -154,3 +154,6 @@ impl<K> ExprTree<K> {
 		Some(pats)
 	}
 }
+
+/// Patterns
+pub type Patterns = SmallVec<[(ArcStr, ArcStr); 1]>;

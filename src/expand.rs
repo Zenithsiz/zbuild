@@ -9,7 +9,7 @@ use {
 	},
 	indexmap::IndexMap,
 	smallvec::SmallVec,
-	std::{collections::BTreeMap, mem, path::PathBuf, sync::Arc},
+	std::{mem, path::PathBuf, sync::Arc},
 	zutil_app_error::{app_error, AllErrs, Context},
 };
 
@@ -202,7 +202,7 @@ impl Expander {
 					rule: self
 						.expand_expr(rule, visitor)
 						.with_context(|| format!("Unable to expand expression {rule}"))?,
-					pats: Arc::new(pats),
+					pats,
 				}
 			},
 		};
@@ -267,7 +267,7 @@ pub struct Visitor {
 	unresolved_pats: SmallVec<[Arc<IndexMap<ArcStr, Pattern>>; 2]>,
 
 	/// All resolved patterns
-	resolved_pats: SmallVec<[Arc<BTreeMap<ArcStr, ArcStr>>; 1]>,
+	resolved_pats: SmallVec<[(ArcStr, ArcStr); 1]>,
 }
 
 impl Visitor {
@@ -276,19 +276,19 @@ impl Visitor {
 	where
 		A: IntoIterator<Item = &'a Arc<IndexMap<ArcStr, Expr>>>,
 		UP: IntoIterator<Item = &'a Arc<IndexMap<ArcStr, Pattern>>>,
-		RP: IntoIterator<Item = &'a Arc<BTreeMap<ArcStr, ArcStr>>>,
+		RP: IntoIterator<Item = SmallVec<[(ArcStr, ArcStr); 1]>>,
 	{
 		Self {
 			aliases:         aliases.into_iter().map(Arc::clone).collect(),
 			unresolved_pats: unresolved_pats.into_iter().map(Arc::clone).collect(),
-			resolved_pats:   resolved_pats.into_iter().map(Arc::clone).collect(),
+			resolved_pats:   resolved_pats.into_iter().flatten().collect(),
 		}
 	}
 
 	/// Visits an identifier
 	fn visit_ident(&self, name: &str) -> FlowControl<Expr> {
-		for pats in &self.resolved_pats {
-			if let Some(pat) = pats.get(name) {
+		for (pat_name, pat) in &self.resolved_pats {
+			if name == &**pat_name {
 				return FlowControl::ExpandTo(Expr::string(pat.clone()));
 			}
 		}
