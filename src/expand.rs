@@ -7,9 +7,8 @@ use {
 		util::ArcStr,
 		AppError,
 	},
-	indexmap::IndexMap,
 	smallvec::SmallVec,
-	std::{mem, path::PathBuf},
+	std::{collections::HashMap, mem, path::PathBuf},
 	zutil_app_error::{app_error, AllErrs, Context},
 };
 
@@ -261,10 +260,10 @@ impl TryFromExpr for ArcStr {
 #[derive(Clone, Debug)]
 pub struct Visitor<'a> {
 	/// All aliases, in order to check
-	aliases: SmallVec<[&'a IndexMap<ArcStr, Expr>; 2]>,
+	aliases: SmallVec<[&'a HashMap<ArcStr, Expr>; 2]>,
 
 	/// All unresolved patterns, in order to check
-	unresolved_pats: SmallVec<[&'a IndexMap<ArcStr, Pattern>; 2]>,
+	unresolved_pats: SmallVec<[&'a HashMap<ArcStr, Pattern>; 2]>,
 
 	/// All resolved patterns
 	resolved_pats: SmallVec<[(ArcStr, ArcStr); 1]>,
@@ -274,8 +273,8 @@ impl<'a> Visitor<'a> {
 	/// Creates a new visitor with aliases and patterns
 	pub fn new<A, UP, RP>(aliases: A, unresolved_pats: UP, resolved_pats: RP) -> Self
 	where
-		A: IntoIterator<Item = &'a IndexMap<ArcStr, Expr>>,
-		UP: IntoIterator<Item = &'a IndexMap<ArcStr, Pattern>>,
+		A: IntoIterator<Item = &'a HashMap<ArcStr, Expr>>,
+		UP: IntoIterator<Item = &'a HashMap<ArcStr, Pattern>>,
 		RP: IntoIterator<Item = SmallVec<[(ArcStr, ArcStr); 1]>>,
 	{
 		Self {

@@ -19,7 +19,7 @@ pub use {
 // Imports
 use {
 	crate::{util::ArcStr, AppError, Ast},
-	indexmap::IndexMap,
+	std::collections::HashMap,
 };
 
 /// Rules.
@@ -32,20 +32,20 @@ pub struct Rules {
 	///
 	/// These are available for the whole program to
 	/// use.
-	pub aliases: IndexMap<ArcStr, Expr>,
+	pub aliases: HashMap<ArcStr, Expr>,
 
 	/// Patterns.
 	///
 	/// These are available for the whole program to
 	/// use.
-	pub pats: IndexMap<ArcStr, Pattern>,
+	pub pats: HashMap<ArcStr, Pattern>,
 
 	/// Default targets to build
 	pub default: Vec<Target<Expr>>,
 
 	/// Rules
 	#[expect(clippy::struct_field_names, reason = "TODO: Rename struct name")]
-	pub rules: IndexMap<ArcStr, Rule<Expr>>,
+	pub rules: HashMap<ArcStr, Rule<Expr>>,
 }
 
 impl Rules {

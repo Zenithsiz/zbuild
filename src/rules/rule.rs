@@ -4,7 +4,7 @@
 use {
 	super::{pattern::Pattern, DepItem, Expr, OutItem},
 	crate::{ast, util::ArcStr, AppError},
-	indexmap::IndexMap,
+	std::collections::HashMap,
 };
 
 /// Rule
@@ -14,10 +14,10 @@ pub struct Rule<T> {
 	pub name: ArcStr,
 
 	/// Aliases
-	pub aliases: IndexMap<ArcStr, T>,
+	pub aliases: HashMap<ArcStr, T>,
 
 	/// Patterns
-	pub pats: IndexMap<ArcStr, Pattern>,
+	pub pats: HashMap<ArcStr, Pattern>,
 
 	/// Output items
 	pub output: Vec<OutItem<T>>,

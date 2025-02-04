@@ -3,10 +3,9 @@
 use {
 	super::Expr,
 	crate::{rules::pattern::Pattern, util::ArcStr, AppError},
-	indexmap::IndexMap,
 	itertools::{Itertools, PeekingNext},
 	smallvec::SmallVec,
-	std::collections::BTreeMap,
+	std::collections::{BTreeMap, HashMap},
 };
 
 /// An expression tree.
@@ -35,7 +34,7 @@ impl<K> ExprTree<K> {
 	/// The expression must not contain any aliases.
 	///
 	/// Returns the old key if the expression already existed.
-	pub fn insert(&mut self, expr: &Expr, key: K, pats: &[&IndexMap<ArcStr, Pattern>]) -> Result<Option<K>, AppError> {
+	pub fn insert(&mut self, expr: &Expr, key: K, pats: &[&HashMap<ArcStr, Pattern>]) -> Result<Option<K>, AppError> {
 		let mut cmpts = expr.cmpts.iter();
 
 		// Get all components from the start that are strings
