@@ -5,7 +5,7 @@ use {
 	crate::{rules::pattern::Pattern, util::ArcStr, AppError},
 	itertools::{Itertools, PeekingNext},
 	smallvec::SmallVec,
-	std::collections::{BTreeMap, HashMap},
+	std::collections::HashMap,
 };
 
 /// An expression tree.
@@ -18,14 +18,14 @@ pub struct ExprTree<K> {
 }
 
 // TODO: Flatten this?
-type PrefixTree<K> = BTreeMap<ArcStr, SuffixTree<K>>;
-type SuffixTree<K> = BTreeMap<ArcStr, (Option<Pattern>, K)>;
+type PrefixTree<K> = HashMap<ArcStr, SuffixTree<K>>;
+type SuffixTree<K> = HashMap<ArcStr, (Option<Pattern>, K)>;
 
 impl<K> ExprTree<K> {
 	/// Creates a new, empty, expression tree
-	pub const fn new() -> Self {
+	pub fn new() -> Self {
 		Self {
-			prefixes: BTreeMap::new(),
+			prefixes: HashMap::new(),
 		}
 	}
 
