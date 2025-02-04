@@ -3,7 +3,7 @@
 use {
 	super::Expr,
 	crate::{rules::pattern::Pattern, util::ArcStr, AppError},
-	itertools::{Itertools, PeekingNext},
+	itertools::PeekingNext,
 	smallvec::SmallVec,
 	std::collections::HashMap,
 };
@@ -39,11 +39,10 @@ impl<K> ExprTree<K> {
 
 		// Get all components from the start that are strings
 		let prefix = cmpts
-			.by_ref()
-			.peeking_take_while(|cmpt| cmpt.is_string())
-			.map(|cmpt| &**cmpt.as_string().expect("Just checked"))
-			.collect::<String>();
-		let prefix = ArcStr::from(prefix);
+			.peeking_next(|cmpt| cmpt.is_string())
+			.map(|cmpt| cmpt.as_string().expect("Just checked"))
+			.cloned()
+			.unwrap_or_default();
 
 		// Get the (possible) pattern in the middle
 		let pat = cmpts
@@ -67,10 +66,10 @@ impl<K> ExprTree<K> {
 
 		// Then get the rest of the string
 		let suffix = cmpts
-			.peeking_take_while(|cmpt| cmpt.is_string())
-			.map(|cmpt| &**cmpt.as_string().expect("Just checked"))
-			.collect::<String>();
-		let suffix = ArcStr::from(suffix);
+			.peeking_next(|cmpt| cmpt.is_string())
+			.map(|cmpt| cmpt.as_string().expect("Just checked"))
+			.cloned()
+			.unwrap_or_default();
 
 		// After this the expression should be empty
 		if let Some(cmpt) = cmpts.next() {
