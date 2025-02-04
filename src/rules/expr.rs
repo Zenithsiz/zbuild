@@ -173,12 +173,13 @@ impl fmt::Display for ExprCmpt {
 		match self {
 			Self::String(s) => write!(f, "{s}"),
 			Self::Ident { name, ops } => {
-				write!(f, "{name}")?;
+				write!(f, "{{{name}")?;
 				for op in ops {
 					match op {
 						ExprOp::DirName => write!(f, ".dir_name")?,
 					}
 				}
+				write!(f, "}}")?;
 				Ok(())
 			},
 		}
