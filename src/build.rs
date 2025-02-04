@@ -21,7 +21,6 @@ use {
 	},
 	dashmap::DashMap,
 	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
-	indexmap::IndexMap,
 	itertools::Itertools,
 	smallvec::SmallVec,
 	std::{collections::HashMap, fmt, future::Future, sync::Arc, time::SystemTime},
@@ -142,7 +141,7 @@ impl Builder {
 	}
 
 	/// Returns all build results
-	pub async fn build_results(&self) -> IndexMap<TargetRule, Option<Result<BuildResult, ()>>> {
+	pub async fn build_results(&self) -> HashMap<TargetRule, Option<Result<BuildResult, ()>>> {
 		self.rules_lock
 			.iter()
 			.map(|rule_lock| async move { (rule_lock.key().clone(), rule_lock.value().res().await) })
