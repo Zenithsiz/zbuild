@@ -130,12 +130,13 @@ impl Expander {
 					is_optional,
 					is_static,
 					is_deps_file,
-				} => Ok::<_, AppError>(DepItem::File {
+				} => Ok(DepItem::File {
 					file: self.expand_expr(file, visitor)?,
 					is_optional,
 					is_static,
 					is_deps_file,
 				}),
+				DepItem::Rule { ref name } => Ok(DepItem::Rule { name: name.clone() }),
 			})
 			.collect::<AllErrs<_, _>>()?;
 

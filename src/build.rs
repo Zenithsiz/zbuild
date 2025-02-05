@@ -453,6 +453,9 @@ impl Builder {
 				is_optional:  bool,
 				exists:       bool,
 			},
+
+			/// Rule
+			Rule { name: ArcStr },
 		}
 
 		// Gather all normal dependencies
@@ -476,6 +479,7 @@ impl Builder {
 							.await
 							.with_context(|| format!("Unable to check if file exists {file:?}"))?,
 					}),
+					DepItem::Rule { ref name } => Ok(Dep::Rule { name: name.clone() }),
 				}
 			})
 			.collect::<FuturesUnordered<_>>()
@@ -534,6 +538,12 @@ impl Builder {
 							file: file.clone(),
 							is_static,
 						}),
+
+						Dep::Rule { ref name } => Some(Target::Rule {
+							rule: name.clone(),
+							// TODO: Allow specifying the patterns here?
+							pats: SmallVec::new(),
+						}),
 					};
 
 					// Then build it, if we should
@@ -590,7 +600,7 @@ impl Builder {
 							.build_deps_file(target, file, rule, ignore_missing, reason)
 							.await
 							.with_context(|| format!("Unable to build dependencies file {file:?}"))?,
-						Dep::File { .. } => vec![],
+						Dep::File { .. } | Dep::Rule { .. } => vec![],
 					};
 					tracing::trace!(%target, ?rule.name, ?dep, ?dep_res, ?dep_deps, "Built target rule dependency dependencies");
 

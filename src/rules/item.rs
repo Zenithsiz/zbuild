@@ -3,7 +3,7 @@
 // Imports
 use {
 	super::Expr,
-	crate::{ast, AppError},
+	crate::{ast, util::ArcStr, AppError},
 	std::fmt,
 };
 
@@ -68,20 +68,31 @@ pub enum DepItem<T> {
 		/// If a dependencies file
 		is_deps_file: bool,
 	},
+
+	/// Rule
+	Rule {
+		/// Name
+		name: ArcStr,
+	},
 }
 
 impl DepItem<Expr> {
 	/// Creates a new item from it's `ast`.
-	pub fn from_ast(item: ast::Expr) -> Self {
-		let is_optional = item.is_opt;
-		let is_static = item.is_static;
-		let is_deps_file = item.is_deps_file;
+	pub fn from_ast(dep: ast::DepStmt) -> Self {
+		match dep {
+			ast::DepStmt::File(dep) => {
+				let is_optional = dep.is_opt;
+				let is_static = dep.is_static;
+				let is_deps_file = dep.is_deps_file;
 
-		Self::File {
-			file: Expr::from_ast(item),
-			is_optional,
-			is_static,
-			is_deps_file,
+				Self::File {
+					file: Expr::from_ast(dep),
+					is_optional,
+					is_static,
+					is_deps_file,
+				}
+			},
+			ast::DepStmt::Rule(name) => Self::Rule { name: name.0 },
 		}
 	}
 }
@@ -96,19 +107,22 @@ impl<T: fmt::Display> fmt::Display for DepItem<T> {
 				is_deps_file,
 			} => {
 				if is_optional {
-					write!(f, "opt: ")?;
+					write!(f, "opt ")?;
 				}
 
 				if is_static {
-					write!(f, "static: ")?;
+					write!(f, "static ")?;
 				}
 
 				if is_deps_file {
-					write!(f, "deps_file: ")?;
+					write!(f, "deps_file ")?;
 				}
 
 				write!(f, "{file}")?;
 				Ok(())
+			},
+			Self::Rule { ref name } => {
+				write!(f, "rule {name}")
 			},
 		}
 	}

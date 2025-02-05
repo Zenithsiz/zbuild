@@ -139,7 +139,7 @@ pub struct RuleStmt {
 	pub out: Vec<Expr>,
 
 	/// Dependencies
-	pub deps: Vec<Expr>,
+	pub deps: Vec<DepStmt>,
 
 	/// Execution
 	pub exec: Vec<Command>,
@@ -169,11 +169,7 @@ impl Parsable for RuleStmt {
 					out.push(parser.parse::<Expr>()?);
 					parser.parse::<TokenSemi>()?;
 				},
-				AnyOf5::T3(_) => {
-					parser.parse::<TokenDep>()?;
-					deps.push(parser.parse::<Expr>()?);
-					parser.parse::<TokenSemi>()?;
-				},
+				AnyOf5::T3(_) => deps.push(parser.parse::<DepStmt>()?),
 				AnyOf5::T4(_) => {
 					parser.parse::<TokenExec>()?;
 					exec.push(parser.parse::<Command>()?);
@@ -190,6 +186,30 @@ impl Parsable for RuleStmt {
 			deps,
 			exec,
 		})
+	}
+}
+
+/// Dependency statement
+#[derive(Clone, Debug)]
+pub enum DepStmt {
+	/// File
+	File(Expr),
+
+	/// Rule
+	Rule(Ident),
+}
+
+impl Parsable for DepStmt {
+	fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
+		parser.parse::<TokenDep>()?;
+
+		let dep = match parser.try_parse::<TokenRule>() {
+			Ok(_) => Self::Rule(parser.parse::<Ident>()?),
+			Err(_) => Self::File(parser.parse::<Expr>()?),
+		};
+		parser.parse::<TokenSemi>()?;
+
+		Ok(dep)
 	}
 }
 
