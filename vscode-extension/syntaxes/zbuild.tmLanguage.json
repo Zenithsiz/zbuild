@@ -15,7 +15,7 @@
 				},
 				{
 					"name": "keyword.other.zbuild",
-					"match": "\\b(alias|args|cwd|default|deps_file|dep|exec|include|non_empty|opt|out|pat|rule|static)\\b"
+					"match": "\\b(alias|args|cwd|default|deps_file|dep|exec|include|non_empty|opt|out|pat|rule|static|stdout)\\b"
 				},
 				{
 					"name": "variable.name",

@@ -14,7 +14,7 @@ pub struct Rule<T> {
 	pub name: ArcStr,
 
 	/// Aliases
-	pub aliases: HashMap<ArcStr, T>,
+	pub aliases: HashMap<ArcStr, Expr>,
 
 	/// Patterns
 	pub pats: HashMap<ArcStr, Pattern>,
@@ -26,7 +26,7 @@ pub struct Rule<T> {
 	pub deps: Vec<DepItem<T>>,
 
 	/// Execution
-	pub exec: Exec<T>,
+	pub exec: Exec<Expr>,
 }
 
 impl Rule<Expr> {
@@ -82,6 +82,9 @@ pub struct Command<T> {
 	/// Working directory
 	pub cwd: Option<T>,
 
+	/// Stdout
+	pub stdout: Option<ArcStr>,
+
 	/// All arguments
 	pub args: Vec<T>,
 }
@@ -90,8 +93,9 @@ impl Command<Expr> {
 	/// Creates a new command from it's ast
 	pub fn from_ast(cmd: ast::Command) -> Self {
 		Self {
-			cwd:  cmd.cwd.map(Expr::from_ast),
-			args: cmd.args.0.into_iter().map(Expr::from_ast).collect(),
+			cwd:    cmd.cwd.map(Expr::from_ast),
+			stdout: cmd.stdout.map(|stdout| stdout.0),
+			args:   cmd.args.0.into_iter().map(Expr::from_ast).collect(),
 		}
 	}
 }

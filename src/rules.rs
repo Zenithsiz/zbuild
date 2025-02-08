@@ -12,7 +12,7 @@ pub use {
 	expr::{Expr, ExprCmpt, ExprOp, ExprTree},
 	item::{DepItem, OutItem},
 	pattern::Pattern,
-	rule::{Command, Exec, Rule},
+	rule::{Command, Rule},
 	target::Target,
 };
 

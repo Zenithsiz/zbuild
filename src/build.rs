@@ -23,8 +23,8 @@ use {
 	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
 	itertools::Itertools,
 	smallvec::SmallVec,
-	std::{collections::HashMap, fmt, future::Future, sync::Arc, time::SystemTime},
-	tokio::{fs, process, sync::Semaphore, task},
+	std::{collections::HashMap, fmt, future::Future, process::Stdio, sync::Arc, time::SystemTime},
+	tokio::{fs, io::AsyncReadExt, process, sync::Semaphore, task},
 	zutil_app_error::{app_error, AllErrs, Context},
 };
 
@@ -303,7 +303,7 @@ impl Builder {
 		// Get the built lock, or create it
 		let build_lock = self
 			.rules_lock
-			.entry(target_rule)
+			.entry(target_rule.clone())
 			.or_insert_with(BuildLock::new)
 			.clone();
 
@@ -348,10 +348,14 @@ impl Builder {
 				rule: Rule<ArcStr>,
 				ignore_missing: bool,
 				reason: BuildReason,
+				target_rule: TargetRule,
 			) -> impl Future<Output = Result<BuildResult, AppError>> + Send {
-				async move { this.build_unchecked(&target, &rule, ignore_missing, reason).await }
+				async move {
+					this.build_unchecked(&target, &rule, ignore_missing, reason, &target_rule)
+						.await
+				}
 			}
-			build_inner(this, target, rule, ignore_missing, reason)
+			build_inner(this, target, rule, ignore_missing, reason, target_rule)
 		})
 		.await
 		.context("Unable to join task")?;
@@ -385,6 +389,7 @@ impl Builder {
 		rule: &Rule<ArcStr>,
 		ignore_missing: bool,
 		reason: BuildReason,
+		target_rule: &TargetRule,
 	) -> Result<BuildResult, AppError> {
 		// Build all dependencies
 		let deps = self.build_deps_unchecked(target, rule, ignore_missing, reason).await?;
@@ -416,7 +421,7 @@ impl Builder {
 		// Then rebuild, if needed
 		if needs_rebuilt {
 			tracing::trace!(%target, ?rule.name, ?deps_last_build_time, ?rule_last_build_time, "Rebuilding target rule");
-			self.rebuild_rule(rule)
+			self.rebuild_rule(rule, target_rule)
 				.await
 				.with_context(|| format!("Unable to build rule {:?}", rule.name))?;
 		}
@@ -719,7 +724,7 @@ impl Builder {
 	}
 
 	/// Rebuilds a rule
-	pub async fn rebuild_rule(&self, rule: &Rule<ArcStr>) -> Result<(), AppError> {
+	pub async fn rebuild_rule(&self, rule: &Rule<ArcStr>, target_rule: &TargetRule) -> Result<(), AppError> {
 		// Lock the semaphore
 		// Note: If we locked it per-command, we could exit earlier
 		//       when closed, but that would break some executions.
@@ -732,8 +737,9 @@ impl Builder {
 			do yeet AppError::msg_with_data("Execution semaphore was closed", AppErrorData { should_ignore: true });
 		};
 
+		let mut stdout_aliases = HashMap::new();
 		for cmd in &rule.exec.cmds {
-			self.exec_cmd(rule, cmd).await?;
+			self.exec_cmd(rule, cmd, target_rule, &mut stdout_aliases).await?;
 		}
 
 		Ok(())
@@ -741,7 +747,23 @@ impl Builder {
 
 	/// Executes `cmd`.
 	#[expect(unused_results, reason = "Due to the builder pattern of `Command`")]
-	async fn exec_cmd(&self, rule: &Rule<ArcStr>, cmd: &Command<ArcStr>) -> Result<(), AppError> {
+	async fn exec_cmd(
+		&self,
+		rule: &Rule<ArcStr>,
+		cmd: &Command<Expr>,
+		target_rule: &TargetRule,
+		stdout_aliases: &mut HashMap<ArcStr, Expr>,
+	) -> Result<(), AppError> {
+		let expand_visitor = expand::Visitor::new(
+			[stdout_aliases, &rule.aliases, &self.rules.aliases],
+			[&rule.pats, &self.rules.pats],
+			[target_rule.pats.clone()],
+		);
+		let cmd = self
+			.expander
+			.expand_cmd::<ArcStr>(cmd, &expand_visitor)
+			.with_context(|| format!("Unable to expand rule command {:?}", rule.name))?;
+
 		// Get the program name
 		let (program, args) = cmd
 			.args
@@ -757,20 +779,52 @@ impl Builder {
 			os_cmd.current_dir(&**cwd);
 		}
 
+		// Capture stdout, if we should
+		if cmd.stdout.is_some() {
+			os_cmd.stdout(Stdio::piped());
+		}
+
 		// Then spawn it and measure
 		tracing::debug!(target: "zbuild_exec", "{program} {}",
 			args.iter().join(" ")
 		);
-		let (duration, ()) = util::try_measure_async(async {
-			os_cmd
-				.status()
+		let (duration, output) = util::try_measure_async::<_, _, AppError>(async {
+			// Spawn
+			let mut output = os_cmd
+				.spawn()
+				.with_context(|| format!("Unable to spawn {}", self::cmd_to_string(&cmd)))?;
+
+			// Then wait for it to finish
+			output
+				.wait()
 				.await
-				.with_context(|| format!("Unable to spawn {}", self::cmd_to_string(cmd)))?
-				.exit_ok()
-				.with_context(|| format!("Command failed {}", self::cmd_to_string(cmd)))
+				.with_context(|| format!("Command failed {}", self::cmd_to_string(&cmd)))?;
+
+			Ok(output)
 		})
 		.await?;
 		tracing::trace!(target: "zbuild_exec", rule_name=?rule.name, ?program, ?args, ?duration, "Execution duration");
+
+		if let Some(stdout_alias) = &cmd.stdout {
+			// Read the stdout
+			let mut stdout = String::new();
+			output
+				.stdout
+				.expect("Stdout was not set")
+				.read_to_string(&mut stdout)
+				.await
+				.with_context(|| format!("Unable to read command stdout {}", self::cmd_to_string(&cmd)))?;
+
+			// Trim the last newline, if any
+			// TODO: This feels like the right behavior, since most tools output a newline at the end, but
+			//       should we have a configuration to avoid it?
+			if stdout.ends_with('\n') {
+				stdout.pop();
+			}
+
+			// Then save it under the alias.
+			stdout_aliases.insert(stdout_alias.clone(), Expr::string(stdout));
+		}
 
 		Ok(())
 	}

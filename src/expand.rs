@@ -3,7 +3,7 @@
 // Imports
 use {
 	crate::{
-		rules::{Command, DepItem, Exec, Expr, ExprCmpt, ExprOp, OutItem, Pattern, Rule, Target},
+		rules::{Command, DepItem, Expr, ExprCmpt, ExprOp, OutItem, Pattern, Rule, Target},
 		util::ArcStr,
 		AppError,
 	},
@@ -104,12 +104,6 @@ impl Expander {
 	where
 		T: TryFromExpr + Ord,
 	{
-		let aliases = rule
-			.aliases
-			.iter()
-			.map(|(name, expr)| Ok((name.clone(), self.expand_expr(expr, visitor)?)))
-			.collect::<AllErrs<_, _>>()?;
-
 		let output = rule
 			.output
 			.iter()
@@ -140,22 +134,13 @@ impl Expander {
 			})
 			.collect::<AllErrs<_, _>>()?;
 
-		let exec = Exec {
-			cmds: rule
-				.exec
-				.cmds
-				.iter()
-				.map(|cmd| self.expand_cmd(cmd, visitor))
-				.collect::<AllErrs<_, _>>()?,
-		};
-
 		Ok(Rule {
 			name: rule.name.clone(),
-			aliases,
+			aliases: rule.aliases.clone(),
 			pats: rule.pats.clone(),
 			output,
 			deps,
-			exec,
+			exec: rule.exec.clone(),
 		})
 	}
 
@@ -165,8 +150,9 @@ impl Expander {
 		T: TryFromExpr,
 	{
 		Ok(Command {
-			cwd:  cmd.cwd.as_ref().map(|cwd| self.expand_expr(cwd, visitor)).transpose()?,
-			args: cmd
+			cwd:    cmd.cwd.as_ref().map(|cwd| self.expand_expr(cwd, visitor)).transpose()?,
+			stdout: cmd.stdout.clone(),
+			args:   cmd
 				.args
 				.iter()
 				.map(|arg| self.expand_expr(arg, visitor))

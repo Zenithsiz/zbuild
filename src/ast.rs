@@ -219,6 +219,9 @@ pub struct Command {
 	/// Working directory
 	pub cwd: Option<Expr>,
 
+	/// Stdout
+	pub stdout: Option<Ident>,
+
 	/// Arguments
 	pub args: Array<Expr>,
 }
@@ -226,6 +229,7 @@ pub struct Command {
 impl Parsable for Command {
 	fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
 		let mut cwd = None;
+		let mut stdout = None;
 		let mut args = None;
 
 		match parser.try_parse::<TokenBracesOpen>() {
@@ -233,16 +237,22 @@ impl Parsable for Command {
 			Ok(_) =>
 				while parser.try_parse::<TokenBracesClose>().is_err() {
 					match parser
-						.peek::<AnyOf2<TokenCwd, TokenArgs>>()
+						.peek::<AnyOf3<TokenCwd, TokenStdout, TokenArgs>>()
 						.context("Expected an alias, default or rule statement")?
 					{
-						AnyOf2::T0(_) => {
+						AnyOf3::T0(_) => {
 							parser.parse::<TokenCwd>()?;
 							zutil_app_error::ensure!(cwd.is_none(), "Working directory was already specified");
 							cwd = Some(parser.parse::<Expr>()?);
 							parser.parse::<TokenSemi>()?;
 						},
-						AnyOf2::T1(_) => {
+						AnyOf3::T1(_) => {
+							parser.parse::<TokenStdout>()?;
+							zutil_app_error::ensure!(stdout.is_none(), "Stdout was already specified");
+							stdout = Some(parser.parse::<Ident>()?);
+							parser.parse::<TokenSemi>()?;
+						},
+						AnyOf3::T2(_) => {
 							parser.parse::<TokenArgs>()?;
 							zutil_app_error::ensure!(args.is_none(), "Arguments were already specified");
 							args = Some(parser.parse::<Array<Expr>>()?);
@@ -259,7 +269,7 @@ impl Parsable for Command {
 
 		let args = args.context("Missing command `args`")?;
 
-		Ok(Self { cwd, args })
+		Ok(Self { cwd, stdout, args })
 	}
 }
 
@@ -501,6 +511,7 @@ decl_tokens! {
 	TokenPat = "pat";
 	TokenRule = "rule";
 	TokenStatic = "static";
+	TokenStdout = "stdout";
 
 	TokenBracesOpen = '{';
 	TokenBracesClose = '}';
