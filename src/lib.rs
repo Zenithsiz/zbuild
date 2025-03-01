@@ -62,7 +62,7 @@ use {
 		path::{Path, PathBuf},
 		sync::Arc,
 		thread,
-		time::{Duration, SystemTime},
+		time::{Duration, Instant, SystemTime},
 	},
 	util::ArcStr,
 	watcher::Watcher,
@@ -170,6 +170,7 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 		.transpose()?;
 
 	// Finally build all targets and start watching
+	let start_time = Instant::now();
 	let (failed_targets, ()) = futures::join!(
 		async {
 			targets_to_build
@@ -191,6 +192,7 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 			}
 		}
 	);
+	let elapsed = start_time.elapsed();
 
 	// Finally print some statistics
 	let targets = builder.build_results().await;
@@ -200,8 +202,8 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 		.filter_map(|(_, res)| res.as_ref())
 		.filter(|res| res.as_ref().is_ok_and(|res| res.built))
 		.count();
-	tracing::info!("Built {built_targets} targets");
-	tracing::info!("Checked {total_targets} targets");
+	tracing::info!("Built {built_targets} targets in {elapsed:.2?}");
+	tracing::info!("Checked {total_targets} targets in {elapsed:.2?}");
 
 	match failed_targets.is_empty() {
 		true => Ok(()),
