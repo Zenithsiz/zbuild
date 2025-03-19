@@ -19,11 +19,11 @@ async fn basic_multiple() -> ExitResult {
 	let temp_dir = util::with_zbuild(
 		r#"
 rule create_file {
-	out ["file1.out", "file2.out"];
-	exec [
-		"touch" "file1.out",
-		"touch" "file2.out",
-	];
+	out "file1.out";
+	out "file2.out";
+
+	exec "touch" "file1.out";
+	exec "touch" "file2.out";
 }
 		"#,
 		// Note: Only request `file1.out`

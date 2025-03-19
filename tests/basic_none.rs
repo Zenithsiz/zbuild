@@ -20,7 +20,7 @@ async fn basic_none() -> ExitResult {
 		r#"
 rule create_file {
 	out "file.out";
-	exec ["touch" "file.out"];
+	exec "touch" "file.out";
 }
 		"#,
 		// Note: We're passing no targets

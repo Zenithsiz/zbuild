@@ -57,31 +57,28 @@ async fn inner(keep_going: bool) -> Result<(), AppError> {
 		r#"
 rule a {
 	out "a";
-	deps ["b", "c1"];
-	exec ["touch" "a"];
+	dep "b";
+	dep "c1";
+	exec "touch" "a";
 }
 
 rule b {
 	out "b";
-	exec [
-		"sleep" "0.1",
-		"false",
-		"touch" "b",
-	];
+	exec "sleep" "0.1";
+	exec "false";
+	exec "touch" "b";
 }
 
 rule c1 {
 	out "c1";
-	deps "c2";
-	exec ["touch" "c1"];
+	dep "c2";
+	exec "touch" "c1";
 }
 
 rule c2 {
 	out "c2";
-	exec [
-		"sleep" "0.2",
-		"touch" "c2"
-	];
+	exec "sleep" "0.2";
+	exec "touch" "c2";
 }
 		"#,
 	)

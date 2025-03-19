@@ -20,7 +20,7 @@ async fn basic_single() -> ExitResult {
 		r#"
 rule create_file {
 	out "file.out";
-	exec ["touch" "file.out"];
+	exec "touch" "file.out";
 }
 		"#,
 		["file.out"],
