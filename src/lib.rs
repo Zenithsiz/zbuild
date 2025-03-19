@@ -21,7 +21,8 @@
 	macro_metavar_expr_concat,
 	substr_range,
 	unwrap_infallible,
-	never_type
+	never_type,
+	try_trait_v2_yeet
 )]
 // Lints
 #![allow(

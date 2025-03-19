@@ -798,7 +798,9 @@ impl Builder {
 			output
 				.wait()
 				.await
-				.with_context(|| format!("Command failed {}", self::cmd_to_string(&cmd)))?;
+				.with_context(|| format!("Command failed to start {}", self::cmd_to_string(&cmd)))?
+				.exit_ok()
+				.with_context(|| format!("Command failed to run {}", self::cmd_to_string(&cmd)))?;
 
 			Ok(output)
 		})

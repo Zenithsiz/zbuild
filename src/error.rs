@@ -3,7 +3,7 @@
 // Imports
 use std::{
 	convert::Infallible,
-	ops::FromResidual,
+	ops::{FromResidual, Yeet},
 	process::{self, Termination},
 };
 
@@ -49,6 +49,12 @@ impl FromResidual<Result<Infallible, AppError>> for ExitResult {
 			Ok(never) => match never {},
 			Err(err) => Self::Err(err),
 		}
+	}
+}
+
+impl FromResidual<Yeet<AppError>> for ExitResult {
+	fn from_residual(Yeet(err): Yeet<AppError>) -> Self {
+		Self::Err(err)
 	}
 }
 
