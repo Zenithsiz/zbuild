@@ -56,6 +56,7 @@ use {
 		rules::Rules,
 	},
 	futures::{stream::FuturesUnordered, StreamExt, TryFutureExt},
+	indicatif::ProgressBar,
 	smallvec::SmallVec,
 	std::{
 		env,
@@ -145,6 +146,18 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 		"Found targets to build"
 	);
 
+	let progress_bar = ProgressBar::new(0).with_style(
+		#[expect(
+			clippy::literal_string_with_formatting_args,
+			reason = "`indicatif` formats these for us dynamically"
+		)]
+		indicatif::ProgressStyle::default_bar()
+			.progress_chars("=> ")
+			.template("[{elapsed:>3.green}/{duration:<3.black}] [{bar:50.black}] {human_pos:>7}/{human_len:<7}")
+			.expect("Invalid progress bar template"),
+	);
+	progress_bar.enable_steady_tick(Duration::from_millis(100));
+
 	// Create the builder
 	let builder = Builder::new(
 		jobs,
@@ -154,6 +167,7 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 		//       user doesn't want to keep going.
 		!args.watch && !args.keep_going,
 		args.always_build,
+		Some(progress_bar.clone()),
 	)
 	.context("Unable to create builder")?;
 	let builder = Arc::new(builder);
@@ -194,6 +208,8 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 		}
 	);
 	let elapsed = start_time.elapsed();
+
+	progress_bar.finish_and_clear();
 
 	// Finally print some statistics
 	let targets = builder.build_results().await;

@@ -21,6 +21,7 @@ use {
 	},
 	dashmap::DashMap,
 	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
+	indicatif::ProgressBar,
 	itertools::Itertools,
 	smallvec::SmallVec,
 	std::{collections::HashMap, fmt, future::Future, process::Stdio, sync::Arc, time::SystemTime},
@@ -85,6 +86,9 @@ pub struct Builder {
 
 	/// Whether we should always build rules, even if their outputs are up to date
 	always_build: bool,
+
+	/// Progress bar
+	progress_bar: Option<ProgressBar>,
 }
 
 impl Builder {
@@ -95,6 +99,7 @@ impl Builder {
 		expander: Expander,
 		stop_builds_on_first_err: bool,
 		always_build: bool,
+		progress_bar: Option<ProgressBar>,
 	) -> Result<Self, AppError> {
 		let (event_tx, event_rx) = async_broadcast::broadcast(jobs);
 		let event_rx = event_rx.deactivate();
@@ -137,6 +142,7 @@ impl Builder {
 			exec_semaphore: Semaphore::new(jobs),
 			stop_builds_on_first_err,
 			always_build,
+			progress_bar,
 		})
 	}
 
@@ -391,6 +397,10 @@ impl Builder {
 		reason: BuildReason,
 		target_rule: &TargetRule,
 	) -> Result<BuildResult, AppError> {
+		if let Some(progress_bar) = &self.progress_bar {
+			progress_bar.inc_length(1);
+		}
+
 		// Build all dependencies
 		let deps = self.build_deps_unchecked(target, rule, ignore_missing, reason).await?;
 
@@ -433,6 +443,10 @@ impl Builder {
 			build_time: cur_build_time,
 			built:      needs_rebuilt,
 		};
+
+		if let Some(progress_bar) = &self.progress_bar {
+			progress_bar.inc(1);
+		}
 
 		Ok(res)
 	}
