@@ -11,22 +11,22 @@ pub use self::{lock::BuildResult, reason::BuildReason};
 use {
 	self::lock::{BuildLock, BuildLockDepGuard},
 	crate::{
+		AppError,
+		Expander,
+		Rules,
 		error::{self, AppErrorData},
 		expand,
 		rules::{Command, DepItem, Expr, ExprTree, OutItem, Rule, Target},
 		util::{self, ArcStr},
-		AppError,
-		Expander,
-		Rules,
 	},
 	dashmap::DashMap,
-	futures::{stream::FuturesUnordered, StreamExt, TryStreamExt},
+	futures::{StreamExt, TryStreamExt, stream::FuturesUnordered},
 	indicatif::ProgressBar,
 	itertools::Itertools,
 	smallvec::SmallVec,
 	std::{collections::HashMap, fmt, future::Future, process::Stdio, sync::Arc, time::SystemTime},
 	tokio::{fs, io::AsyncReadExt, process, sync::Semaphore, task},
-	zutil_app_error::{app_error, AllErrs, Context},
+	zutil_app_error::{AllErrs, Context, app_error},
 };
 
 /// Event
@@ -128,7 +128,7 @@ impl Builder {
 						"Multiple rules match the same output file: {output_file}\n  first rule: {prev_rule_name}\n  \
 						 second rule: {rule_name}"
 					));
-				};
+				}
 			}
 		}
 

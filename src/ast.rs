@@ -8,7 +8,7 @@
 
 // Imports
 use {
-	crate::{util::ArcStr, AppError},
+	crate::{AppError, util::ArcStr},
 	std::{fmt::Write, fs, mem, path::Path, ptr, str::pattern::Pattern},
 	zutil_app_error::Context,
 };
@@ -265,7 +265,7 @@ impl Parsable for Command {
 			Err(_) => {
 				args = Some(parser.parse::<Array<Expr>>()?);
 			},
-		};
+		}
 
 		let args = args.context("Missing command `args`")?;
 
@@ -749,7 +749,6 @@ macro decl_any_of($Name:ident, $($T:ident),* $(,)?) {
 
 decl_any_of!(AnyOf2, T0, T1);
 decl_any_of!(AnyOf3, T0, T1, T2);
-decl_any_of!(AnyOf4, T0, T1, T2, T3);
 decl_any_of!(AnyOf5, T0, T1, T2, T3, T4);
 
 /// Fully parses the ast from `path`.

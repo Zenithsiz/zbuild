@@ -1,6 +1,6 @@
 # TODO: Add `LICENSE-APACHE` to `license-file` once that key supports multiple licenses
 [package]
-edition = "2021"
+edition = "2024"
 name = "zbuild"
 description = "Make-like build system"
 license-file = "LICENSE-MIT"
@@ -99,3 +99,6 @@ clippy.missing_panics_doc = "allow"
 
 # This is too prevalent on generic functions, which we don't want to ALWAYS be `Send`
 clippy.future_not_send = "allow"
+
+# We want to format paths with quotes
+clippy.unnecessary_debug_formatting = "allow"

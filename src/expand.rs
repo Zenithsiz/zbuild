@@ -3,13 +3,13 @@
 // Imports
 use {
 	crate::{
+		AppError,
 		rules::{Command, DepItem, Expr, ExprCmpt, ExprOp, OutItem, Pattern, Rule, Target},
 		util::ArcStr,
-		AppError,
 	},
 	smallvec::SmallVec,
 	std::{collections::HashMap, mem, path::PathBuf},
-	zutil_app_error::{app_error, AllErrs, Context},
+	zutil_app_error::{AllErrs, Context, app_error},
 };
 
 /// Expander
@@ -69,7 +69,7 @@ impl Expander {
 						FlowControl::Keep => expr.push(cmpt),
 						FlowControl::Error => zutil_app_error::bail!("Unknown expression {name:?}"),
 					},
-				};
+				}
 
 				Ok::<_, AppError>(expr)
 			})?;
@@ -94,7 +94,7 @@ impl Expander {
 					.into_string()
 					.expect("utf-8 path was no longer utf-8 after getting dir-name");
 			},
-		};
+		}
 
 		Ok(())
 	}

@@ -5,14 +5,12 @@
 	exit_status_error,
 	decl_macro,
 	box_patterns,
-	let_chains,
 	yeet_expr,
 	must_not_suspend,
 	assert_matches,
 	try_trait_v2,
 	if_let_guard,
 	pattern,
-	unsigned_signed_diff,
 	vec_into_raw_parts,
 	ptr_metadata
 )]

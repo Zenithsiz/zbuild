@@ -6,8 +6,8 @@ use {
 		assert_matches::assert_matches,
 		mem,
 		sync::{
-			atomic::{self, AtomicBool},
 			Arc,
+			atomic::{self, AtomicBool},
 		},
 		time::SystemTime,
 	},
@@ -83,7 +83,6 @@ impl BuildLockBuildGuard {
 	/// Retrieves a target's result
 	///
 	/// Waits for any builders to finish
-	#[expect(clippy::missing_const_for_fn, reason = "False positive")]
 	pub fn _res(&self) -> Option<Result<BuildResult, ()>> {
 		self.state.res
 	}
@@ -124,7 +123,6 @@ impl BuildLockDepGuard {
 	/// Retrieves a target's result
 	///
 	/// Waits for any builders to finish
-	#[expect(clippy::missing_const_for_fn, reason = "False positive")]
 	pub fn res(&self) -> Option<Result<BuildResult, ()>> {
 		self.state.res
 	}
