@@ -9,7 +9,7 @@ license=('MIT' 'APACHE-2')
 depends=('gcc-libs')
 makedepends=('cargo-nightly')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/zenithsiz/$pkgname/archive/$pkgver.tar.gz")
-sha512sums=('682afc2e294fb1179a64e8754e22d98bad0055c3bed037d2ae65f095c285d6e0d5441572f733e241f9c2aa389b6f4b69124a5e89269b1e7fbc4ecdae4643d91a')
+sha512sums=('f5a94c82b8298e40a33598f3d3070cd55d18879733f415326950281aa484ebce4d161f682b2a62ca809629e56b7f681516b3f31bcfc77a9874f9d51fc662e11b')
 
 prepare() {
 	cd "$pkgname-$pkgver"
