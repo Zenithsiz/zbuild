@@ -1,33 +1,38 @@
-# TODO: Add `LICENSE-APACHE` to `license-file` once that key supports multiple licenses
 [package]
-edition = "2021"
-name = "zbuild"
+edition     = "2024"
+name        = "zbuild"
 description = "Make-like build system"
-license-file = "LICENSE-MIT"
-version = "0.1.9"
-repository = "https://github.com/zenithsiz/zbuild"
-publish = ["filipejr"]
+license     = "MIT OR Apache-2.0"
+version     = "0.1.10"
+repository  = "https://github.com/zenithsiz/zbuild"
+publish     = ["filipejr"]
 
 [dependencies]
 
-anyhow = "1.0.86"
-async-broadcast = "0.7.1"
-clap = { version = "4.5.15", features = ["derive"] }
-console-subscriber = { version = "0.4.0", optional = true }
-dashmap = "6.0.1"
-futures = "0.3.30"
-indexmap = { version = "2.4.0", features = ["serde"] }
-itertools = "0.13.0"
-notify = "6.1.1"
-notify-debouncer-full = "0.3.1"
-pin-project = "1.1.5"
-serde = { version = "1.0.205", features = ["derive"] }
-serde_yaml = "0.9.34"
-smallvec = { version = "1.13.2", features = ["may_dangle"] }
-tokio = { version = "1.39.2", features = ["full"] }
-tokio-stream = "0.1.15"
-tracing = "0.1.40"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+async-broadcast       = "0.7.2"
+clap                  = { features = ["derive"], version = "4.5.27" }
+console-subscriber    = { optional = true, version = "0.4.1" }
+dashmap               = "6.1.0"
+futures               = "0.3.31"
+indexmap              = "2.7.1"
+indicatif             = "0.17.11"
+itertools             = "0.14.0"
+notify                = "8.0.0"
+notify-debouncer-full = "0.5.0"
+pin-project           = "1.1.8"
+smallvec              = { features = ["may_dangle"], version = "1.13.2" }
+tokio                 = { features = ["full"], version = "1.43.0" }
+tokio-stream          = "0.1.17"
+tracing               = "0.1.41"
+tracing-subscriber    = { features = ["env-filter"], version = "0.3.19" }
+unicode-ident         = "1.0.16"
+yoke                  = "0.7.5"
+zutil-app-error       = { git = "https://github.com/Zenithsiz/zutil", rev = "5363bba6ced162185a1eb5a132cce499bfc5d818" }
+
+[dev-dependencies]
+
+tempfile     = "3.16.0"
+tracing-test = { version = "0.2.5", features = ["no-env-filter"] }
 
 [features]
 
@@ -36,19 +41,12 @@ tokio-console = ["dep:console-subscriber"]
 [lints]
 
 # This project doesn't require unsafe code (outside of some modules)
-rust.unsafe_code = "deny"
+rust.unsafe_code            = "deny"
 rust.unsafe_op_in_unsafe_fn = "deny"
 
 # Group lints
-# Note: We warn on the full group list, and then `allow` the
-#       lints of each group that don't make sense for this project.
-#       This is so that when new lints are added we can immediatly start
-#       receiving *warnings*, and can then remove them if they're not
-#       relevant.
 clippy.pedantic = { level = "warn", priority = -1 }
-clippy.nursery = { level = "warn", priority = -1 }
-clippy.restriction = { level = "warn", priority = -1 }
-clippy.blanket_clippy_restriction_lints = "allow"
+clippy.nursery  = { level = "warn", priority = -1 }
 
 # Prefer `expect` instead of `unwrap`
 clippy.unwrap_used = "deny"
@@ -58,109 +56,48 @@ clippy.expect_used = "allow"
 rust.elided_lifetimes_in_paths = "deny"
 
 # `Debug` / `Copy` should be implemented wherever possible
-rust.missing_copy_implementations = "warn"
+rust.missing_copy_implementations  = "warn"
 rust.missing_debug_implementations = "warn"
 
 # Misc.
-rust.noop_method_call = "warn"
-rust.unused_results = "warn"
+rust.noop_method_call               = "warn"
+rust.unused_results                 = "warn"
 rust.explicit_outlives_requirements = "warn"
-rust.fuzzy_provenance_casts = "deny"
-rust.meta_variable_misuse = "warn"
-rust.must_not_suspend = "warn"
-rust.single_use_lifetimes = "warn"
-rust.trivial_numeric_casts = "warn"
-rust.unused_lifetimes = "warn"
-rust.unused_macro_rules = "warn"
-rust.variant_size_differences = "warn"
-rust.unused_crate_dependencies = "warn"
+rust.meta_variable_misuse           = "warn"
+rust.must_not_suspend               = "warn"
+rust.single_use_lifetimes           = "warn"
+rust.trivial_numeric_casts          = "warn"
+rust.unused_lifetimes               = "warn"
+rust.unused_macro_rules             = "warn"
+rust.variant_size_differences       = "warn"
+clippy.let_underscore_untyped       = "warn"
 
 # False positives
 clippy.significant_drop_tightening = "allow"
 
-# Can't easily `allow` / `expect` it.
-# TODO: Issue seems to be with the feature `stmt_expr_attributes`?
-clippy.arithmetic_side_effects = "allow"
-
-# We don't need this kind of control over this application
-clippy.pub_use = "allow"
-clippy.question_mark_used = "allow"
-clippy.integer_division = "allow"
-clippy.exhaustive_enums = "allow"
-clippy.exhaustive_structs = "allow"
-clippy.impl_trait_in_params = "allow"
-clippy.unreachable = "allow"
-clippy.mem_forget = "allow"
-clippy.shadow_same = "allow"
-clippy.shadow_reuse = "allow"
-clippy.shadow_unrelated = "allow"     # TODO: Maybe check this one every once in a while? Pretty noisy though
-clippy.min_ident_chars = "allow"      # Useful for generics such as `f: impl FnOnce()`
-clippy.single_call_fn = "allow"       # It's still useful to separate blocks of code into functions
-clippy.float_arithmetic = "allow"
-clippy.struct_field_names = "allow"
-clippy.iter_over_hash_type = "allow"
-clippy.non_ascii_literal = "allow"
-
-# We prefer the short version
-clippy.pub_with_shorthand = "allow"
-clippy.pub_without_shorthand = "warn"
-
-# We prefer the semicolon inside
-clippy.semicolon_inside_block = "allow"
-clippy.semicolon_outside_block = "deny"
-
 # Style
-clippy.implicit_return = "allow"
-clippy.multiple_inherent_impl = "allow"
-clippy.pattern_type_mismatch = "allow"
-clippy.match_bool = "allow"
-clippy.single_match_else = "allow"        # Note: `match` reads easier than `if / else`
-clippy.option_if_let_else = "allow"
-clippy.self_named_module_files = "allow"
-clippy.items_after_statements = "allow"
-clippy.module_name_repetitions = "allow"
-clippy.module_inception = "allow"
+clippy.implicit_return          = "allow"
+clippy.multiple_inherent_impl   = "allow"
+clippy.pattern_type_mismatch    = "allow"
+clippy.match_bool               = "allow"
+clippy.single_match_else        = "allow" # Note: `match` reads easier than `if / else`
+clippy.option_if_let_else       = "allow"
+clippy.self_named_module_files  = "allow"
+clippy.items_after_statements   = "allow"
+clippy.module_name_repetitions  = "allow"
+clippy.module_inception         = "allow"
 clippy.separated_literal_suffix = "allow"
-clippy.ref_patterns = "allow"             # Matching on a vale and adding `ref` is easier than matching on ref and de-referencing values within the body
+clippy.ref_patterns             = "allow" # Matching on a vale and adding `ref` is easier than matching on ref and de-referencing values within the body
 
-# Performance of floats isn't paramount
-clippy.suboptimal_flops = "allow"
 
-# Some functions might return an error / be async in the future
-clippy.unnecessary_wraps = "allow"
-clippy.unused_async = "allow"
-
-# We use proper error types when it matters what errors can be returned, else = "allow"
-# such as when using `anyhow`, we just assume the caller won't check *what* error
-# happened and instead just bubbles it up
+# Callers don't care about which error happened.
 clippy.missing_errors_doc = "allow"
 
-
-# We don't expose certain entities that should be documented for internal use.
-rustdoc.private_intra_doc_links = "allow"
+# Too noisy with self-contained panics that the caller will never see.
+clippy.missing_panics_doc = "allow"
 
 # This is too prevalent on generic functions, which we don't want to ALWAYS be `Send`
 clippy.future_not_send = "allow"
 
-# TODO: Use `core` / `alloc` instead of `std` where possible?
-clippy.std_instead_of_core = "allow"
-clippy.std_instead_of_alloc = "allow"
-
-# Single-letter generics / lifetimes are fine when there isn't a specific meaning to the generic
-clippy.single_char_lifetime_names = "allow"
-
-# We don't need to annotate `#[inline]` to every single function
-# TODO: Check if it might be required in some hot functions?
-clippy.missing_inline_in_public_items = "allow"
-
-# For most trait impls, the default is fine.
-# TODO: Turn this off every once in a while and check if there's any
-#       performance improvements from implementing default functions?
-clippy.missing_trait_methods = "allow"
-
-# We only panic when it's an unrecoverable error
-clippy.unwrap_in_result = "allow"
-clippy.panic_in_result_fn = "allow"
-
-# Sometimes small structs defined inline don't need documentation
-clippy.missing_docs_in_private_items = "allow"
+# We want to format paths with quotes
+clippy.unnecessary_debug_formatting = "allow"

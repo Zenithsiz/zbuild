@@ -1,0 +1,113 @@
+default "out/0.out";
+
+rule r0 {
+	pat name;
+
+	out "out/0{name}.out";
+
+	dep "out/1{name}a.out";
+	dep "out/1{name}b.out";
+	dep "out/1{name}c.out";
+
+	exec "touch" "out/0{name}.out";
+}
+
+rule r1 {
+	pat name;
+
+	out "out/1{name}.out";
+
+	dep "out/2{name}a.out";
+	dep "out/2{name}b.out";
+	dep "out/2{name}c.out";
+
+	exec "touch" "out/1{name}.out";
+}
+
+rule r2 {
+	pat name;
+
+	out "out/2{name}.out";
+
+	dep "out/3{name}a.out";
+	dep "out/3{name}b.out";
+	dep "out/3{name}c.out";
+
+	exec "touch" "out/2{name}.out";
+}
+
+rule r3 {
+	pat name;
+
+	out "out/3{name}.out";
+
+	dep "out/4{name}a.out";
+	dep "out/4{name}b.out";
+	dep "out/4{name}c.out";
+
+	exec "touch" "out/3{name}.out";
+}
+
+rule r4 {
+	pat name;
+
+	out "out/4{name}.out";
+
+	dep "out/5{name}a.out";
+	dep "out/5{name}b.out";
+	dep "out/5{name}c.out";
+
+	exec "touch" "out/4{name}.out";
+}
+
+rule r5 {
+	pat name;
+
+	out "out/5{name}.out";
+
+	dep "out/6{name}a.out";
+	dep "out/6{name}b.out";
+	dep "out/6{name}c.out";
+
+	exec "touch" "out/5{name}.out";
+}
+
+rule r6 {
+	pat name;
+
+	out "out/6{name}.out";
+
+	dep "out/7{name}a.out";
+	dep "out/7{name}b.out";
+	dep "out/7{name}c.out";
+
+	exec "touch" "out/6{name}.out";
+}
+
+rule r7 {
+	pat name;
+
+	out "out/7{name}.out";
+
+	dep "out/8{name}a.out";
+	dep "out/8{name}b.out";
+	dep "out/8{name}c.out";
+
+	exec "touch" "out/7{name}.out";
+}
+
+rule r8 {
+	pat name;
+
+	out "out/8{name}.out";
+
+	dep static "out/";
+
+	exec "touch" "out/8{name}.out";
+}
+
+rule out {
+	out "out/";
+
+	exec "mkdir" "-p" "out/";
+}

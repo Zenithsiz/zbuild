@@ -1,7 +1,6 @@
 //! Rules
 
 // Modules
-mod alias;
 mod expr;
 mod item;
 mod pattern;
@@ -10,19 +9,17 @@ mod target;
 
 // Exports
 pub use {
-	alias::AliasOp,
-	expr::{Expr, ExprCmpt, ExprTree},
+	expr::{Expr, ExprCmpt, ExprOp, ExprTree},
 	item::{DepItem, OutItem},
-	pattern::PatternOp,
-	rule::{Command, Exec, Rule},
+	pattern::Pattern,
+	rule::{Command, Rule},
 	target::Target,
 };
 
 // Imports
 use {
-	crate::{util::ArcStr, Ast},
-	indexmap::IndexMap,
-	std::sync::Arc,
+	crate::{AppError, Ast, util::ArcStr},
+	std::collections::HashMap,
 };
 
 /// Rules.
@@ -35,42 +32,56 @@ pub struct Rules {
 	///
 	/// These are available for the whole program to
 	/// use.
-	pub aliases: Arc<IndexMap<ArcStr, Expr>>,
+	pub aliases: HashMap<ArcStr, Expr>,
+
+	/// Patterns.
+	///
+	/// These are available for the whole program to
+	/// use.
+	pub pats: HashMap<ArcStr, Pattern>,
 
 	/// Default targets to build
 	pub default: Vec<Target<Expr>>,
 
 	/// Rules
-	pub rules: IndexMap<ArcStr, Rule<Expr>>,
+	#[expect(clippy::struct_field_names, reason = "TODO: Rename struct name")]
+	pub rules: HashMap<ArcStr, Rule<Expr>>,
 }
 
 impl Rules {
 	/// Creates all rules from the ast
-	#[must_use]
-	pub fn from_ast(zbuild_file: &ArcStr, ast: Ast<'_>) -> Self {
+	pub fn from_ast(ast: Ast) -> Result<Self, AppError> {
 		let aliases = ast
 			.aliases
 			.into_iter()
-			.map(|(alias, value)| (zbuild_file.slice_from_str(alias), Expr::from_ast(zbuild_file, value)))
+			.map(|alias| (alias.name.0, Expr::from_ast(alias.value)))
+			.collect();
+		let pats = ast
+			.pats
+			.into_iter()
+			.map(|pat| {
+				(pat.name.0.clone(), Pattern {
+					name:      pat.name.0,
+					non_empty: pat.non_empty,
+				})
+			})
 			.collect();
 		let default = ast
-			.default
+			.defaults
 			.into_iter()
-			.map(|target| Target::from_ast(zbuild_file, target))
+			.map(|target| Target::from_ast(target.default))
 			.collect();
 		let rules = ast
 			.rules
 			.into_iter()
-			.map(|(name, rule)| {
-				let name = zbuild_file.slice_from_str(name);
-				(name.clone(), Rule::from_ast(zbuild_file, name, rule))
-			})
-			.collect();
+			.map(|rule| try { (rule.name.0.clone(), Rule::from_ast(rule)?) })
+			.collect::<Result<_, AppError>>()?;
 
-		Self {
-			aliases: Arc::new(aliases),
+		Ok(Self {
+			aliases,
+			pats,
 			default,
 			rules,
-		}
+		})
 	}
 }

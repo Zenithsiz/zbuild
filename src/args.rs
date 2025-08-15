@@ -15,6 +15,7 @@ use std::path::PathBuf;
 #[derive(Debug)]
 #[derive(clap::Parser)]
 #[clap(author, version, about)]
+#[expect(clippy::struct_excessive_bools, reason = "It's normal to have a lot of switches")]
 pub struct Args {
 	/// All targets to build.
 	///
@@ -43,6 +44,21 @@ pub struct Args {
 	#[clap(long = "ignore-missing", short = 'i')]
 	pub ignore_missing: bool,
 
+	/// Keeps building files even if an error has occurred.
+	///
+	/// Normally, whenever an error occurs, further rules are forbidden
+	/// to execute, although currently executing rules continue running.
+	///
+	/// This makes it so that whenever an error occurs,
+	/// we continue searching and executing rules until there is nothing
+	/// else we can do
+	#[clap(long = "keep-going")]
+	pub keep_going: bool,
+
+	/// Always build rules, even if their outputs are up to date
+	#[clap(long = "always-build")]
+	pub always_build: bool,
+
 	/// Watch for file changes and rebuild any necessary targets.
 	///
 	/// WARNING: If the log file is situated in the same directory as any watched
@@ -61,4 +77,21 @@ pub struct Args {
 	/// You can use `RUST_FILE_LOG` to set filtering options
 	#[clap(long = "log-file")]
 	pub log_file: Option<PathBuf>,
+}
+
+#[expect(clippy::derivable_impls, reason = "We want to be explicit with the defaults")]
+impl Default for Args {
+	fn default() -> Self {
+		Self {
+			targets: vec![],
+			zbuild_path: None,
+			jobs: None,
+			ignore_missing: false,
+			keep_going: false,
+			always_build: false,
+			watch: false,
+			watcher_debouncer_timeout_ms: None,
+			log_file: None,
+		}
+	}
 }

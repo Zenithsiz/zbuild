@@ -3,8 +3,8 @@
 // Imports
 use {
 	super::Expr,
-	crate::{ast, util::ArcStr},
-	std::{collections::BTreeMap, fmt, sync::Arc},
+	crate::{AppError, ast, util::ArcStr},
+	std::fmt,
 };
 
 
@@ -23,17 +23,15 @@ pub enum OutItem<T> {
 
 impl OutItem<Expr> {
 	/// Creates a new item from it's `ast`.
-	pub fn from_ast(zbuild_file: &ArcStr, item: ast::OutItem<'_>) -> Self {
-		match item {
-			ast::OutItem::File(file) => Self::File {
-				file:         Expr::from_ast(zbuild_file, file),
-				is_deps_file: false,
-			},
-			ast::OutItem::DepsFile { deps_file } => Self::File {
-				file:         Expr::from_ast(zbuild_file, deps_file),
-				is_deps_file: true,
-			},
-		}
+	pub fn from_ast(item: ast::Expr) -> Result<Self, AppError> {
+		let is_deps_file = item.is_deps_file;
+		zutil_app_error::ensure!(!item.is_opt, "Output items cannot be optional");
+		zutil_app_error::ensure!(!item.is_static, "Output items cannot be static");
+
+		Ok(Self::File {
+			file: Expr::from_ast(item),
+			is_deps_file,
+		})
 	}
 }
 
@@ -73,68 +71,28 @@ pub enum DepItem<T> {
 
 	/// Rule
 	Rule {
-		/// Rule name
-		name: T,
-
-		/// All rule patterns
-		pats: Arc<BTreeMap<T, T>>,
+		/// Name
+		name: ArcStr,
 	},
 }
 
 impl DepItem<Expr> {
 	/// Creates a new item from it's `ast`.
-	pub fn from_ast(zbuild_file: &ArcStr, item: ast::DepItem<'_>) -> Self {
-		match item {
-			ast::DepItem::File(file) => Self::File {
-				file:         Expr::from_ast(zbuild_file, file),
-				is_optional:  false,
-				is_static:    false,
-				is_deps_file: false,
-			},
-			ast::DepItem::Rule { rule, pats } => {
-				let pats = pats
-					.into_iter()
-					.map(|(pat, value)| (Expr::from_ast(zbuild_file, pat), Expr::from_ast(zbuild_file, value)))
-					.collect();
-				Self::Rule {
-					name: Expr::from_ast(zbuild_file, rule),
-					pats: Arc::new(pats),
+	pub fn from_ast(dep: ast::DepStmt) -> Self {
+		match dep {
+			ast::DepStmt::File(dep) => {
+				let is_optional = dep.is_opt;
+				let is_static = dep.is_static;
+				let is_deps_file = dep.is_deps_file;
+
+				Self::File {
+					file: Expr::from_ast(dep),
+					is_optional,
+					is_static,
+					is_deps_file,
 				}
 			},
-			ast::DepItem::DepsFile { deps_file } => Self::File {
-				file:         Expr::from_ast(zbuild_file, deps_file),
-				is_optional:  false,
-				is_static:    false,
-				is_deps_file: true,
-			},
-			ast::DepItem::Static { item: static_item } => match static_item {
-				ast::StaticDepItem::File(file) => Self::File {
-					file:         Expr::from_ast(zbuild_file, file),
-					is_optional:  false,
-					is_static:    true,
-					is_deps_file: false,
-				},
-				ast::StaticDepItem::DepsFile { deps_file } => Self::File {
-					file:         Expr::from_ast(zbuild_file, deps_file),
-					is_optional:  false,
-					is_static:    true,
-					is_deps_file: true,
-				},
-			},
-			ast::DepItem::Opt { item: opt_item } => match opt_item {
-				ast::OptDepItem::File(file) => Self::File {
-					file:         Expr::from_ast(zbuild_file, file),
-					is_optional:  true,
-					is_static:    true,
-					is_deps_file: false,
-				},
-				ast::OptDepItem::DepsFile { deps_file } => Self::File {
-					file:         Expr::from_ast(zbuild_file, deps_file),
-					is_optional:  true,
-					is_static:    true,
-					is_deps_file: true,
-				},
-			},
+			ast::DepStmt::Rule(name) => Self::Rule { name: name.0 },
 		}
 	}
 }
@@ -149,34 +107,22 @@ impl<T: fmt::Display> fmt::Display for DepItem<T> {
 				is_deps_file,
 			} => {
 				if is_optional {
-					write!(f, "opt: ")?;
+					write!(f, "opt ")?;
 				}
 
 				if is_static {
-					write!(f, "static: ")?;
+					write!(f, "static ")?;
 				}
 
 				if is_deps_file {
-					write!(f, "deps_file: ")?;
+					write!(f, "deps_file ")?;
 				}
 
 				write!(f, "{file}")?;
 				Ok(())
 			},
-			Self::Rule { ref name, ref pats } => {
-				write!(f, "rule: {name}")?;
-
-				if !pats.is_empty() {
-					write!(f, " (")?;
-
-					for (pat, value) in &**pats {
-						write!(f, "{pat}={value}, ")?;
-					}
-
-					write!(f, ")")?;
-				}
-
-				Ok(())
+			Self::Rule { ref name } => {
+				write!(f, "rule {name}")
 			},
 		}
 	}

@@ -1,18 +1,18 @@
 //! Arc string
 
-// Lints
-#![expect(unsafe_code, reason = "We need unsafe to implement our string 'cached' pointer")]
-
 // Imports
-use std::{
-	borrow::Borrow,
-	cmp,
-	fmt,
-	hash::{Hash, Hasher},
-	ops::Deref,
-	ptr::NonNull,
-	str::pattern::{Pattern, ReverseSearcher},
-	sync::Arc,
+use {
+	std::{
+		borrow::Borrow,
+		cmp,
+		fmt,
+		hash::{Hash, Hasher},
+		mem,
+		ops::{Deref, Range},
+		str::pattern::{Pattern, ReverseSearcher},
+		sync::Arc,
+	},
+	yoke::Yoke,
 };
 
 /// Arc string.
@@ -25,23 +25,18 @@ use std::{
 /// accessible as a `String`.
 #[derive(Clone)]
 pub struct ArcStr {
-	/// This string's pointer
-	///
-	/// The string must *never* be mutated through this pointer,
-	/// due to it being possibly derived from a `&str`.
-	ptr: NonNull<str>,
-
 	/// Inner
-	#[expect(clippy::rc_buffer, reason = "We need it for efficient conversion to/from `String`")]
-	inner: Arc<String>,
+	// Note: We need an `Arc<String>` for efficient conversion to/from `String`
+	inner: Yoke<&'static str, Arc<String>>,
 }
 
 impl ArcStr {
-	/// Returns the offset of this string compared to the base
-	fn base_offset(&self) -> usize {
-		// SAFETY: `self.ptr` was derived from `inner.base_ptr`
-		let start = unsafe { self.ptr.as_ptr().byte_offset_from(self.inner.as_ptr()) };
-		usize::try_from(start).expect("String pointer was before base pointer")
+	/// Returns the range of this string compared to the base
+	fn base_range(&self) -> Range<usize> {
+		self.inner
+			.backing_cart()
+			.substr_range(self)
+			.expect("String pointer should be within allocation")
 	}
 
 	/// Updates this string as a `&mut String`.
@@ -51,36 +46,32 @@ impl ArcStr {
 	where
 		F: FnOnce(&mut String) -> R,
 	{
-		// Get the offset and length of our specific string
-		let start = self.base_offset();
-		let len = self.len();
+		// Get the range of our specific string
+		let range = self.base_range();
 
 		// Get the inner string
-		let s = match Arc::get_mut(&mut self.inner) {
+		let mut inner = mem::take(self).inner.into_backing_cart();
+		let s = match Arc::get_mut(&mut inner) {
 			// If we're unique, slice the parts we don't care about and return
 			Some(s) => {
-				s.truncate(start + len);
-				let _ = s.drain(..start);
+				s.truncate(range.end);
+				let _ = s.drain(..range.start);
 
 				s
 			},
 
 			// Otherwise copy
 			None => {
-				self.inner = Arc::new(self.to_string());
-				Arc::get_mut(&mut self.inner).expect("Should be unique")
+				inner = Arc::new(inner[range].to_owned());
+				Arc::get_mut(&mut inner).expect("Should be unique")
 			},
 		};
-
-		// Since we're invalidating `self.inner`, replace `ptr`
-		// with a dummy value in case of panics.
-		self.ptr = NonNull::from("");
 
 		// Then mutate
 		let output = f(s);
 
 		// And finally, reconstruct ourselves
-		self.ptr = NonNull::from(s.as_str());
+		*self = Self::from(inner);
 
 		output
 	}
@@ -90,23 +81,17 @@ impl ArcStr {
 	/// # Panics
 	/// `s` must be derived from this string, else this method panics.
 	pub fn slice_from_str(&self, s: &str) -> Self {
-		// Get pointer ranges
-		let self_range = self.as_bytes().as_ptr_range();
-		let s_range = s.as_bytes().as_ptr_range();
+		let range = self.substr_range(s).expect("Input was not a substring of this string");
+		let inner = self.inner.map_project_cloned(|s, _| &s[range]);
+		Self { inner }
+	}
 
-		assert!(
-			self_range.contains(&s_range.start) || s_range.start == self_range.end,
-			"String start was before this string"
-		);
-		assert!(
-			self_range.contains(&s_range.end) || s_range.end == self_range.end,
-			"String end was past this string"
-		);
-
-		Self {
-			ptr:   NonNull::from(s),
-			inner: Arc::clone(&self.inner),
-		}
+	/// Slices this string
+	pub fn slice<S>(&self, slice: S) -> Self
+	where
+		str: std::ops::Index<S, Output = str>,
+	{
+		self.slice_from_str(&self[slice])
 	}
 
 	/// Wrapper for [`str::strip_prefix`]
@@ -122,14 +107,6 @@ impl ArcStr {
 		(**self).strip_suffix(suffix).map(|s| self.slice_from_str(s))
 	}
 }
-
-// SAFETY: We're a self-referential `(&str, Arc<String>)`,
-//         which is comprised of `Send + Sync` types.
-unsafe impl Send for ArcStr {}
-
-// SAFETY: See above in [`Send`] impl
-unsafe impl Sync for ArcStr {}
-
 
 impl PartialEq for ArcStr {
 	fn eq(&self, other: &Self) -> bool {
@@ -176,8 +153,7 @@ impl Deref for ArcStr {
 	type Target = str;
 
 	fn deref(&self) -> &Self::Target {
-		// SAFETY: `self.ptr` always contains a valid `str`.
-		unsafe { self.ptr.as_ref() }
+		self.inner.get()
 	}
 }
 
@@ -189,36 +165,35 @@ impl Borrow<str> for ArcStr {
 
 impl From<String> for ArcStr {
 	fn from(s: String) -> Self {
+		Self::from(Arc::new(s))
+	}
+}
+
+impl From<Arc<String>> for ArcStr {
+	fn from(s: Arc<String>) -> Self {
 		Self {
-			ptr:   NonNull::from(s.as_str()),
-			inner: Arc::new(s),
+			inner: Yoke::attach_to_cart(s, |s| &**s),
 		}
 	}
 }
 
 impl From<ArcStr> for String {
 	fn from(s: ArcStr) -> Self {
-		// Get the offset and length of our specific string
-		let start = s.base_offset();
-		let len = s.len();
+		// Get the range of our specific string
+		let range = s.base_range();
 
-		match Arc::try_unwrap(s.inner) {
+		let inner = s.inner.into_backing_cart();
+		match Arc::try_unwrap(inner) {
 			// If we're unique, slice the parts we don't care about and return
 			Ok(mut inner) => {
-				inner.truncate(start + len);
-				let _ = inner.drain(..start);
+				inner.truncate(range.end);
+				let _ = inner.drain(..range.start);
 
 				inner
 			},
 
 			// Otherwise copy
-			Err(inner) => ArcStr { inner, ..s }.to_string(),
+			Err(inner) => inner[range].to_owned(),
 		}
-	}
-}
-
-impl From<&str> for ArcStr {
-	fn from(s: &str) -> Self {
-		s.to_owned().into()
 	}
 }

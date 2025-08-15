@@ -3,31 +3,28 @@
 // Imports
 use {
 	crate::{
-		error::{AppError, ResultMultiple},
-		rules::{AliasOp, Command, DepItem, Exec, Expr, ExprCmpt, OutItem, Rule, Target},
+		AppError,
+		rules::{Command, DepItem, Expr, ExprCmpt, ExprOp, OutItem, Pattern, Rule, Target},
 		util::ArcStr,
 	},
-	indexmap::IndexMap,
 	smallvec::SmallVec,
-	std::{collections::BTreeMap, marker::PhantomData, mem, path::PathBuf, sync::Arc},
+	std::{collections::HashMap, mem, path::PathBuf},
+	zutil_app_error::{AllErrs, Context, app_error},
 };
 
 /// Expander
 #[derive(Debug)]
-pub struct Expander {
-	/// Phantom for `'s`
-	_phantom: PhantomData<&'static ()>,
-}
+pub struct Expander {}
 
 #[expect(clippy::unused_self, reason = "Currently expander doesn't do anything")]
 impl Expander {
 	/// Creates a new expander
 	pub const fn new() -> Self {
-		Self { _phantom: PhantomData }
+		Self {}
 	}
 
 	/// Expands an expression to it's components
-	pub fn expand_expr<T>(&self, expr: &Expr, visitor: &Visitor) -> Result<T, AppError>
+	pub fn expand_expr<T>(&self, expr: &Expr, visitor: &Visitor<'_>) -> Result<T, AppError>
 	where
 		T: TryFromExpr,
 	{
@@ -41,25 +38,11 @@ impl Expander {
 					ExprCmpt::String(s) => expr.push_str(s),
 
 					// If it's a pattern, we visit it
-					// Note: We don't care about the operations on patterns, those are for matching
-					ExprCmpt::Pattern(pat) => match visitor.visit_pat(&pat.name) {
-						// If expanded, just replace it with a string
-						FlowControl::ExpandTo(value) => expr.push_str(value),
-
-						// Else keep on Keep and error on Error
-						FlowControl::Keep => expr.push(cmpt),
-						FlowControl::Error =>
-							return Err(AppError::UnknownPattern {
-								pattern_name: pat.name.to_string(),
-							}),
-					},
-
-					// If it's an alias, we visit and then expand it
-					ExprCmpt::Alias(alias) => match visitor.visit_alias(&alias.name) {
+					ExprCmpt::Ident { name, ops } => match visitor.visit_ident(name) {
 						// If expanded, check if we need to apply any operations
-						FlowControl::ExpandTo(alias_expr) => match alias.ops.is_empty() {
+						FlowControl::ExpandTo(expand_expr) => match ops.is_empty() {
 							// If not, just recursively expand it
-							true => expr.extend(self.expand_expr::<Expr>(alias_expr, visitor)?.cmpts),
+							true => expr.extend(self.expand_expr::<Expr>(&expand_expr, visitor)?.cmpts),
 
 							// Else expand it to a string, then apply all operations
 							// Note: We expand to string even if we don't *need* to to ensure the user doesn't
@@ -67,15 +50,15 @@ impl Expander {
 							//       we can't resolve the operations.
 							false => {
 								// Expand
-								let value = self.expand_expr::<ArcStr>(alias_expr, visitor)?;
+								let value = self.expand_expr::<ArcStr>(&expand_expr, visitor)?;
 
 								// Then apply all
-								let value = alias.ops.iter().try_fold(value, |mut value, &op| {
+								let value = ops.iter().try_fold(value, |mut value, &op| {
 									value
-										.with_mut(|s| self.expand_alias_op(op, s))
-										.map_err(AppError::alias_op(op))?;
+										.with_mut(|s| self.expand_expr_op(op, s))
+										.with_context(|| format!("Unable to apply expression operator `{op}`"))?;
 
-									Ok(value)
+									Ok::<_, AppError>(value)
 								})?;
 
 								expr.push_str(&value);
@@ -84,29 +67,24 @@ impl Expander {
 
 						// Else keep on Keep and error on Error
 						FlowControl::Keep => expr.push(cmpt),
-						FlowControl::Error =>
-							return Err(AppError::UnknownAlias {
-								alias_name: alias.name.to_string(),
-							}),
+						FlowControl::Error => zutil_app_error::bail!("Unknown expression {name:?}"),
 					},
-				};
+				}
 
-				Ok(expr)
+				Ok::<_, AppError>(expr)
 			})?;
 
 		// Then try to parse from the expression
 		T::try_from_expr(expr)
 	}
 
-	/// Expands an alias operation on the value of that alias
-	fn expand_alias_op(&self, op: AliasOp, value: &mut String) -> Result<(), AppError> {
+	/// Expands an expression operation on the value of that expression
+	fn expand_expr_op(&self, op: ExprOp, value: &mut String) -> Result<(), AppError> {
 		match op {
-			AliasOp::DirName => {
+			ExprOp::DirName => {
 				// Get the path and try to pop the last segment
 				let mut path = PathBuf::from(mem::take(value));
-				if !path.pop() {
-					return Err(AppError::PathParent { path });
-				}
+				zutil_app_error::ensure!(path.pop(), "Path had no parent directory {path:?}");
 
 				// Then convert it back to a string
 				// Note: This should technically never fail, since the path was originally
@@ -116,22 +94,16 @@ impl Expander {
 					.into_string()
 					.expect("utf-8 path was no longer utf-8 after getting dir-name");
 			},
-		};
+		}
 
 		Ok(())
 	}
 
 	/// Expands a rule of all it's aliases and patterns
-	pub fn expand_rule<T>(&self, rule: &Rule<Expr>, visitor: &Visitor) -> Result<Rule<T>, AppError>
+	pub fn expand_rule<T>(&self, rule: &Rule<Expr>, visitor: &Visitor<'_>) -> Result<Rule<T>, AppError>
 	where
 		T: TryFromExpr + Ord,
 	{
-		let aliases = rule
-			.aliases
-			.iter()
-			.map(|(name, expr)| Ok((name.clone(), self.expand_expr(expr, visitor)?)))
-			.collect::<ResultMultiple<_>>()?;
-
 		let output = rule
 			.output
 			.iter()
@@ -141,7 +113,7 @@ impl Expander {
 					is_deps_file,
 				}),
 			})
-			.collect::<ResultMultiple<_>>()?;
+			.collect::<AllErrs<_, _>>()?;
 
 		let deps = rule
 			.deps
@@ -152,66 +124,52 @@ impl Expander {
 					is_optional,
 					is_static,
 					is_deps_file,
-				} => Ok::<_, AppError>(DepItem::File {
+				} => Ok(DepItem::File {
 					file: self.expand_expr(file, visitor)?,
 					is_optional,
 					is_static,
 					is_deps_file,
 				}),
-				DepItem::Rule { ref name, ref pats } => {
-					let pats = pats
-						.iter()
-						.map(|(pat, expr)| Ok((self.expand_expr(pat, visitor)?, self.expand_expr(expr, visitor)?)))
-						.collect::<ResultMultiple<_>>()?;
-					Ok::<_, AppError>(DepItem::Rule {
-						name: self.expand_expr(name, visitor)?,
-						pats: Arc::new(pats),
-					})
-				},
+				DepItem::Rule { ref name } => Ok(DepItem::Rule { name: name.clone() }),
 			})
-			.collect::<ResultMultiple<_>>()?;
-
-		let exec = Exec {
-			cmds: rule
-				.exec
-				.cmds
-				.iter()
-				.map(|cmd| self.expand_cmd(cmd, visitor))
-				.collect::<ResultMultiple<_>>()?,
-		};
+			.collect::<AllErrs<_, _>>()?;
 
 		Ok(Rule {
 			name: rule.name.clone(),
-			aliases: Arc::new(aliases),
+			aliases: rule.aliases.clone(),
+			pats: rule.pats.clone(),
 			output,
 			deps,
-			exec,
+			exec: rule.exec.clone(),
 		})
 	}
 
 	/// Expands a command
-	pub fn expand_cmd<T>(&self, cmd: &Command<Expr>, visitor: &Visitor) -> Result<Command<T>, AppError>
+	pub fn expand_cmd<T>(&self, cmd: &Command<Expr>, visitor: &Visitor<'_>) -> Result<Command<T>, AppError>
 	where
 		T: TryFromExpr,
 	{
 		Ok(Command {
-			cwd:  cmd.cwd.as_ref().map(|cwd| self.expand_expr(cwd, visitor)).transpose()?,
-			args: cmd
+			cwd:    cmd.cwd.as_ref().map(|cwd| self.expand_expr(cwd, visitor)).transpose()?,
+			stdout: cmd.stdout.clone(),
+			args:   cmd
 				.args
 				.iter()
 				.map(|arg| self.expand_expr(arg, visitor))
-				.collect::<ResultMultiple<_>>()?,
+				.collect::<AllErrs<_, _>>()?,
 		})
 	}
 
 	/// Expands a target expression
-	pub fn expand_target<T>(&self, target: &Target<Expr>, visitor: &Visitor) -> Result<Target<T>, AppError>
+	pub fn expand_target<T>(&self, target: &Target<Expr>, visitor: &Visitor<'_>) -> Result<Target<T>, AppError>
 	where
 		T: TryFromExpr,
 	{
 		let target = match *target {
 			Target::File { ref file, is_static } => Target::File {
-				file: self.expand_expr(file, visitor).map_err(AppError::expand_expr(file))?,
+				file: self
+					.expand_expr(file, visitor)
+					.with_context(|| format!("Unable to expand expression {file}"))?,
 				is_static,
 			},
 
@@ -221,13 +179,16 @@ impl Expander {
 					.map(|(pat, expr)| {
 						Ok((
 							pat.clone(),
-							self.expand_expr(expr, visitor).map_err(AppError::expand_expr(expr))?,
+							self.expand_expr(expr, visitor)
+								.with_context(|| format!("Unable to expand expression {expr}"))?,
 						))
 					})
-					.collect::<ResultMultiple<_>>()?;
+					.collect::<AllErrs<_, _>>()?;
 				Target::Rule {
-					rule: self.expand_expr(rule, visitor).map_err(AppError::expand_expr(rule))?,
-					pats: Arc::new(pats),
+					rule: self
+						.expand_expr(rule, visitor)
+						.with_context(|| format!("Unable to expand expression {rule}"))?,
+					pats,
 				}
 			},
 		};
@@ -251,7 +212,7 @@ pub enum FlowControl<T> {
 
 impl<T> FlowControl<T> {
 	/// Converts a `&FlowControl<T>` to `FlowControl<&T>`
-	pub const fn as_ref(&self) -> FlowControl<&T> {
+	pub const fn _as_ref(&self) -> FlowControl<&T> {
 		match self {
 			Self::ExpandTo(value) => FlowControl::ExpandTo(value),
 			Self::Keep => FlowControl::Keep,
@@ -273,76 +234,63 @@ impl TryFromExpr for Expr {
 
 impl TryFromExpr for ArcStr {
 	fn try_from_expr(expr: Expr) -> Result<Self, AppError> {
-		expr.try_into_string().map_err(|expr| AppError::UnresolvedAliasOrPats {
-			expr:       expr.to_string(),
-			expr_cmpts: expr.cmpts.into_iter().map(|cmpt| cmpt.to_string()).collect(),
+		expr.try_into_string().map_err(|expr| {
+			app_error!(
+				"Expression had unresolved aliases or patterns: {expr} ({:?})",
+				expr.cmpts.iter().map(ExprCmpt::to_string).collect::<Vec<_>>()
+			)
 		})
 	}
 }
 
 /// Visitor for [`Expander`]
 #[derive(Clone, Debug)]
-pub struct Visitor {
+pub struct Visitor<'a> {
 	/// All aliases, in order to check
-	aliases: SmallVec<[Arc<IndexMap<ArcStr, Expr>>; 2]>,
+	aliases: SmallVec<[&'a HashMap<ArcStr, Expr>; 2]>,
 
-	/// All patterns, in order to check
-	pats: SmallVec<[Arc<BTreeMap<ArcStr, ArcStr>>; 1]>,
+	/// All unresolved patterns, in order to check
+	unresolved_pats: SmallVec<[&'a HashMap<ArcStr, Pattern>; 2]>,
 
-	/// Default alias action
-	default_alias: FlowControl<Expr>,
-
-	/// Default pattern action
-	default_pat: FlowControl<ArcStr>,
+	/// All resolved patterns
+	resolved_pats: SmallVec<[(ArcStr, ArcStr); 1]>,
 }
 
-impl Visitor {
+impl<'a> Visitor<'a> {
 	/// Creates a new visitor with aliases and patterns
-	pub fn new<'a, A, P>(aliases: A, pats: P) -> Self
+	pub fn new<A, UP, RP>(aliases: A, unresolved_pats: UP, resolved_pats: RP) -> Self
 	where
-		A: IntoIterator<Item = &'a Arc<IndexMap<ArcStr, Expr>>>,
-		P: IntoIterator<Item = &'a Arc<BTreeMap<ArcStr, ArcStr>>>,
+		A: IntoIterator<Item = &'a HashMap<ArcStr, Expr>>,
+		UP: IntoIterator<Item = &'a HashMap<ArcStr, Pattern>>,
+		RP: IntoIterator<Item = SmallVec<[(ArcStr, ArcStr); 1]>>,
 	{
 		Self {
-			aliases:       aliases.into_iter().map(Arc::clone).collect(),
-			pats:          pats.into_iter().map(Arc::clone).collect(),
-			default_alias: FlowControl::Error,
-			default_pat:   FlowControl::Error,
+			aliases:         aliases.into_iter().collect(),
+			unresolved_pats: unresolved_pats.into_iter().collect(),
+			resolved_pats:   resolved_pats.into_iter().flatten().collect(),
 		}
 	}
 
-	/// Creates a visitor from aliases
-	pub fn from_aliases<'a, A>(aliases: A) -> Self
-	where
-		A: IntoIterator<Item = &'a Arc<IndexMap<ArcStr, Expr>>>,
-	{
-		Self::new(aliases, [])
-	}
+	/// Visits an identifier
+	fn visit_ident(&self, name: &str) -> FlowControl<Expr> {
+		for (pat_name, pat) in &self.resolved_pats {
+			if name == &**pat_name {
+				return FlowControl::ExpandTo(Expr::string(pat.clone()));
+			}
+		}
 
-	/// Sets the default pattern
-	pub fn with_default_pat(self, default_pat: FlowControl<ArcStr>) -> Self {
-		Self { default_pat, ..self }
-	}
+		for pats in &self.unresolved_pats {
+			if pats.contains_key(name) {
+				return FlowControl::Keep;
+			}
+		}
 
-	/// Visits an alias
-	fn visit_alias(&self, alias_name: &str) -> FlowControl<&Expr> {
 		for aliases in &self.aliases {
-			if let Some(alias) = aliases.get(alias_name) {
-				return FlowControl::ExpandTo(alias);
+			if let Some(alias) = aliases.get(name) {
+				return FlowControl::ExpandTo(alias.clone());
 			}
 		}
 
-		self.default_alias.as_ref()
-	}
-
-	/// Visits a pattern
-	fn visit_pat(&self, pat_name: &str) -> FlowControl<&ArcStr> {
-		for pats in &self.pats {
-			if let Some(pat) = pats.get(pat_name) {
-				return FlowControl::ExpandTo(pat);
-			}
-		}
-
-		self.default_pat.as_ref()
+		FlowControl::Error
 	}
 }

@@ -1,0 +1,17 @@
+default "a.out";
+
+rule a {
+	out "a.out";
+
+	dep "b.out";
+
+	exec "touch" "a.out";
+}
+
+rule b {
+	out "b.out";
+
+	dep "a.out";
+
+	exec "touch" "b.out";
+}

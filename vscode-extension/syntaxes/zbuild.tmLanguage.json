@@ -1,0 +1,49 @@
+{
+	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+	"name": "zbuild",
+	"patterns": [
+		{ "include": "#keywords" },
+		{ "include": "#strings" },
+		{ "include": "#comment" }
+	],
+	"repository": {
+		"keywords": {
+			"patterns": [
+				{
+					"name": "keyword.control.zbuild",
+					"match": "="
+				},
+				{
+					"name": "keyword.other.zbuild",
+					"match": "\\b(alias|args|cwd|default|deps_file|dep|exec|include|non_empty|opt|out|pat|rule|static|stdout)\\b"
+				},
+				{
+					"name": "variable.name",
+					"match": "\\p{XID_Start}\\p{XID_Continue}*"
+				}
+			]
+		},
+		"strings": {
+			"name": "string.quoted.double.zbuild",
+			"begin": "\"",
+			"end": "\""
+		},
+		"comment": {
+			"patterns": [
+				{ "include": "#comment-block" },
+				{ "include": "#comment-line" }
+			]
+		},
+		"comment-block": {
+			"name": "comment.block.zbuild",
+			"begin": "###",
+			"end": "###"
+		},
+		"comment-line": {
+			"name": "comment.line.zbuild",
+			"begin": "#",
+			"end": "$"
+		}
+	},
+	"scopeName": "source.zbuild"
+}

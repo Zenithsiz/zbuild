@@ -8,11 +8,9 @@
 
 // Imports
 use {
-	crate::{build, rules::Target, util::ArcStr, AppError, Builder},
-	anyhow::Context,
+	crate::{AppError, Builder, build, rules::Target, util::ArcStr},
 	dashmap::{DashMap, DashSet},
-	futures::{stream::FuturesUnordered, StreamExt},
-	notify::Watcher as _,
+	futures::{StreamExt, stream::FuturesUnordered},
 	notify_debouncer_full::Debouncer,
 	std::{
 		io,
@@ -22,6 +20,7 @@ use {
 	},
 	tokio::sync::mpsc,
 	tokio_stream::wrappers::ReceiverStream,
+	zutil_app_error::Context,
 };
 
 /// A reverse dependency
@@ -36,8 +35,8 @@ struct RevDep {
 
 /// Target watcher
 pub struct Watcher {
-	/// Watcher
-	watcher: Debouncer<notify::RecommendedWatcher, notify_debouncer_full::FileIdMap>,
+	/// Inner watcher
+	inner: Debouncer<notify::RecommendedWatcher, notify_debouncer_full::RecommendedCache>,
 
 	/// Reverse dependencies
 	rev_deps: DashMap<PathBuf, RevDep>,
@@ -62,23 +61,17 @@ impl Watcher {
 				for fs_event in fs_events {
 					tracing::trace!(?fs_event, "Watcher fs event");
 
-					#[expect(
-						let_underscore_drop,
-						clippy::let_underscore_must_use,
-						reason = "We don't care if it succeeded or not"
-					)]
 					let _: Result<(), _> = fs_event_tx.blocking_send(fs_event);
 				},
 			Err(errs) =>
-				for err in errs {
-					tracing::warn!(err=?anyhow::Error::from(err), "Error while watching");
+				for err in &errs {
+					tracing::warn!(err=?AppError::from(err), "Error while watching");
 				},
 		})
-		.context("Unable to create file watcher")
-		.map_err(AppError::Other)?;
+		.context("Unable to create file watcher")?;
 
 		Ok(Self {
-			watcher,
+			inner: watcher,
 			rev_deps: DashMap::new(),
 			fs_event_stream: ReceiverStream::new(fs_event_rx),
 			builder_event_rx,
@@ -124,7 +117,7 @@ impl Watcher {
 								// TODO: Is this enough? What if the parent directory also gets deleted?
 								//       should we watch directories until the root?
 								tracing::trace!(?dep_path, "Starting to watch path");
-								if let Err(err) = self.watcher.watcher().watch(
+								if let Err(err) = self.inner.watch(
 									dep_path.parent().unwrap_or(&dep_path),
 									notify::RecursiveMode::NonRecursive,
 								) {
@@ -243,7 +236,6 @@ impl Watcher {
 					dep_parents
 						.iter()
 						.map(|target| async {
-							#[expect(clippy::let_underscore_must_use, reason = "We don't care if the build succeeds")]
 							let _: Result<(), _> = crate::build_target(builder, target, ignore_missing).await;
 						})
 						.collect::<FuturesUnordered<_>>()

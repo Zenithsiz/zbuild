@@ -11,26 +11,22 @@ pub use self::{lock::BuildResult, reason::BuildReason};
 use {
 	self::lock::{BuildLock, BuildLockDepGuard},
 	crate::{
-		error::ResultMultiple,
-		expand,
-		rules::{Command, DepItem, Expr, ExprTree, OutItem, Rule, Target},
-		util::{self, ArcStr},
 		AppError,
 		Expander,
 		Rules,
+		error::{self, AppErrorData},
+		expand,
+		rules::{Command, DepItem, Expr, ExprTree, OutItem, Rule, Target},
+		util::{self, ArcStr},
 	},
-	anyhow::Context,
 	dashmap::DashMap,
-	futures::{stream::FuturesUnordered, StreamExt},
-	indexmap::IndexMap,
+	futures::{StreamExt, TryStreamExt, stream::FuturesUnordered},
+	indicatif::ProgressBar,
 	itertools::Itertools,
-	std::{
-		collections::{BTreeMap, HashMap},
-		future::Future,
-		sync::Arc,
-		time::SystemTime,
-	},
-	tokio::{fs, process, sync::Semaphore, task},
+	smallvec::SmallVec,
+	std::{collections::HashMap, fmt, future::Future, process::Stdio, sync::Arc, time::SystemTime},
+	tokio::{fs, io::AsyncReadExt, process, sync::Semaphore, task},
+	zutil_app_error::{AllErrs, Context, app_error},
 };
 
 /// Event
@@ -53,7 +49,7 @@ pub struct TargetRule {
 	name: ArcStr,
 
 	/// Patterns
-	pats: Arc<BTreeMap<ArcStr, ArcStr>>,
+	pats: SmallVec<[(ArcStr, ArcStr); 1]>,
 }
 
 /// Builder
@@ -87,6 +83,12 @@ pub struct Builder {
 
 	/// If the execution semaphore should be closed on the first error
 	stop_builds_on_first_err: bool,
+
+	/// Whether we should always build rules, even if their outputs are up to date
+	always_build: bool,
+
+	/// Progress bar
+	progress_bar: Option<ProgressBar>,
 }
 
 impl Builder {
@@ -96,6 +98,8 @@ impl Builder {
 		rules: Rules,
 		expander: Expander,
 		stop_builds_on_first_err: bool,
+		always_build: bool,
+		progress_bar: Option<ProgressBar>,
 	) -> Result<Self, AppError> {
 		let (event_tx, event_rx) = async_broadcast::broadcast(jobs);
 		let event_rx = event_rx.deactivate();
@@ -110,22 +114,21 @@ impl Builder {
 				let output_file = match output {
 					OutItem::File { file: output_file, .. } => output_file,
 				};
-				let expand_visitor = expand::Visitor::from_aliases([&rule.aliases, &rules.aliases])
-					.with_default_pat(expand::FlowControl::Keep);
+				let expand_visitor =
+					expand::Visitor::new([&rule.aliases, &rules.aliases], [&rule.pats, &rules.pats], []);
 				let output_file = expander.expand_expr(output_file, &expand_visitor)?;
 
 
 				// Then try to insert it
 				if let Some(prev_rule_name) = rule_output_tree
-					.insert(&output_file, rule_name.clone())
-					.context("Unable to add rule output to tree")
-					.map_err(AppError::Other)?
+					.insert(&output_file, rule_name.clone(), &[&rule.pats, &rules.pats])
+					.context("Unable to add rule output to tree")?
 				{
-					return Err(AppError::Other(anyhow::anyhow!(
+					return Err(app_error!(
 						"Multiple rules match the same output file: {output_file}\n  first rule: {prev_rule_name}\n  \
 						 second rule: {rule_name}"
-					)));
-				};
+					));
+				}
 			}
 		}
 
@@ -138,11 +141,13 @@ impl Builder {
 			rule_output_tree,
 			exec_semaphore: Semaphore::new(jobs),
 			stop_builds_on_first_err,
+			always_build,
+			progress_bar,
 		})
 	}
 
 	/// Returns all build results
-	pub async fn build_results(&self) -> IndexMap<TargetRule, Option<Result<BuildResult, ()>>> {
+	pub async fn build_results(&self) -> HashMap<TargetRule, Option<Result<BuildResult, ()>>> {
 		self.rules_lock
 			.iter()
 			.map(|rule_lock| async move { (rule_lock.key().clone(), rule_lock.value().res().await) })
@@ -177,10 +182,7 @@ impl Builder {
 			Target::File { ref file, .. } => match self.rule_output_tree.find(file) {
 				Some((name, pats)) => {
 					tracing::trace!(%target, %name, "Found target rule");
-					TargetRule {
-						name,
-						pats: Arc::new(pats),
-					}
+					TargetRule { name, pats }
 				},
 
 				None => return Ok(None),
@@ -189,7 +191,7 @@ impl Builder {
 			// If we got a rule name with patterns, find it and replace all patterns
 			Target::Rule { ref rule, ref pats } => TargetRule {
 				name: rule.clone(),
-				pats: Arc::clone(pats),
+				pats: pats.clone(),
 			},
 		};
 
@@ -198,14 +200,15 @@ impl Builder {
 			.rules
 			.rules
 			.get(&*target_rule.name)
-			.ok_or_else(|| AppError::UnknownRule {
-				rule_name: (*target_rule.name).to_owned(),
-			})?;
-		let expand_visitor = expand::Visitor::new([&rule.aliases, &self.rules.aliases], [&target_rule.pats]);
+			.with_context(|| format!("Unknown rule {:?}", target_rule.name))?;
+		let expand_visitor =
+			expand::Visitor::new([&rule.aliases, &self.rules.aliases], [&rule.pats, &self.rules.pats], [
+				target_rule.pats.clone(),
+			]);
 		let rule = self
 			.expander
 			.expand_rule(rule, &expand_visitor)
-			.map_err(AppError::expand_rule(&*rule.name))?;
+			.with_context(|| format!("Unable to expand rule {:?}", rule.name))?;
 
 		Ok(Some((rule, target_rule)))
 	}
@@ -239,34 +242,18 @@ impl Builder {
 		reason: BuildReason,
 	) -> Result<(BuildResult, Option<BuildLockDepGuard>), AppError> {
 		// Expand the target
-		let expand_visitor = expand::Visitor::from_aliases([&self.rules.aliases]);
+		let expand_visitor = expand::Visitor::new([&self.rules.aliases], [&self.rules.pats], []);
 		let target = self
 			.expander
 			.expand_target(target, &expand_visitor)
-			.map_err(AppError::expand_target(target))?;
+			.with_context(|| format!("Unable to expand target {target}"))?;
 
 		// Then build
 		self.build(&target, ignore_missing, reason).await
 	}
 
 	/// Builds a target
-	// TODO: Remove this wrapper function once the compiler behaves.
-	#[expect(
-		clippy::manual_async_fn,
-		reason = "For some reason, without this wrapper, the compiler
-			can't see that `build_inner`'s future is `Send`"
-	)]
-	pub fn build<'a>(
-		self: &'a Arc<Self>,
-		target: &'a Target<ArcStr>,
-		ignore_missing: bool,
-		reason: BuildReason,
-	) -> impl Future<Output = Result<(BuildResult, Option<BuildLockDepGuard>), AppError>> + Send + 'a {
-		async move { self.build_inner(target, ignore_missing, reason).await }
-	}
-
-	/// Inner function for [`Builder::build`]
-	pub async fn build_inner<'a>(
+	pub async fn build<'a>(
 		self: &'a Arc<Self>,
 		target: &'a Target<ArcStr>,
 		ignore_missing: bool,
@@ -286,7 +273,9 @@ impl Builder {
 			match *target {
 				Target::File { ref file, .. } => match fs::symlink_metadata(&**file).await {
 					Ok(metadata) => {
-						let build_time = metadata.modified().map_err(AppError::get_file_modified_time(&**file))?;
+						let build_time = metadata
+							.modified()
+							.with_context(|| format!("Unable to get file modified time: {file:?}"))?;
 						tracing::trace!(%target, ?build_time, "Found target file");
 						return Ok((
 							BuildResult {
@@ -297,7 +286,7 @@ impl Builder {
 						));
 					},
 					Err(_) if ignore_missing => {
-						tracing::debug!(?file, "Ignoring missing target file");
+						tracing::info!(?file, "Ignoring missing target file");
 						return Ok((
 							BuildResult {
 								// Note: We simply pretend the file was built right now
@@ -309,10 +298,8 @@ impl Builder {
 						));
 					},
 					Err(err) =>
-						return Err(AppError::MissingFile {
-							file_path: (**file).into(),
-							source:    err,
-						}),
+						do yeet AppError::new(&err)
+							.context(format!("Missing file {file:?} and no rule to build it found")),
 				},
 				// Note: If `target_rule` returns `Err` if this was a rule, so we can never reach here
 				Target::Rule { .. } => unreachable!(),
@@ -322,7 +309,7 @@ impl Builder {
 		// Get the built lock, or create it
 		let build_lock = self
 			.rules_lock
-			.entry(target_rule)
+			.entry(target_rule.clone())
 			.or_insert_with(BuildLock::new)
 			.clone();
 
@@ -331,12 +318,9 @@ impl Builder {
 			// First check if we're done with a dependency lock
 			let build_guard = build_lock.lock_dep().await;
 			if let Some(res) = build_guard.res() {
-				return res
-					.map(|res| (res, Some(build_guard)))
-					.map_err(|()| AppError::BuildTarget {
-						source: None,
-						target: target.to_string(),
-					});
+				return res.map(|res| (res, Some(build_guard))).map_err(|()| {
+					AppError::msg_with_data("Unable to build target {target}", AppErrorData { should_ignore: true })
+				});
 			}
 
 			// Otherwise, try to upgrade to a build lock
@@ -347,9 +331,8 @@ impl Builder {
 			//       the writer should have priority, so this shouldn't result in much
 			//       waiting for them.
 			let res = build_guard.try_upgrade_into_build().await;
-			match res {
-				Ok(build_guard) => break build_guard,
-				Err(_) => continue,
+			if let Ok(build_guard) = res {
+				break build_guard;
 			}
 		};
 
@@ -358,11 +341,30 @@ impl Builder {
 		let res = task::spawn({
 			let this = Arc::clone(self);
 			let target = Arc::clone(&target);
-			async move { this.build_unchecked(&target, &rule, ignore_missing, reason).await }
+
+			// TODO: Remove this wrapper function once the compiler behaves.
+			#[expect(
+				clippy::manual_async_fn,
+				reason = "For some reason, without this wrapper, the compiler can't see that `build_inner`'s future \
+				          is `Send` without explicitly annotating it in the return type"
+			)]
+			fn build_inner(
+				this: Arc<Builder>,
+				target: Arc<Target<ArcStr>>,
+				rule: Rule<ArcStr>,
+				ignore_missing: bool,
+				reason: BuildReason,
+				target_rule: TargetRule,
+			) -> impl Future<Output = Result<BuildResult, AppError>> + Send {
+				async move {
+					this.build_unchecked(&target, &rule, ignore_missing, reason, &target_rule)
+						.await
+				}
+			}
+			build_inner(this, target, rule, ignore_missing, reason, target_rule)
 		})
 		.await
-		.context("Unable to join task")
-		.map_err(AppError::Other)?;
+		.context("Unable to join task")?;
 
 		match res {
 			Ok(res) => {
@@ -373,10 +375,10 @@ impl Builder {
 			Err(err) => {
 				// If we should, close the exec semaphore to ensure we exit as early as possible
 				// Note: This check is racy, but it's fine to print this warning multiple times. We just don't want
-				//       to spam the user, since all further errors will likely caused by `AppError::ExecSemaphoreClosed`,
+				//       to spam the user, since all further errors will likely caused by the semaphore closing,
 				//       while the first few are the useful ones with the reason why the execution semaphore is being closed.
 				if self.stop_builds_on_first_err && !self.exec_semaphore.is_closed() {
-					tracing::debug!(err=%err.pretty(), "Stopping all future builds due to failure of target {target}");
+					tracing::debug!(err=%error::pretty(&err), "Stopping all future builds due to failure of target {target}");
 					self.exec_semaphore.close();
 				}
 
@@ -387,14 +389,77 @@ impl Builder {
 	}
 
 	/// Builds a target without checking if the target is already being built.
-	#[expect(clippy::too_many_lines, reason = "TODO: Split this function onto smaller ones")]
 	async fn build_unchecked(
 		self: &Arc<Self>,
 		target: &Target<ArcStr>,
 		rule: &Rule<ArcStr>,
 		ignore_missing: bool,
 		reason: BuildReason,
+		target_rule: &TargetRule,
 	) -> Result<BuildResult, AppError> {
+		if let Some(progress_bar) = &self.progress_bar {
+			progress_bar.inc_length(1);
+		}
+
+		// Build all dependencies
+		let deps = self.build_deps_unchecked(target, rule, ignore_missing, reason).await?;
+
+		let deps_last_build_time = deps
+			.iter()
+			.filter(|(dep_target, ..)| !dep_target.is_static())
+			.map(|(_, dep_res, _)| dep_res.build_time)
+			.max();
+		tracing::trace!(%target, ?rule.name, ?deps_last_build_time, ?deps, "Built target rule dependencies");
+
+		// Afterwards check the last time we've built the rule and compare it with
+		// the dependency build times.
+		let rule_last_build_time = self::rule_last_build_time(rule).await;
+		let needs_rebuilt = match (deps_last_build_time, &rule_last_build_time) {
+			// If any files were missing, or we had no outputs, build
+			(_, Err(_) | Ok(None)) => true,
+
+			// If no dependencies and all outputs exist, don't rebuild
+			(None, Ok(_)) => false,
+
+			// If we have dependencies and outputs, rebuild if the dependencies are
+			// newer than the outputs
+			(Some(deps_last_build_time), Ok(Some(rule_last_build_time))) =>
+				deps_last_build_time > *rule_last_build_time,
+		};
+		let needs_rebuilt = needs_rebuilt || self.always_build;
+
+		// Then rebuild, if needed
+		if needs_rebuilt {
+			tracing::trace!(%target, ?rule.name, ?deps_last_build_time, ?rule_last_build_time, "Rebuilding target rule");
+			self.rebuild_rule(rule, target_rule)
+				.await
+				.with_context(|| format!("Unable to build rule {:?}", rule.name))?;
+		}
+
+		// Then get the build time
+		// Note: If we don't have any outputs, just use the current time as the build time
+		let cur_build_time = self::rule_last_build_time(rule).await?.unwrap_or_else(SystemTime::now);
+		let res = BuildResult {
+			build_time: cur_build_time,
+			built:      needs_rebuilt,
+		};
+
+		if let Some(progress_bar) = &self.progress_bar {
+			progress_bar.inc(1);
+		}
+
+		Ok(res)
+	}
+
+	/// Builds all dependencies of `target`
+	#[expect(clippy::too_many_lines, reason = "TODO: Split this function onto smaller ones")]
+	async fn build_deps_unchecked(
+		self: &Arc<Self>,
+		target: &Target<ArcStr>,
+		rule: &Rule<ArcStr>,
+		ignore_missing: bool,
+		reason: BuildReason,
+	) -> Result<Vec<(Target<ArcStr>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {
 		/// Dependency
 		#[derive(Clone, Debug)]
 		enum Dep {
@@ -409,10 +474,7 @@ impl Builder {
 			},
 
 			/// Rule
-			Rule {
-				name: ArcStr,
-				pats: Arc<BTreeMap<ArcStr, ArcStr>>,
-			},
+			Rule { name: ArcStr },
 		}
 
 		// Gather all normal dependencies
@@ -434,19 +496,14 @@ impl Builder {
 						is_optional,
 						exists: util::fs_try_exists_symlink(&**file)
 							.await
-							.map_err(AppError::check_file_exists(&**file))?,
+							.with_context(|| format!("Unable to check if file exists {file:?}"))?,
 					}),
-					DepItem::Rule { ref name, ref pats } => Ok(Dep::Rule {
-						name: name.clone(),
-						pats: Arc::clone(pats),
-					}),
+					DepItem::Rule { ref name } => Ok(Dep::Rule { name: name.clone() }),
 				}
 			})
 			.collect::<FuturesUnordered<_>>()
-			.collect::<Vec<_>>()
-			.await
-			.into_iter()
-			.collect::<ResultMultiple<Vec<_>>>()?;
+			.collect::<AllErrs<Vec<_>, _>>()
+			.await?;
 
 		// And all output dependencies
 		#[expect(
@@ -469,20 +526,17 @@ impl Builder {
 						is_optional:  false,
 						exists:       util::fs_try_exists_symlink(&**file)
 							.await
-							.map_err(AppError::check_file_exists(&**file))?,
+							.with_context(|| format!("Unable to check if file exists {file:?}"))?,
 					})),
 					_ => Ok(None),
 				}
 			})
 			.collect::<FuturesUnordered<_>>()
 			.filter_map(move |res| async move { res.transpose() })
-			.collect::<Vec<_>>()
-			.await
-			.into_iter()
-			.collect::<ResultMultiple<Vec<_>>>()?;
+			.collect::<AllErrs<Vec<_>, _>>()
+			.await?;
 
 		// Then build all dependencies, as well as any dependency files
-		// TODO: Don't collect like 3 times during this
 		let deps = util::chain!(normal_deps, out_deps)
 			.map(|dep| {
 				tracing::trace!(%target, ?rule.name, ?dep, "Found target rule dependency");
@@ -504,10 +558,10 @@ impl Builder {
 							is_static,
 						}),
 
-						// If a rule, always build
-						Dep::Rule { ref name, ref pats } => Some(Target::Rule {
+						Dep::Rule { ref name } => Some(Target::Rule {
 							rule: name.clone(),
-							pats: Arc::clone(pats),
+							// TODO: Allow specifying the patterns here?
+							pats: SmallVec::new(),
 						}),
 					};
 
@@ -521,7 +575,7 @@ impl Builder {
 									reason.with_target(target.clone()),
 								)
 								.await
-								.map_err(AppError::build_target(&dep_target))?;
+								.with_context(|| format!("Unable to build target {dep_target}"))?;
 							tracing::trace!(%target, ?rule.name, ?dep, ?res, "Built target rule dependency");
 
 							self.send_event(|| Event::TargetDepBuilt {
@@ -537,7 +591,6 @@ impl Builder {
 					};
 
 					// If the dependency if a dependency deps file or an output deps file (and exists), build it's dependencies too
-					#[expect(clippy::wildcard_enum_match_arm, reason = "We only care about some variants")]
 					let dep_deps = match &dep {
 						// Non-optional we don't check if they exist, so that an error
 						// pops up if they don't.
@@ -565,65 +618,24 @@ impl Builder {
 						} => self
 							.build_deps_file(target, file, rule, ignore_missing, reason)
 							.await
-							.map_err(AppError::build_deps_file(&**file))?,
-						_ => vec![],
+							.with_context(|| format!("Unable to build dependencies file {file:?}"))?,
+						Dep::File { .. } | Dep::Rule { .. } => vec![],
 					};
+					tracing::trace!(%target, ?rule.name, ?dep, ?dep_res, ?dep_deps, "Built target rule dependency dependencies");
 
-					let deps = util::chain!(dep_res, dep_deps.into_iter()).collect::<Vec<_>>();
-					tracing::trace!(%target, ?rule.name, ?dep, ?deps, "Built target rule dependency dependencies");
+					let deps = util::chain!(dep_res, dep_deps.into_iter());
 
-					Ok(deps)
+					Ok::<_, AppError>(deps)
 				}
 			})
 			.collect::<FuturesUnordered<_>>()
-			.collect::<Vec<_>>()
-			.await
-			.into_iter()
-			.collect::<ResultMultiple<Vec<_>>>()?
-			.into_iter()
-			.flatten()
-			.collect::<Vec<_>>();
+			.map_ok(|deps| deps.map(Ok))
+			.map_ok(futures::stream::iter)
+			.try_flatten()
+			.collect::<AllErrs<Vec<_>, _>>()
+			.await?;
 
-		let deps_last_build_time = deps
-			.iter()
-			.filter(|(dep_target, ..)| !dep_target.is_static())
-			.map(|(_, dep_res, _)| dep_res.build_time)
-			.max();
-		tracing::trace!(%target, ?rule.name, ?deps_last_build_time, ?deps, "Built target rule dependencies");
-
-		// Afterwards check the last time we've built the rule and compare it with
-		// the dependency build times.
-		let rule_last_build_time = self::rule_last_build_time(rule).await;
-		let needs_rebuilt = match (deps_last_build_time, &rule_last_build_time) {
-			// If any files were missing, or we had no outputs, build
-			(_, Err(_) | Ok(None)) => true,
-
-			// If no dependencies and all outputs exist, don't rebuild
-			(None, Ok(_)) => false,
-
-			// If we have dependencies and outputs, rebuild if the dependencies are
-			// newer than the outputs
-			(Some(deps_last_build_time), Ok(Some(rule_last_build_time))) =>
-				deps_last_build_time > *rule_last_build_time,
-		};
-
-		// Then rebuild, if needed
-		if needs_rebuilt {
-			tracing::trace!(%target, ?rule.name, ?deps_last_build_time, ?rule_last_build_time, "Rebuilding target rule");
-			self.rebuild_rule(rule)
-				.await
-				.map_err(AppError::build_rule(&*rule.name))?;
-		}
-
-		// Then get the build time
-		// Note: If we don't have any outputs, just use the current time as the build time
-		let cur_build_time = self::rule_last_build_time(rule).await?.unwrap_or_else(SystemTime::now);
-		let res = BuildResult {
-			build_time: cur_build_time,
-			built:      needs_rebuilt,
-		};
-
-		Ok(res)
+		Ok(deps)
 	}
 
 	/// Builds all dependencies of a `deps` file.
@@ -645,13 +657,12 @@ impl Builder {
 		let matches_rule = |output: &str| match rule.output.is_empty() {
 			// If there were no outputs, make sure it matches the rule name
 			// TODO: Seems kinda weird for it to match the rule name, but not sure how else to check this here
-			true => (output == &*rule.name)
-				.then_some(())
-				.ok_or_else(|| AppError::DepFileMissingRuleName {
-					deps_file_path: deps_file.into(),
-					rule_name:      rule.name.to_string(),
-					dep_output:     output.to_owned(),
-				}),
+			true => (output == &*rule.name).then_some(()).ok_or_else(|| {
+				app_error!(
+					"Dependencies file {deps_file:?} is missing the rule name {:?}, found {output:?}",
+					rule.name
+				)
+			}),
 
 			// If there were any output, make sure the dependency file applies to one of them
 			false => rule
@@ -661,10 +672,11 @@ impl Builder {
 					OutItem::File { file, .. } => &**file == output,
 				})
 				.then_some(())
-				.ok_or_else(|| AppError::DepFileMissingOutputs {
-					deps_file_path: deps_file.into(),
-					rule_outputs:   rule.output.iter().map(OutItem::to_string).collect(),
-					dep_output:     output.to_owned(),
+				.ok_or_else(|| {
+					app_error!(
+						"Dependencies file {deps_file:?} is missing any output of {:?}, found {output:?}",
+						rule.output.iter().map(OutItem::to_string).collect::<Vec<_>>()
+					)
 				}),
 		};
 
@@ -676,14 +688,10 @@ impl Builder {
 		match oks.is_empty() {
 			true => {
 				// If we had no matching outputs, try to return all errors
-				errs.into_iter()
-					.map(|(_, err)| Err(err))
-					.collect::<ResultMultiple<()>>()?;
+				errs.into_iter().map(|(_, err)| Err(err)).collect::<AllErrs<(), _>>()?;
 
 				// If no errors existed, return an error for that
-				return Err(AppError::DepFileEmpty {
-					deps_file_path: deps_file.into(),
-				});
+				zutil_app_error::bail!("Dependencies file {deps_file:?} had no dependencies");
 			},
 
 			// Otherwise, just log and remove all errors
@@ -691,7 +699,7 @@ impl Builder {
 				for (output, err) in errs {
 					let _: Vec<_> = deps.remove(&output).expect("Dependency should exist");
 
-					tracing::warn!(target=%parent_target, ?rule.name, err=%err.pretty(), "Ignoring unknown output in dependency file");
+					tracing::warn!(target=%parent_target, ?rule.name, err=%error::pretty(&err), "Ignoring unknown output in dependency file");
 				},
 		}
 
@@ -711,7 +719,7 @@ impl Builder {
 					let (res, dep_guard) = self
 						.build(&dep_target, ignore_missing, reason.with_target(parent_target.clone()))
 						.await
-						.map_err(AppError::build_target(&dep_target))?;
+						.with_context(|| format!("Unable to build target {dep_target}"))?;
 
 					self.send_event(|| Event::TargetDepBuilt {
 						target: parent_target.clone(),
@@ -723,16 +731,14 @@ impl Builder {
 				}
 			})
 			.collect::<FuturesUnordered<_>>()
-			.collect::<Vec<_>>()
-			.await
-			.into_iter()
-			.collect::<ResultMultiple<_>>()?;
+			.collect::<AllErrs<_, _>>()
+			.await?;
 
 		Ok(deps_res)
 	}
 
 	/// Rebuilds a rule
-	pub async fn rebuild_rule(&self, rule: &Rule<ArcStr>) -> Result<(), AppError> {
+	pub async fn rebuild_rule(&self, rule: &Rule<ArcStr>, target_rule: &TargetRule) -> Result<(), AppError> {
 		// Lock the semaphore
 		// Note: If we locked it per-command, we could exit earlier
 		//       when closed, but that would break some executions.
@@ -742,11 +748,12 @@ impl Builder {
 		//       be in a "bad state", and since all the modification dates
 		//       match it wouldn't be rebuilt.
 		let Ok(_permit) = self.exec_semaphore.acquire().await else {
-			do yeet AppError::ExecSemaphoreClosed {};
+			do yeet AppError::msg_with_data("Execution semaphore was closed", AppErrorData { should_ignore: true });
 		};
 
+		let mut stdout_aliases = HashMap::new();
 		for cmd in &rule.exec.cmds {
-			self.exec_cmd(rule, cmd).await?;
+			self.exec_cmd(rule, cmd, target_rule, &mut stdout_aliases).await?;
 		}
 
 		Ok(())
@@ -754,11 +761,28 @@ impl Builder {
 
 	/// Executes `cmd`.
 	#[expect(unused_results, reason = "Due to the builder pattern of `Command`")]
-	async fn exec_cmd(&self, rule: &Rule<ArcStr>, cmd: &Command<ArcStr>) -> Result<(), AppError> {
+	async fn exec_cmd(
+		&self,
+		rule: &Rule<ArcStr>,
+		cmd: &Command<Expr>,
+		target_rule: &TargetRule,
+		stdout_aliases: &mut HashMap<ArcStr, Expr>,
+	) -> Result<(), AppError> {
+		let expand_visitor = expand::Visitor::new(
+			[stdout_aliases, &rule.aliases, &self.rules.aliases],
+			[&rule.pats, &self.rules.pats],
+			[target_rule.pats.clone()],
+		);
+		let cmd = self
+			.expander
+			.expand_cmd::<ArcStr>(cmd, &expand_visitor)
+			.with_context(|| format!("Unable to expand rule command {:?}", rule.name))?;
+
 		// Get the program name
-		let (program, args) = cmd.args.split_first().ok_or_else(|| AppError::RuleExecEmpty {
-			rule_name: rule.name.to_string(),
-		})?;
+		let (program, args) = cmd
+			.args
+			.split_first()
+			.ok_or_else(|| app_error!("Rule {:?} executable was empty", rule.name))?;
 
 		// Create the command and feed in all the arguments
 		let mut os_cmd = process::Command::new(&**program);
@@ -769,20 +793,54 @@ impl Builder {
 			os_cmd.current_dir(&**cwd);
 		}
 
+		// Capture stdout, if we should
+		if cmd.stdout.is_some() {
+			os_cmd.stdout(Stdio::piped());
+		}
+
 		// Then spawn it and measure
 		tracing::debug!(target: "zbuild_exec", "{program} {}",
 			args.iter().join(" ")
 		);
-		let (duration, ()) = util::try_measure_async(async {
-			os_cmd
-				.status()
+		let (duration, output) = util::try_measure_async::<_, _, AppError>(async {
+			// Spawn
+			let mut output = os_cmd
+				.spawn()
+				.with_context(|| format!("Unable to spawn {}", self::cmd_to_string(&cmd)))?;
+
+			// Then wait for it to finish
+			output
+				.wait()
 				.await
-				.map_err(AppError::spawn_command(cmd))?
+				.with_context(|| format!("Command failed to start {}", self::cmd_to_string(&cmd)))?
 				.exit_ok()
-				.map_err(AppError::command_failed(cmd))
+				.with_context(|| format!("Command failed to run {}", self::cmd_to_string(&cmd)))?;
+
+			Ok(output)
 		})
 		.await?;
 		tracing::trace!(target: "zbuild_exec", rule_name=?rule.name, ?program, ?args, ?duration, "Execution duration");
+
+		if let Some(stdout_alias) = &cmd.stdout {
+			// Read the stdout
+			let mut stdout = String::new();
+			output
+				.stdout
+				.expect("Stdout was not set")
+				.read_to_string(&mut stdout)
+				.await
+				.with_context(|| format!("Unable to read command stdout {}", self::cmd_to_string(&cmd)))?;
+
+			// Trim the last newline, if any
+			// TODO: This feels like the right behavior, since most tools output a newline at the end, but
+			//       should we have a configuration to avoid it?
+			if stdout.ends_with('\n') {
+				stdout.pop();
+			}
+
+			// Then save it under the alias.
+			stdout_aliases.insert(stdout_alias.clone(), Expr::string(stdout));
+		}
 
 		Ok(())
 	}
@@ -791,7 +849,9 @@ impl Builder {
 /// Parses a dependencies file
 async fn parse_deps_file(file: &str) -> Result<HashMap<ArcStr, Vec<ArcStr>>, AppError> {
 	// Read it
-	let mut contents = fs::read_to_string(file).await.map_err(AppError::read_file(file))?;
+	let mut contents = fs::read_to_string(file)
+		.await
+		.with_context(|| format!("Unable to read file {file:?}"))?;
 
 	// Replace all backslashes at the end of a line with spaces
 	// Note: Although it'd be fine to replace it with a single space, by replacing it
@@ -799,6 +859,7 @@ async fn parse_deps_file(file: &str) -> Result<HashMap<ArcStr, Vec<ArcStr>>, App
 	util::string_replace_in_place_with(&mut contents, "\\\n", "  ");
 
 	// Now go through all non-empty lines and parse them
+	let contents = ArcStr::from(contents);
 	let deps = contents
 		.lines()
 		.filter_map(|line| {
@@ -807,15 +868,18 @@ async fn parse_deps_file(file: &str) -> Result<HashMap<ArcStr, Vec<ArcStr>>, App
 		})
 		.map(|line| {
 			// Parse it
-			let (output, deps) = line.split_once(':').ok_or_else(|| AppError::DepFileMissingColon {
-				deps_file_path: file.into(),
-			})?;
-			let output = ArcStr::from(output.trim());
-			let deps = deps.split_whitespace().map(ArcStr::from).collect();
+			let (output, deps) = line
+				.split_once(':')
+				.ok_or_else(|| app_error!("Dependencies file {file:?} was missing a `:`"))?;
+			let output = contents.slice_from_str(output.trim());
+			let deps = deps
+				.split_whitespace()
+				.map(|dep| contents.slice_from_str(dep))
+				.collect();
 
 			Ok((output, deps))
 		})
-		.collect::<ResultMultiple<_>>()?;
+		.collect::<AllErrs<_, _>>()?;
 
 	Ok(deps)
 }
@@ -836,17 +900,23 @@ async fn rule_last_build_time(rule: &Rule<ArcStr>) -> Result<Option<SystemTime>,
 			};
 			let metadata = fs::symlink_metadata(&**file)
 				.await
-				.map_err(AppError::read_file_metadata(&**file))?;
-			let modified_time = metadata.modified().map_err(AppError::get_file_modified_time(&**file))?;
+				.with_context(|| format!("Unable to read file metadata (not following symlinks) of {file:?}"))?;
+			let modified_time = metadata
+				.modified()
+				.with_context(|| format!("Unable to get file modified time of {file:?}"))?;
 
 			Ok(modified_time)
 		})
 		.collect::<FuturesUnordered<_>>()
-		.collect::<Vec<_>>()
-		.await
-		.into_iter()
-		.collect::<ResultMultiple<Vec<_>>>()?
+		.collect::<AllErrs<Vec<_>, _>>()
+		.await?
 		.into_iter()
 		.min();
 	Ok(built_time)
+}
+
+/// Helper function to format a `Command` for errors
+fn cmd_to_string<T: fmt::Display>(cmd: &Command<T>) -> String {
+	let inner = cmd.args.iter().map(|arg| format!("\"{arg}\"")).join(" ");
+	format!("[{inner}]")
 }

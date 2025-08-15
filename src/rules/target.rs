@@ -7,12 +7,11 @@ use {
 		ast,
 		util::{self, ArcStr},
 	},
+	smallvec::SmallVec,
 	std::{
-		collections::BTreeMap,
 		fmt,
 		hash::{Hash, Hasher},
 		mem,
-		sync::Arc,
 	},
 };
 
@@ -34,7 +33,7 @@ pub enum Target<T> {
 		rule: T,
 
 		/// Patterns
-		pats: Arc<BTreeMap<ArcStr, T>>,
+		pats: SmallVec<[(ArcStr, T); 1]>,
 	},
 }
 
@@ -50,16 +49,10 @@ impl<T> Target<T> {
 
 impl Target<Expr> {
 	/// Creates a new target from it's ast
-	pub fn from_ast(zbuild_file: &ArcStr, ast: ast::Target<'_>) -> Self {
-		match ast {
-			ast::Target::File(file) => Self::File {
-				file:      Expr::from_ast(zbuild_file, file),
-				is_static: false,
-			},
-			ast::Target::Rule { rule } => Self::Rule {
-				rule: Expr::from_ast(zbuild_file, rule),
-				pats: Arc::new(BTreeMap::new()),
-			},
+	pub fn from_ast(target: ast::Expr) -> Self {
+		Self::File {
+			is_static: target.is_static,
+			file:      Expr::from_ast(target),
 		}
 	}
 }

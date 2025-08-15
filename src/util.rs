@@ -131,11 +131,6 @@ where
 	let mut matches = s.match_indices(pat.clone());
 
 	// Find all matches, replacing the range as we go.
-	#[expect(
-		clippy::string_slice,
-		reason = "The index will always be valid, as it's the end of the string returned by `match_indices`, which \
-		          must return substrings of the string"
-	)]
 	while let Some((pos, part)) = matches.next() {
 		// Replace the range
 		mem::drop(matches);

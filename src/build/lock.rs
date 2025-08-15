@@ -6,8 +6,8 @@ use {
 		assert_matches::assert_matches,
 		mem,
 		sync::{
-			atomic::{self, AtomicBool},
 			Arc,
+			atomic::{self, AtomicBool},
 		},
 		time::SystemTime,
 	},
