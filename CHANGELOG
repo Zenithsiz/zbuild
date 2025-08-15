@@ -1,3 +1,15 @@
+# 0.1.10
+
+# Major
+
+- Replaced yaml file with custom language `.zb`.
+
+- Added a vscode extension for the custom `.zb` language.
+
+- Added progress bar during building
+
+- Added flags `--keep-going` and `--always-build`
+
 # 0.1.9
 
 # Major
