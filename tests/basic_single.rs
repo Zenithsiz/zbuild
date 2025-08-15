@@ -9,7 +9,7 @@ mod util;
 // Imports
 use {
 	zbuild::ExitResult,
-	zutil_app_error::{app_error, Context},
+	zutil_app_error::{Context, app_error},
 };
 
 /// Single rule and target

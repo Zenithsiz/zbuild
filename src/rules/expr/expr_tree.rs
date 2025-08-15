@@ -2,7 +2,7 @@
 
 use {
 	super::Expr,
-	crate::{rules::pattern::Pattern, util::ArcStr, AppError},
+	crate::{AppError, rules::pattern::Pattern, util::ArcStr},
 	itertools::PeekingNext,
 	smallvec::SmallVec,
 	std::collections::HashMap,

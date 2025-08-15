@@ -4,8 +4,8 @@
 
 // Imports
 use std::sync::{
-	atomic::{self, AtomicBool},
 	Mutex,
+	atomic::{self, AtomicBool},
 };
 
 /// If logging as already initialized

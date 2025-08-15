@@ -8,9 +8,9 @@
 
 // Imports
 use {
-	crate::{build, rules::Target, util::ArcStr, AppError, Builder},
+	crate::{AppError, Builder, build, rules::Target, util::ArcStr},
 	dashmap::{DashMap, DashSet},
-	futures::{stream::FuturesUnordered, StreamExt},
+	futures::{StreamExt, stream::FuturesUnordered},
 	notify_debouncer_full::Debouncer,
 	std::{
 		io,

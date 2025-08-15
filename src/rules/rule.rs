@@ -2,8 +2,8 @@
 
 // Imports
 use {
-	super::{pattern::Pattern, DepItem, Expr, OutItem},
-	crate::{ast, util::ArcStr, AppError},
+	super::{DepItem, Expr, OutItem, pattern::Pattern},
+	crate::{AppError, ast, util::ArcStr},
 	std::collections::HashMap,
 };
 

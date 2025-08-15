@@ -3,7 +3,7 @@
 // Imports
 use {
 	super::Expr,
-	crate::{ast, util::ArcStr, AppError},
+	crate::{AppError, ast, util::ArcStr},
 	std::fmt,
 };
 

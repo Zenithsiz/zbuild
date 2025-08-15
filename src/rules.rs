@@ -18,7 +18,7 @@ pub use {
 
 // Imports
 use {
-	crate::{util::ArcStr, AppError, Ast},
+	crate::{AppError, Ast, util::ArcStr},
 	std::collections::HashMap,
 };
 

@@ -16,7 +16,7 @@ use {
 		sync::Mutex,
 	},
 	tracing::metadata::LevelFilter,
-	tracing_subscriber::{prelude::*, EnvFilter, Registry},
+	tracing_subscriber::{EnvFilter, Registry, prelude::*},
 	zutil_app_error::Context,
 };
 
