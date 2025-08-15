@@ -1,12 +1,11 @@
-# TODO: Add `LICENSE-APACHE` to `license-file` once that key supports multiple licenses
 [package]
-edition      = "2024"
-name         = "zbuild"
-description  = "Make-like build system"
-license-file = "LICENSE-MIT"
-version      = "0.1.9"
-repository   = "https://github.com/zenithsiz/zbuild"
-publish      = ["filipejr"]
+edition     = "2024"
+name        = "zbuild"
+description = "Make-like build system"
+license     = "MIT OR Apache-2.0"
+version     = "0.1.9"
+repository  = "https://github.com/zenithsiz/zbuild"
+publish     = ["filipejr"]
 
 [dependencies]
 
