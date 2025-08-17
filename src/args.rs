@@ -59,6 +59,10 @@ pub struct Args {
 	#[clap(long = "always-build")]
 	pub always_build: bool,
 
+	/// Disables the progress bar
+	#[clap(long = "no-progress-bar")]
+	pub no_progress_bar: bool,
+
 	/// Watch for file changes and rebuild any necessary targets.
 	///
 	/// WARNING: If the log file is situated in the same directory as any watched
@@ -89,6 +93,7 @@ impl Default for Args {
 			ignore_missing: false,
 			keep_going: false,
 			always_build: false,
+			no_progress_bar: false,
 			watch: false,
 			watcher_debouncer_timeout_ms: None,
 			log_file: None,
