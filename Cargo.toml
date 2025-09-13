@@ -10,28 +10,28 @@ publish     = ["filipejr"]
 [dependencies]
 
 async-broadcast       = "0.7.2"
-clap                  = { features = ["derive"], version = "4.5.27" }
+clap                  = { features = ["derive"], version = "4.5.47" }
 console-subscriber    = { optional = true, version = "0.4.1" }
 dashmap               = "6.1.0"
 futures               = "0.3.31"
-indexmap              = "2.7.1"
-indicatif             = "0.17.11"
+indexmap              = "2.11.1"
+indicatif             = "0.18.0"
 itertools             = "0.14.0"
-notify                = "8.0.0"
-notify-debouncer-full = "0.5.0"
-pin-project           = "1.1.8"
-smallvec              = { features = ["may_dangle"], version = "1.13.2" }
-tokio                 = { features = ["full"], version = "1.43.0" }
+notify                = "8.2.0"
+notify-debouncer-full = "0.6.0"
+pin-project           = "1.1.10"
+smallvec              = { features = ["may_dangle"], version = "1.15.1" }
+tokio                 = { features = ["full"], version = "1.47.1" }
 tokio-stream          = "0.1.17"
 tracing               = "0.1.41"
-tracing-subscriber    = { features = ["env-filter"], version = "0.3.19" }
-unicode-ident         = "1.0.16"
-yoke                  = "0.7.5"
+tracing-subscriber    = { features = ["env-filter"], version = "0.3.20" }
+unicode-ident         = "1.0.19"
+yoke                  = "0.8.0"
 zutil-app-error       = { git = "https://github.com/Zenithsiz/zutil", rev = "5363bba6ced162185a1eb5a132cce499bfc5d818" }
 
 [dev-dependencies]
 
-tempfile     = "3.16.0"
+tempfile     = "3.22.0"
 tracing-test = { version = "0.2.5", features = ["no-env-filter"] }
 
 [features]
