@@ -1,146 +1,217 @@
 //! Logger
 
-// TODO: Parse the environment non-lossy first, then use a default.
-
-// Modules
-mod pre_init;
-
 // Imports
 use {
-	crate::AppError,
+	itertools::Itertools,
 	std::{
+		collections::{HashMap, hash_map},
 		env::{self, VarError},
 		fs,
 		io::{self, IsTerminal},
 		path::Path,
-		sync::Mutex,
+		sync::Arc,
 	},
-	tracing::metadata::LevelFilter,
-	tracing_subscriber::{EnvFilter, Registry, prelude::*},
-	zutil_app_error::Context,
+	tracing::{Dispatch, Subscriber, dispatcher, metadata::LevelFilter, subscriber::DefaultGuard},
+	tracing_subscriber::{EnvFilter, Layer, fmt::format::FmtSpan, prelude::*, registry::LookupSpan},
+	zbuild::AppError,
 };
 
-/// Initializes the logger
-///
-/// Logs to `stderr`, and to `{log_file}`.
-pub fn init(log_path: Option<&Path>) {
-	// Create the terminal layer
-	let term_layer = self::term_layer();
+/// Temporary subscriber type
+type TempSubscriber = impl Subscriber + for<'a> LookupSpan<'a> + Send + Sync + 'static;
 
-	// Create the file layer
-	let file_layer = log_path.and_then(|log_path| match self::file_layer(log_path) {
-		Ok(layer) => Some(layer),
-		Err(err) => {
-			pre_init::warn(format!("Unable to create file logging layer: {err:?}"));
-			None
-		},
-	});
+/// Logger
+pub struct Logger {
+	/// Dispatch
+	dispatch: Dispatch,
 
-	// Create the console layer
-	#[cfg(feature = "tokio-console")]
-	let (console_layer, console_server) = console_subscriber::ConsoleLayer::builder().with_default_env().build();
+	/// Guard
+	_guard: DefaultGuard,
+}
 
-	// Create a registry with all the layers
-	let registry = Registry::default().with(term_layer).with(file_layer);
+impl Logger {
+	/// Creates a new stderr-only logger and initializes it as the temporary logger
+	#[define_opaque(TempSubscriber)]
+	pub fn init_temp() -> Self {
+		// Initialize a barebones logger first to catch all logs
+		// until our temporary subscriber is up and running.
+		let barebones_logger =
+			tracing_subscriber::fmt::Subscriber::builder().with_env_filter(EnvFilter::from_default_env());
+		let barebones_logger_guard = dispatcher::set_default(&barebones_logger.into());
+		tracing::debug!("Initialized barebones logger");
 
-	#[cfg(feature = "tokio-console")]
-	let registry = registry.with(console_layer);
+		// Create the initial registry
+		let registry = tracing_subscriber::registry();
 
-	// Then initialize it
-	registry.init();
-	tracing::debug!(?log_path, "Initialized logging");
+		// Add the terminal layer
+		let term_layer = self::term_layer();
+		let registry = registry.with(term_layer);
 
-	// And emit all pre-init warnings
-	for message in pre_init::take_traces() {
-		tracing::trace!("{message}");
+		// Add the tokio-console layer
+		#[cfg(feature = "tokio-console")]
+		let registry = registry.with(console_subscriber::spawn());
+
+		// And stuff it into the dispatch
+		let registry = Arc::new(registry);
+		let dispatch = tracing::Dispatch::new::<Arc<TempSubscriber>>(registry);
+
+		// Then initialize it temporarily
+		drop(barebones_logger_guard);
+		let guard = dispatcher::set_default(&dispatch);
+		tracing::debug!("Initialized temporary stderr logger");
+
+		// Initialize the `log` compatibility too
+		tracing_log::LogTracer::builder()
+			.init()
+			.expect("Unable to initialize `log` compatibility layer");
+		tracing::debug!("Initialized `log` compatibility layer");
+
+		Self {
+			dispatch,
+			_guard: guard,
+		}
 	}
-	for message in pre_init::take_debugs() {
-		tracing::debug!("{message}");
-	}
-	for message in pre_init::take_warnings() {
-		tracing::warn!("{message}");
+
+	/// Fully initializes the logger, potentially with a file to log into
+	pub fn init_global(self, log_file: Option<&Path>) {
+		// Create the file layer if we can
+		let file_layer = log_file.and_then(self::file_layer);
+
+		// Get the original registry we already created and add all layers
+		// TODO: Retroactively prepend all logs into these new layers?
+		let registry = self.into_temp_subscriber().with(file_layer);
+
+		// And properly initialize
+		dispatcher::set_global_default(registry.into()).expect("Unable to set global `tracing` logger");
+		tracing::debug!(?log_file, "Initialized global logger");
 	}
 
-	// Finally spawn the console server
-	#[cfg(feature = "tokio-console")]
-	{
-		use std::mem;
+	/// Retrieves the temporary subscriber
+	// TODO a way to get the registry back more easily than this absolute mess
+	fn into_temp_subscriber(self) -> TempSubscriber {
+		// Get and clone the Arc we initially gave as a subscriber
+		let registry = self
+			.dispatch
+			.downcast_ref::<Arc<TempSubscriber>>()
+			.expect("Dispatch had the wrong inner type");
+		let registry = Arc::clone(registry);
 
-		let console_serve = tokio::spawn(async move {
-			if let Err(err) = console_server.serve().await {
-				tracing::warn!(?err, "Unable to spawn tokio console server");
-			}
-		});
-		mem::drop(console_serve);
+		// Then drop any references to it (which are stored in `self`) and unwrap it
+		drop(self);
+		Arc::into_inner(registry).expect("Dispatch had multiple copies of subscriber")
 	}
 }
 
 /// Creates the terminal layer
-fn term_layer<S>() -> impl tracing_subscriber::Layer<S>
+fn term_layer<S>() -> impl Layer<S>
 where
-	S: tracing::Subscriber + for<'span> tracing_subscriber::registry::LookupSpan<'span> + 'static,
+	S: Subscriber + for<'a> LookupSpan<'a>,
 {
-	let enable_colors = self::term_enable_colors();
-	pre_init::debug(format!("Stderr logging colors: {enable_colors}"));
+	let use_colors = self::colors_enabled();
+	let env = self::get_env_filters("RUST_LOG", "info");
+	let layer = tracing_subscriber::fmt::layer()
+		.with_span_events(FmtSpan::CLOSE)
+		.with_ansi(use_colors);
+	tracing::debug!("Using colors for terminal logging: {use_colors}");
 
-	let env = env::var("RUST_LOG").unwrap_or_else(|_| "info".to_owned());
-	pre_init::debug(format!("Stderr logging filter: {env}"));
+	#[cfg(debug_assertions)]
+	let layer = layer.with_file(true).with_line_number(true).with_thread_names(true);
 
-	tracing_subscriber::fmt::layer()
-		.with_ansi(enable_colors)
-		.with_writer(io::stderr)
-		.with_filter(
-			EnvFilter::builder()
-				.with_default_directive(LevelFilter::INFO.into())
-				.parse_lossy(env),
-		)
+	layer.with_filter(
+		EnvFilter::builder()
+			.with_default_directive(LevelFilter::INFO.into())
+			.parse_lossy(env),
+	)
 }
 
 /// Creates the file layer
-fn file_layer<S>(log_path: &Path) -> Result<impl tracing_subscriber::Layer<S>, AppError>
+fn file_layer<S>(log_file: &Path) -> Option<impl Layer<S>>
 where
-	S: tracing::Subscriber + for<'span> tracing_subscriber::registry::LookupSpan<'span> + 'static,
+	S: Subscriber + for<'a> LookupSpan<'a>,
 {
-	// Parse the environment
-	let env = env::var("RUST_FILE_LOG").unwrap_or_else(|_| "debug".to_owned());
-	pre_init::debug(format!("File logging filter: {env}"));
+	// Try to create the file
+	let file = match fs::File::create(log_file) {
+		Ok(file) => {
+			tracing::debug!("Created log file {log_file:?}");
+			file
+		},
+		Err(err) => {
+			let err = AppError::new(&err);
+			tracing::warn!("Unable to create log file {log_file:?}: {}", err.pretty());
+			return None;
+		},
+	};
 
-	// Try to create the log file parent, if it doesn't exist.
-	let parent_dir = log_path.parent().context("Log path has no parent directory")?;
-	fs::create_dir_all(parent_dir).context("Unable to create log path parent directory")?;
-
-	// Then create the file
-	let file = fs::File::create(log_path).context("Unable to create log file")?;
-
-	// And finally the layer
+	// Then create the layer
+	let env = self::get_env_filters("RUST_FILE_LOG", "debug");
 	let layer = tracing_subscriber::fmt::layer()
-		.with_writer(Mutex::new(file))
+		.with_span_events(FmtSpan::CLOSE)
+		.with_writer(file)
 		.with_ansi(false)
 		.with_filter(EnvFilter::builder().parse_lossy(env));
 
-	Ok(layer)
+	Some(layer)
 }
 
 /// Returns whether to colors should be enabled for the terminal layer.
-fn term_enable_colors() -> bool {
-	match env::var("RUST_LOG_COLOR").map(|var| var.to_lowercase()).as_deref() {
-		// If it isn't present, check if we're in a terminal
-		Err(VarError::NotPresent) => io::stderr().is_terminal(),
-
-		// Else check user input
-		Ok("1" | "yes" | "true") => true,
-		Ok("0" | "no" | "false") => false,
-
-		// On invalid input, warn and don't use colors
-		Ok(env) => {
-			pre_init::warn(format!(
-				"Ignoring unknown `RUST_LOG_COLOR` value: {env:?}, expected `0`, `1`, `yes`, `no`, `true`, `false`"
-			));
-			false
-		},
-		Err(VarError::NotUnicode(err)) => {
-			pre_init::warn(format!("Ignoring non-utf8 `RUST_LOG_COLOR`: {err:?}"));
-			false
-		},
+fn colors_enabled() -> bool {
+	// If `NO_COLOR` is set to non-empty, we shouldn't use colors
+	if env::var("NO_COLOR").is_ok_and(|var| !var.is_empty()) {
+		return false;
 	}
+
+	// Otherwise, enable colors if we're not being piped
+	io::stdout().is_terminal()
+}
+
+/// Returns the env filters of a variable.
+///
+/// Adds default filters, if not specified
+#[must_use]
+fn get_env_filters(env: &str, default: &str) -> String {
+	// Default filters
+	let default_filters = [(None, default)];
+
+	// Get the current filters
+	let env_var;
+	let mut cur_filters = match env::var(env) {
+		// Split filters by `,`, then src and level by `=`
+		Ok(var) => {
+			env_var = var;
+			env_var
+				.split(',')
+				.map(|s| match s.split_once('=') {
+					Some((src, level)) => (Some(src), level),
+					None => (None, s),
+				})
+				.collect::<HashMap<_, _>>()
+		},
+
+		// If there were none, don't use any
+		Err(err) => {
+			if let VarError::NotUnicode(var) = err {
+				tracing::warn!("Ignoring non-utf8 env variable {env:?}: {var:?}");
+			}
+
+			HashMap::new()
+		},
+	};
+
+	// Add all default filters, if not specified
+	for (src, level) in default_filters {
+		if let hash_map::Entry::Vacant(entry) = cur_filters.entry(src) {
+			let _: &mut &str = entry.insert(level);
+		}
+	}
+
+	// Then re-create it
+	let var = cur_filters
+		.into_iter()
+		.map(|(src, level)| match src {
+			Some(src) => format!("{src}={level}"),
+			None => level.to_owned(),
+		})
+		.join(",");
+	tracing::trace!("Using {env}={var}");
+
+	var
 }

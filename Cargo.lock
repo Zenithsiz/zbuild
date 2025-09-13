@@ -2022,6 +2022,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+ "tracing-log",
  "tracing-subscriber",
  "tracing-test",
  "unicode-ident",

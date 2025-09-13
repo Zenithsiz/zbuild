@@ -24,6 +24,7 @@ smallvec              = { features = ["may_dangle"], version = "1.15.1" }
 tokio                 = { features = ["full"], version = "1.47.1" }
 tokio-stream          = "0.1.17"
 tracing               = "0.1.41"
+tracing-log           = "0.2.0"
 tracing-subscriber    = { features = ["env-filter"], version = "0.3.20" }
 unicode-ident         = "1.0.19"
 yoke                  = "0.8.0"

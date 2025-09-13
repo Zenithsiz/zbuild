@@ -12,7 +12,8 @@
 	if_let_guard,
 	pattern,
 	vec_into_raw_parts,
-	ptr_metadata
+	ptr_metadata,
+	type_alias_impl_trait
 )]
 // Lints
 #![allow(
@@ -26,13 +27,14 @@ mod logger;
 
 // Imports
 use {
+	self::logger::Logger,
 	clap::Parser,
 	std::{
 		env,
 		sync::atomic::{self, AtomicUsize},
 	},
 	tokio::runtime,
-	zbuild::{AppError, Args, ExitResult},
+	zbuild::{Args, ExitResult},
 	zutil_app_error::Context,
 };
 
@@ -41,12 +43,15 @@ use {
 	reason = "Runtime builder method provides a lot of unused `&mut Builder`"
 )]
 fn main() -> ExitResult {
+	// Initialize stderr-only logging
+	let logger = Logger::init_temp();
+
 	// Get all args
 	let args = Args::parse();
+	tracing::debug!(?args, "Arguments");
 
-	// Initialize the logger
-	logger::init(args.log_file.as_deref());
-	tracing::trace!(?args, "Arguments");
+	// Initialize the logger properly now
+	logger.init_global(args.log_file.as_deref());
 
 	// Build the tokio runtime
 	let mut runtime_builder = runtime::Builder::new_multi_thread();
