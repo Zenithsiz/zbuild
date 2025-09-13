@@ -5,7 +5,7 @@ use {
 	crate::{AppError, rules::Target, util::ArcStr},
 	itertools::Itertools,
 	std::{ops::Try, sync::Arc},
-	zutil_app_error::app_error,
+	app_error::app_error,
 };
 
 /// Inner type for [`BuildReason`].

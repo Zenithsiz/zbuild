@@ -8,7 +8,7 @@ use std::{
 };
 
 /// App error
-pub type AppError = zutil_app_error::AppError<AppErrorData>;
+pub type AppError = app_error::AppError<AppErrorData>;
 
 /// App error data
 #[derive(Clone, Copy, Debug)]
@@ -59,6 +59,6 @@ impl FromResidual<Yeet<AppError>> for ExitResult {
 }
 
 /// Function to setup pretty printing
-pub fn pretty(err: &AppError) -> zutil_app_error::PrettyDisplay<'_, AppErrorData> {
+pub fn pretty(err: &AppError) -> app_error::PrettyDisplay<'_, AppErrorData> {
 	err.pretty().with_ignore_err(|_, data| data.should_ignore)
 }

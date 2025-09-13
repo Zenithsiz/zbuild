@@ -11,7 +11,7 @@ use {
 	std::fs,
 	tempfile::TempDir,
 	zbuild::{Args, ExitResult},
-	zutil_app_error::Context,
+	app_error::Context,
 };
 
 #[tokio::test]
@@ -41,11 +41,11 @@ rule a {
 	};
 	tracing::info!(?args, "Arguments");
 	let res = zbuild::run(args).await;
-	zutil_app_error::ensure!(res.is_err(), "Expected zbuild error");
+	app_error::ensure!(res.is_err(), "Expected zbuild error");
 
 
 	let a = temp_dir.path().join("a");
-	zutil_app_error::ensure!(
+	app_error::ensure!(
 		!a.try_exists().context("Unable to check if output file exists")?,
 		"Output file {a:?} was created when it shouldn't've"
 	);

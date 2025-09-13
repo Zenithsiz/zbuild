@@ -9,6 +9,7 @@ publish     = ["filipejr"]
 
 [dependencies]
 
+app-error             = { git = "https://github.com/Zenithsiz/app-error", rev = "9a7c202f54ef449d02e2b6ace74ad916f6e6720e" }
 async-broadcast       = "0.7.2"
 clap                  = { features = ["derive"], version = "4.5.47" }
 console-subscriber    = { optional = true, version = "0.4.1" }
@@ -28,7 +29,6 @@ tracing-log           = "0.2.0"
 tracing-subscriber    = { features = ["env-filter"], version = "0.3.20" }
 unicode-ident         = "1.0.19"
 yoke                  = "0.8.0"
-zutil-app-error       = { git = "https://github.com/Zenithsiz/zutil", rev = "5363bba6ced162185a1eb5a132cce499bfc5d818" }
 
 [dev-dependencies]
 

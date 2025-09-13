@@ -11,7 +11,7 @@ use {
 	std::fs,
 	tempfile::TempDir,
 	zbuild::{AppError, Args, ExitResult},
-	zutil_app_error::Context,
+	app_error::Context,
 };
 
 /// Test for `--keep-going`
@@ -92,34 +92,34 @@ rule c2 {
 	};
 	tracing::info!(?args, "Arguments");
 	let res = zbuild::run(args).await;
-	zutil_app_error::ensure!(res.is_err(), "Expected zbuild error");
+	app_error::ensure!(res.is_err(), "Expected zbuild error");
 
 
 	let a = temp_dir.path().join("a");
 	let b = temp_dir.path().join("b");
 	let c1 = temp_dir.path().join("c1");
 	let c2 = temp_dir.path().join("c2");
-	zutil_app_error::ensure!(
+	app_error::ensure!(
 		!a.try_exists().context("Unable to check if output file exists")?,
 		"Output file {a:?} was created"
 	);
-	zutil_app_error::ensure!(
+	app_error::ensure!(
 		!b.try_exists().context("Unable to check if output file exists")?,
 		"Output file {b:?} was created"
 	);
 
 	match keep_going {
-		true => zutil_app_error::ensure!(
+		true => app_error::ensure!(
 			c1.try_exists().context("Unable to check if output file exists")?,
 			"Output file {c1:?} was missing"
 		),
-		false => zutil_app_error::ensure!(
+		false => app_error::ensure!(
 			!c1.try_exists().context("Unable to check if output file exists")?,
 			"Output file {c1:?} was created"
 		),
 	}
 
-	zutil_app_error::ensure!(
+	app_error::ensure!(
 		c2.try_exists().context("Unable to check if output file exists")?,
 		"Output file {c2:?} was missing"
 	);

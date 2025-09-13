@@ -9,7 +9,7 @@ use {
 	},
 	smallvec::SmallVec,
 	std::{collections::HashMap, mem, path::PathBuf},
-	zutil_app_error::{AllErrs, Context, app_error},
+	app_error::{AllErrs, Context, app_error},
 };
 
 /// Expander
@@ -67,7 +67,7 @@ impl Expander {
 
 						// Else keep on Keep and error on Error
 						FlowControl::Keep => expr.push(cmpt),
-						FlowControl::Error => zutil_app_error::bail!("Unknown expression {name:?}"),
+						FlowControl::Error => app_error::bail!("Unknown expression {name:?}"),
 					},
 				}
 
@@ -84,7 +84,7 @@ impl Expander {
 			ExprOp::DirName => {
 				// Get the path and try to pop the last segment
 				let mut path = PathBuf::from(mem::take(value));
-				zutil_app_error::ensure!(path.pop(), "Path had no parent directory {path:?}");
+				app_error::ensure!(path.pop(), "Path had no parent directory {path:?}");
 
 				// Then convert it back to a string
 				// Note: This should technically never fail, since the path was originally

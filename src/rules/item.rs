@@ -25,8 +25,8 @@ impl OutItem<Expr> {
 	/// Creates a new item from it's `ast`.
 	pub fn from_ast(item: ast::Expr) -> Result<Self, AppError> {
 		let is_deps_file = item.is_deps_file;
-		zutil_app_error::ensure!(!item.is_opt, "Output items cannot be optional");
-		zutil_app_error::ensure!(!item.is_static, "Output items cannot be static");
+		app_error::ensure!(!item.is_opt, "Output items cannot be optional");
+		app_error::ensure!(!item.is_static, "Output items cannot be static");
 
 		Ok(Self::File {
 			file: Expr::from_ast(item),

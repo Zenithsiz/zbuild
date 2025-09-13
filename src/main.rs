@@ -28,6 +28,7 @@ mod logger;
 // Imports
 use {
 	self::logger::Logger,
+	app_error::Context,
 	clap::Parser,
 	std::{
 		env,
@@ -35,7 +36,6 @@ use {
 	},
 	tokio::runtime,
 	zbuild::{Args, ExitResult},
-	zutil_app_error::Context,
 };
 
 #[expect(

@@ -69,7 +69,7 @@ impl<K> ExprTree<K> {
 
 		// After this the expression should be empty
 		if let Some(cmpt) = cmpts.next() {
-			zutil_app_error::bail!("Unexpected component in expression {expr}: {cmpt}");
+			app_error::bail!("Unexpected component in expression {expr}: {cmpt}");
 		}
 
 		// Finally try to insert and retrieve the old key, if any.

@@ -9,8 +9,8 @@
 // Imports
 use {
 	crate::{AppError, util::ArcStr},
+	app_error::Context,
 	std::{fmt::Write, fs, mem, path::Path, ptr, str::pattern::Pattern},
-	zutil_app_error::Context,
 };
 
 /// Zbuild ast
@@ -242,19 +242,19 @@ impl Parsable for Command {
 					{
 						AnyOf3::T0(_) => {
 							parser.parse::<TokenCwd>()?;
-							zutil_app_error::ensure!(cwd.is_none(), "Working directory was already specified");
+							app_error::ensure!(cwd.is_none(), "Working directory was already specified");
 							cwd = Some(parser.parse::<Expr>()?);
 							parser.parse::<TokenSemi>()?;
 						},
 						AnyOf3::T1(_) => {
 							parser.parse::<TokenStdout>()?;
-							zutil_app_error::ensure!(stdout.is_none(), "Stdout was already specified");
+							app_error::ensure!(stdout.is_none(), "Stdout was already specified");
 							stdout = Some(parser.parse::<Ident>()?);
 							parser.parse::<TokenSemi>()?;
 						},
 						AnyOf3::T2(_) => {
 							parser.parse::<TokenArgs>()?;
-							zutil_app_error::ensure!(args.is_none(), "Arguments were already specified");
+							app_error::ensure!(args.is_none(), "Arguments were already specified");
 							args = Some(parser.parse::<Array<Expr>>()?);
 							parser.parse::<TokenSemi>()?;
 						},
@@ -404,7 +404,7 @@ impl ExprCmpt {
 					let op = parser.parse::<Ident>().context("Expected identifier after `.`")?;
 					match &*op.0 {
 						"dir_name" => ops.push(ExprOp::DirName),
-						op => zutil_app_error::bail!("Unknown expression operator: {op:?}"),
+						op => app_error::bail!("Unknown expression operator: {op:?}"),
 					}
 				}
 
@@ -415,7 +415,7 @@ impl ExprCmpt {
 				parser.parse::<TokenDoubleQuote>()?;
 				while parser.try_parse::<TokenDoubleQuote>().is_err() {
 					let Some(end_idx) = parser.remaining().find(['{', '"']) else {
-						zutil_app_error::bail!("Expected closing `\"` after `\"`");
+						app_error::bail!("Expected closing `\"` after `\"`");
 					};
 					let prefix = parser.advance_by(end_idx);
 					if !prefix.is_empty() {
@@ -489,7 +489,7 @@ pub macro decl_tokens($($TokenName:ident = $Token:expr;)*) {
 			fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
 				match parser.strip_prefix($Token) {
 					Some(value) => Ok(Self(value.into())),
-					None => zutil_app_error::bail!("Expected {:?}", $Token),
+					None => app_error::bail!("Expected {:?}", $Token),
 				}
 			}
 		}
@@ -742,7 +742,7 @@ macro decl_any_of($Name:ident, $($T:ident),* $(,)?) {
 				}.expect("Failed to write into string");
 			)*
 
-			Err(zutil_app_error::AppError::msg(err))
+			Err(app_error::AppError::msg(err))
 		}
 	}
 }

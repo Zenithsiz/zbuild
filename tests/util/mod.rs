@@ -11,7 +11,7 @@ use {
 	std::fs,
 	tempfile::TempDir,
 	zbuild::{AppError, Args},
-	zutil_app_error::Context,
+	app_error::Context,
 };
 
 /// Creates a directory with a zbuild manifest, then runs it, and returns the directory

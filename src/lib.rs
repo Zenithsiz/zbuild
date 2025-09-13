@@ -66,7 +66,7 @@ use {
 	},
 	util::ArcStr,
 	watcher::Watcher,
-	zutil_app_error::Context,
+	app_error::Context,
 };
 
 #[expect(clippy::too_many_lines, reason = "TODO: Split it up more")]
@@ -257,7 +257,7 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 			true => return Ok(zbuild_path),
 			false => match cur_path.parent() {
 				Some(parent) => cur_path = parent,
-				None => zutil_app_error::bail!(
+				None => app_error::bail!(
 					"No `zbuild.zb` file found in current or parent directories.\nYou can use `--path \
 					 {{zbuild-path}}` in order to specify the manifest's path"
 				),

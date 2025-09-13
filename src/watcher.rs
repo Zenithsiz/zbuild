@@ -20,7 +20,7 @@ use {
 	},
 	tokio::sync::mpsc,
 	tokio_stream::wrappers::ReceiverStream,
-	zutil_app_error::Context,
+	app_error::Context,
 };
 
 /// A reverse dependency

@@ -83,6 +83,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0674a1ddeecb70197781e945de4b3b8ffb61fa939a5597bcf48503737663100"
 
 [[package]]
+name = "app-error"
+version = "0.1.0"
+source = "git+https://github.com/Zenithsiz/app-error?rev=9a7c202f54ef449d02e2b6ace74ad916f6e6720e#9a7c202f54ef449d02e2b6ace74ad916f6e6720e"
+dependencies = [
+ "itertools",
+]
+
+[[package]]
 name = "async-broadcast"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2006,6 +2014,7 @@ dependencies = [
 name = "zbuild"
 version = "0.1.10"
 dependencies = [
+ "app-error",
  "async-broadcast",
  "clap",
  "console-subscriber",
@@ -2027,7 +2036,6 @@ dependencies = [
  "tracing-test",
  "unicode-ident",
  "yoke",
- "zutil-app-error",
 ]
 
 [[package]]
@@ -2055,11 +2063,3 @@ name = "zerofrom"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "50cc42e0333e05660c3587f3bf9d0478688e15d870fab3346451ce7f8c9fbea5"
-
-[[package]]
-name = "zutil-app-error"
-version = "0.1.0"
-source = "git+https://github.com/Zenithsiz/zutil?rev=5363bba6ced162185a1eb5a132cce499bfc5d818#5363bba6ced162185a1eb5a132cce499bfc5d818"
-dependencies = [
- "itertools",
-]

@@ -26,7 +26,7 @@ use {
 	smallvec::SmallVec,
 	std::{collections::HashMap, fmt, future::Future, process::Stdio, sync::Arc, time::SystemTime},
 	tokio::{fs, io::AsyncReadExt, process, sync::Semaphore, task},
-	zutil_app_error::{AllErrs, Context, app_error},
+	app_error::{AllErrs, Context, app_error},
 };
 
 /// Event
@@ -691,7 +691,7 @@ impl Builder {
 				errs.into_iter().map(|(_, err)| Err(err)).collect::<AllErrs<(), _>>()?;
 
 				// If no errors existed, return an error for that
-				zutil_app_error::bail!("Dependencies file {deps_file:?} had no dependencies");
+				app_error::bail!("Dependencies file {deps_file:?} had no dependencies");
 			},
 
 			// Otherwise, just log and remove all errors
