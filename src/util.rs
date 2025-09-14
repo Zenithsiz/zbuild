@@ -156,6 +156,7 @@ mod tests {
 			("a/./b/", "a/b/"),
 			("../b", "../b"),
 			("a/b/../../c", "c"),
+			("", "."),
 		];
 
 		for (orig, norm) in tests {
