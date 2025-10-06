@@ -230,6 +230,7 @@ impl From<ArcStr> for String {
 }
 
 #[cfg(test)]
+#[coverage(off)]
 mod tests {
 	use {super::*, std::collections::HashSet};
 

@@ -145,6 +145,7 @@ where
 }
 
 #[cfg(test)]
+#[coverage(off)]
 mod tests {
 	#[test]
 	fn normalize_path() {

@@ -20,7 +20,8 @@
 	substr_range,
 	unwrap_infallible,
 	never_type,
-	try_trait_v2_yeet
+	try_trait_v2_yeet,
+	coverage_attribute
 )]
 // Lints
 #![allow(
@@ -53,6 +54,7 @@ use {
 		expand::Expander,
 		rules::Rules,
 	},
+	app_error::Context,
 	futures::{StreamExt, TryFutureExt, stream::FuturesUnordered},
 	indicatif::ProgressBar,
 	smallvec::SmallVec,
@@ -66,7 +68,6 @@ use {
 	},
 	util::ArcStr,
 	watcher::Watcher,
-	app_error::Context,
 };
 
 #[expect(clippy::too_many_lines, reason = "TODO: Split it up more")]
