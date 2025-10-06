@@ -14,7 +14,7 @@ use {
 };
 
 /// Zbuild ast
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Ast {
 	/// Aliases
 	pub aliases: Vec<AliasStmt>,
@@ -61,7 +61,7 @@ impl Parsable for Ast {
 }
 
 /// Alias statement
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct AliasStmt {
 	/// Alias name
 	pub name: Ident,
@@ -83,7 +83,7 @@ impl Parsable for AliasStmt {
 }
 
 /// Pattern statement
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct PatStmt {
 	/// Pattern name
 	pub name: Ident,
@@ -107,7 +107,7 @@ impl Parsable for PatStmt {
 }
 
 /// Default statement
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct DefaultStmt {
 	/// Default
 	pub default: Expr,
@@ -124,7 +124,7 @@ impl Parsable for DefaultStmt {
 }
 
 /// Rule statement
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct RuleStmt {
 	/// Rule name
 	pub name: Ident,
@@ -190,7 +190,7 @@ impl Parsable for RuleStmt {
 }
 
 /// Dependency statement
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub enum DepStmt {
 	/// File
 	File(Expr),
@@ -214,7 +214,7 @@ impl Parsable for DepStmt {
 }
 
 /// Command
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Command {
 	/// Working directory
 	pub cwd: Option<Expr>,
@@ -274,7 +274,7 @@ impl Parsable for Command {
 }
 
 /// Include statement
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct IncludeStmt {
 	/// Path
 	pub path: StringLiteral,
@@ -291,7 +291,7 @@ impl Parsable for IncludeStmt {
 }
 
 /// Array
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Array<T>(pub Vec<T>);
 
 impl<T> Parsable for Array<T>
@@ -334,7 +334,7 @@ where
 }
 
 /// Expression
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Expr {
 	/// Dependencies file
 	pub is_deps_file: bool,
@@ -378,7 +378,7 @@ impl Parsable for Expr {
 }
 
 /// Expression component
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub enum ExprCmpt {
 	/// Identifier
 	Ident { ident: Ident, ops: Vec<ExprOp> },
@@ -442,14 +442,14 @@ impl ExprCmpt {
 }
 
 /// Expression operators
-#[derive(Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum ExprOp {
 	/// Directory name, `.dir_name`.
 	DirName,
 }
 
 /// Identifier
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Ident(pub ArcStr);
 
 impl Parsable for Ident {
@@ -466,7 +466,7 @@ impl Parsable for Ident {
 }
 
 /// String literal
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct StringLiteral(ArcStr);
 
 impl Parsable for StringLiteral {
@@ -543,7 +543,7 @@ pub trait Parsable: Sized {
 }
 
 /// Parser
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Parser {
 	/// Input
 	input: ArcStr,
@@ -656,8 +656,10 @@ impl Parser {
 					let end_idx = rest.find("###").context("Expected `###` after `###`")?;
 					Ok(&rest[end_idx + 3..])
 				} else if let Some(rest) = remaining.strip_prefix('#') {
-					let end_idx = rest.find('\n').unwrap_or(rest.len());
-					Ok(&rest[end_idx + 1..])
+					match rest.find('\n') {
+							Some(end_idx) => Ok(&rest[end_idx + 1..]),
+							None => Ok(&rest[rest.len()..]),
+						}
 				} else {
 					Ok::<_, AppError>(remaining)
 				}
@@ -787,4 +789,33 @@ pub fn parse(path: &Path) -> Result<Ast, AppError> {
 	}
 
 	Ok(ast)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn parse_ast() {
+		const EMPTY_AST: Ast = Ast {
+			aliases:  vec![],
+			pats:     vec![],
+			defaults: vec![],
+			rules:    vec![],
+			includes: vec![],
+		};
+		let cases = [
+			("", EMPTY_AST),
+			("#Comment\n", EMPTY_AST),
+			("#Comment", EMPTY_AST),
+			("###Comment###", EMPTY_AST),
+		];
+
+		for (input, expected_ast) in cases {
+			let mut parser = Parser::new(ArcStr::from(input.to_owned()));
+			let ast = Ast::parse_from(&mut parser)
+				.unwrap_or_else(|err| panic!("Unable to parse input {input:?}: {}", err.pretty()));
+			assert_eq!(ast, expected_ast, "Ast differed for {input:?}");
+		}
+	}
 }
