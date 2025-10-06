@@ -21,6 +21,7 @@
 		"tempdir",
 		"thiserror",
 		"yeet",
+		"yokeable",
 		"Zbuild",
 		"zutil"
 	],
