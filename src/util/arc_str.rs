@@ -163,6 +163,12 @@ impl Borrow<str> for ArcStr {
 	}
 }
 
+impl From<&'_ str> for ArcStr {
+	fn from(s: &str) -> Self {
+		Self::from(s.to_owned())
+	}
+}
+
 impl From<String> for ArcStr {
 	fn from(s: String) -> Self {
 		Self::from(Arc::new(s))

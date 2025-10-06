@@ -812,7 +812,7 @@ mod tests {
 		];
 
 		for (input, expected_ast) in cases {
-			let mut parser = Parser::new(ArcStr::from(input.to_owned()));
+			let mut parser = Parser::new(input.into());
 			let ast = Ast::parse_from(&mut parser)
 				.unwrap_or_else(|err| panic!("Unable to parse input {input:?}: {}", err.pretty()));
 			assert_eq!(ast, expected_ast, "Ast differed for {input:?}");
