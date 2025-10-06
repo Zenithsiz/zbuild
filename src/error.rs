@@ -11,7 +11,7 @@ use std::{
 pub type AppError = app_error::AppError<AppErrorData>;
 
 /// App error data
-#[derive(Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct AppErrorData {
 	/// Whether this error should be ignored when printing
 	pub should_ignore: bool,

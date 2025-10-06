@@ -657,9 +657,9 @@ impl Parser {
 					Ok(&rest[end_idx + 3..])
 				} else if let Some(rest) = remaining.strip_prefix('#') {
 					match rest.find('\n') {
-							Some(end_idx) => Ok(&rest[end_idx + 1..]),
-							None => Ok(&rest[rest.len()..]),
-						}
+						Some(end_idx) => Ok(&rest[end_idx + 1..]),
+						None => Ok(&rest[rest.len()..]),
+					}
 				} else {
 					Ok::<_, AppError>(remaining)
 				}
@@ -792,30 +792,234 @@ pub fn parse(path: &Path) -> Result<Ast, AppError> {
 }
 
 #[cfg(test)]
+#[coverage(off)]
 mod tests {
 	use super::*;
 
+	const EMPTY_AST: Ast = Ast {
+		aliases:  vec![],
+		pats:     vec![],
+		defaults: vec![],
+		rules:    vec![],
+		includes: vec![],
+	};
+	const EMPTY_EXPR: Expr = Expr {
+		is_deps_file: false,
+		is_static:    false,
+		is_opt:       false,
+		cmpts:        vec![],
+	};
+	const fn ident(s: &'static str) -> Ident {
+		Ident(ArcStr::from_static(s))
+	}
+	fn expr_string(s: &str) -> Expr {
+		Expr {
+			is_deps_file: false,
+			is_static:    false,
+			is_opt:       false,
+			cmpts:        vec![ExprCmpt::String(s.into())],
+		}
+	}
+	fn alias_string(name: &'static str, value: &str) -> AliasStmt {
+		AliasStmt {
+			name:  ident(name),
+			value: expr_string(value),
+		}
+	}
+	fn pat(name: &'static str) -> PatStmt {
+		PatStmt {
+			name:      ident(name),
+			non_empty: false,
+		}
+	}
+	fn pat_non_empty(name: &'static str) -> PatStmt {
+		PatStmt {
+			name:      ident(name),
+			non_empty: true,
+		}
+	}
+	fn default(s: &str) -> DefaultStmt {
+		DefaultStmt {
+			default: expr_string(s),
+		}
+	}
+	fn array_expr_string<const N: usize>(s: [&'static str; N]) -> Array<Expr> {
+		Array(s.into_iter().map(expr_string).collect())
+	}
+	fn expr_cmpt_string(s: &str) -> ExprCmpt {
+		ExprCmpt::String(s.into())
+	}
+	fn expr_cmpt_ident(s: &'static str, ops: Vec<ExprOp>) -> ExprCmpt {
+		ExprCmpt::Ident { ident: ident(s), ops }
+	}
+
+	#[track_caller]
+	fn check_cases_fail<T: Parsable + std::fmt::Debug>(cases: impl IntoIterator<Item = (&'static str, &'static str)>) {
+		for (input, expected_err) in cases {
+			let mut parser = Parser::new(input.into());
+			let err = match T::parse_from(&mut parser) {
+				Ok(value) => panic!("Input was unexpectedly valid {input:?}: {value:?}"),
+				Err(err) => err,
+			};
+			assert!(
+				err.pretty().to_string().contains(expected_err),
+				"Error did not contain expected output for {input:?} ({expected_err:?}): {}",
+				err.pretty()
+			);
+		}
+	}
+
+	#[track_caller]
+	fn check_cases<T: Parsable + PartialEq + std::fmt::Debug>(cases: impl IntoIterator<Item = (&'static str, T)>) {
+		for (input, expected) in cases {
+			let mut parser = Parser::new(input.into());
+			let value = T::parse_from(&mut parser)
+				.unwrap_or_else(|err| panic!("Unable to parse input {input:?}: {}", err.pretty()));
+			assert!(
+				value == expected,
+				"Output differed for {input:?}\n  Expected: {expected:?}\n  Found   : {value:?}"
+			);
+			assert!(
+				parser.remaining().is_empty(),
+				"Parser had remaining tokens for input {input:?}: {:?}",
+				parser.remaining()
+			);
+		}
+	}
+
 	#[test]
 	fn parse_ast() {
-		const EMPTY_AST: Ast = Ast {
-			aliases:  vec![],
-			pats:     vec![],
-			defaults: vec![],
-			rules:    vec![],
-			includes: vec![],
-		};
-		let cases = [
+		self::check_cases([
+			// Whitespace
 			("", EMPTY_AST),
+			("  ", EMPTY_AST),
+			// Comments
 			("#Comment\n", EMPTY_AST),
 			("#Comment", EMPTY_AST),
 			("###Comment###", EMPTY_AST),
-		];
+			// Global aliases
+			(r#"alias a = "test"; alias b = "test2";"#, Ast {
+				aliases: vec![alias_string("a", "test"), alias_string("b", "test2")],
+				..EMPTY_AST
+			}),
+			// Global patterns
+			("pat a; pat non_empty b;", Ast {
+				pats: vec![pat("a"), pat_non_empty("b")],
+				..EMPTY_AST
+			}),
+			// Default
+			(r#"default "a";"#, Ast {
+				defaults: vec![default("a")],
+				..EMPTY_AST
+			}),
+			// Rules
+			(
+				r#"rule a { alias a = "test"; pat b; out "out"; dep "dep"; exec "cmd"; }"#,
+				Ast {
+					rules: vec![RuleStmt {
+						name:    ident("a"),
+						aliases: vec![alias_string("a", "test")],
+						pats:    vec![pat("b")],
+						out:     vec![expr_string("out")],
+						deps:    vec![DepStmt::File(expr_string("dep"))],
+						exec:    vec![Command {
+							cwd:    None,
+							stdout: None,
+							args:   Array(vec![expr_string("cmd")]),
+						}],
+					}],
+					..EMPTY_AST
+				},
+			),
+			// Includes
+			(r#"include "a/b.zb";"#, Ast {
+				includes: vec![IncludeStmt {
+					path: StringLiteral(ArcStr::from_static("a/b.zb")),
+				}],
+				..EMPTY_AST
+			}),
+		]);
 
-		for (input, expected_ast) in cases {
-			let mut parser = Parser::new(input.into());
-			let ast = Ast::parse_from(&mut parser)
-				.unwrap_or_else(|err| panic!("Unable to parse input {input:?}: {}", err.pretty()));
-			assert_eq!(ast, expected_ast, "Ast differed for {input:?}");
-		}
+		self::check_cases_fail::<Ast>([
+			("unknown", "Expected one of the following"),
+			//
+		]);
+	}
+
+	#[test]
+	fn parse_alias() {
+		check_cases_fail::<AliasStmt>([("alias ", "Expected alias name")]);
+	}
+
+	#[test]
+	fn parse_dep() {
+		check_cases([
+			(r#"dep "a";"#, DepStmt::File(expr_string("a"))),
+			("dep rule a;", DepStmt::Rule(ident("a"))),
+		]);
+	}
+
+	#[test]
+	fn parse_cmd() {
+		self::check_cases([
+			(r#""cmd""#, Command {
+				cwd:    None,
+				stdout: None,
+				args:   Array(vec![expr_string("cmd")]),
+			}),
+			(r#""cmd" "a" "b""#, Command {
+				cwd:    None,
+				stdout: None,
+				args:   Array(vec![expr_string("cmd"), expr_string("a"), expr_string("b")]),
+			}),
+			(r#"{ cwd "a/b/c"; stdout output; args "cmd" "a" "b"; }"#, Command {
+				cwd:    Some(expr_string("a/b/c")),
+				stdout: Some(ident("output")),
+				args:   Array(vec![expr_string("cmd"), expr_string("a"), expr_string("b")]),
+			}),
+		]);
+	}
+
+	#[test]
+	fn parse_array() {
+		self::check_cases([
+			(r#""a" "b" "c""#, array_expr_string(["a", "b", "c"])),
+			(r#"["a", "b", "c"]"#, array_expr_string(["a", "b", "c"])),
+			(r#"["a", "b", "c",]"#, array_expr_string(["a", "b", "c"])),
+		]);
+	}
+
+	#[test]
+	fn parse_expr() {
+		self::check_cases([
+			(r#""""#, EMPTY_EXPR),
+			(r#"deps_file static opt "a""#, Expr {
+				is_deps_file: true,
+				is_static: true,
+				is_opt: true,
+				..expr_string("a")
+			}),
+			(r#""a{b}c""#, Expr {
+				cmpts: vec![
+					expr_cmpt_string("a"),
+					expr_cmpt_ident("b", vec![]),
+					expr_cmpt_string("c"),
+				],
+				..EMPTY_EXPR
+			}),
+			(r#""a{b.dir_name}c""#, Expr {
+				cmpts: vec![
+					expr_cmpt_string("a"),
+					expr_cmpt_ident("b", vec![ExprOp::DirName]),
+					expr_cmpt_string("c"),
+				],
+				..EMPTY_EXPR
+			}),
+		]);
+
+		self::check_cases_fail::<Expr>([
+			(r#""abc"#, r#"Expected closing `"` after `"`"#),
+			(r#""{a.unknown}""#, r#"Unknown expression operator: "unknown""#),
+		]);
 	}
 }
