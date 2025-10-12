@@ -7,9 +7,9 @@ use {
 		rules::{Command, DepItem, Expr, ExprCmpt, ExprOp, OutItem, Pattern, Rule, Target},
 		util::ArcStr,
 	},
+	app_error::{AllErrs, Context, app_error},
 	smallvec::SmallVec,
 	std::{collections::HashMap, mem, path::PathBuf},
-	app_error::{AllErrs, Context, app_error},
 };
 
 /// Expander

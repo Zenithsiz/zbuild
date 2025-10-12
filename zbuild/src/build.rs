@@ -19,6 +19,7 @@ use {
 		rules::{Command, DepItem, Expr, ExprTree, OutItem, Rule, Target},
 		util::{self, ArcStr},
 	},
+	app_error::{AllErrs, Context, app_error},
 	dashmap::DashMap,
 	futures::{StreamExt, TryStreamExt, stream::FuturesUnordered},
 	indicatif::ProgressBar,
@@ -26,7 +27,6 @@ use {
 	smallvec::SmallVec,
 	std::{collections::HashMap, fmt, future::Future, process::Stdio, sync::Arc, time::SystemTime},
 	tokio::{fs, io::AsyncReadExt, process, sync::Semaphore, task},
-	app_error::{AllErrs, Context, app_error},
 };
 
 /// Event

@@ -3,9 +3,9 @@
 // Imports
 use {
 	crate::{AppError, rules::Target, util::ArcStr},
+	app_error::app_error,
 	itertools::Itertools,
 	std::{ops::Try, sync::Arc},
-	app_error::app_error,
 };
 
 /// Inner type for [`BuildReason`].

@@ -9,6 +9,7 @@
 // Imports
 use {
 	crate::{AppError, Builder, build, rules::Target, util::ArcStr},
+	app_error::Context,
 	dashmap::{DashMap, DashSet},
 	futures::{StreamExt, stream::FuturesUnordered},
 	notify_debouncer_full::Debouncer,
@@ -20,7 +21,6 @@ use {
 	},
 	tokio::sync::mpsc,
 	tokio_stream::wrappers::ReceiverStream,
-	app_error::Context,
 };
 
 /// A reverse dependency
