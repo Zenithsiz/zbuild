@@ -2034,6 +2034,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "zbuild-bin"
+version = "0.1.10"
+dependencies = [
+ "app-error",
+ "async-broadcast",
+ "clap",
+ "console-subscriber",
+ "dashmap",
+ "futures",
+ "indexmap 2.11.1",
+ "indicatif",
+ "itertools",
+ "notify",
+ "notify-debouncer-full",
+ "pin-project",
+ "smallvec",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "tracing-log",
+ "tracing-subscriber",
+ "unicode-ident",
+ "yoke",
+ "zbuild",
+]
+
+[[package]]
 name = "zbuild-test"
 version = "0.1.10"
 dependencies = [
