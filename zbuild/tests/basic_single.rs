@@ -3,20 +3,17 @@
 // Lints
 #![expect(clippy::tests_outside_test_module, reason = "We're an integration test")]
 
-// Modules
-mod util;
-
 // Imports
 use {
-	zbuild::ExitResult,
 	app_error::{Context, app_error},
+	zbuild::ExitResult,
 };
 
 /// Single rule and target
 #[tokio::test]
 #[tracing_test::traced_test]
 async fn basic_single() -> ExitResult {
-	let temp_dir = util::with_zbuild(
+	let temp_dir = zbuild_test::with_zbuild(
 		r#"
 rule create_file {
 	out "file.out";

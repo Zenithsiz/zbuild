@@ -1,0 +1,18 @@
+[package]
+name        = "zbuild-test"
+description = { workspace = true }
+edition     = { workspace = true }
+license     = { workspace = true }
+publish     = { workspace = true }
+repository  = { workspace = true }
+version     = { workspace = true }
+
+[dependencies]
+
+app-error = { workspace = true }
+tempfile  = { workspace = true }
+tracing   = { workspace = true }
+zbuild    = { workspace = true }
+
+[lints]
+workspace = true

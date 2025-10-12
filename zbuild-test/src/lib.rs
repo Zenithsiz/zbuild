@@ -1,10 +1,7 @@
-//! Utilities for all integration tests
+//! Zbuild testing utilities.
 
-// Lints
-#![allow(
-	dead_code,
-	reason = "This module is used from many tests, which might not use everything"
-)]
+// Features
+#![feature(must_not_suspend)]
 
 // Imports
 use {

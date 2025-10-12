@@ -3,15 +3,12 @@
 // Lints
 #![expect(clippy::tests_outside_test_module, reason = "We're an integration test")]
 
-// Modules
-mod util;
-
 // Imports
 use {
+	app_error::Context,
 	std::fs,
 	tempfile::TempDir,
 	zbuild::{AppError, Args, ExitResult},
-	app_error::Context,
 };
 
 /// Test for `--keep-going`

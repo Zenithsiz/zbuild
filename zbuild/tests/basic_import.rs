@@ -3,9 +3,6 @@
 // Lints
 #![expect(clippy::tests_outside_test_module, reason = "We're an integration test")]
 
-// Modules
-mod util;
-
 // Imports
 use zbuild::ExitResult;
 
@@ -13,7 +10,7 @@ use zbuild::ExitResult;
 #[tokio::test]
 #[tracing_test::traced_test]
 async fn basic_import() -> ExitResult {
-	let _temp_dir = util::with_zbuild_multiple(r#"include "a.zb";"#, [("a.zb", "")], []).await?;
+	let _temp_dir = zbuild_test::with_zbuild_multiple(r#"include "a.zb";"#, [("a.zb", "")], []).await?;
 
 	ExitResult::Ok
 }

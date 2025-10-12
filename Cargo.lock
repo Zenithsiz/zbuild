@@ -2030,6 +2030,17 @@ dependencies = [
  "tracing-test",
  "unicode-ident",
  "yoke",
+ "zbuild-test",
+]
+
+[[package]]
+name = "zbuild-test"
+version = "0.1.10"
+dependencies = [
+ "app-error",
+ "tempfile",
+ "tracing",
+ "zbuild",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
 [workspace]
 
-members  = ["zbuild"]
+members  = ["zbuild", "zbuild-test"]
 resolver = "2"
 
 [workspace.package]
@@ -14,7 +14,8 @@ version     = "0.1.10"
 [workspace.dependencies]
 
 # Workspace
-zbuild = { path = "zbuild" }
+zbuild      = { path = "zbuild" }
+zbuild-test = { path = "zbuild-test" }
 
 app-error             = { git = "https://github.com/Zenithsiz/app-error", rev = "9a7c202f54ef449d02e2b6ace74ad916f6e6720e" }
 async-broadcast       = "0.7.2"
