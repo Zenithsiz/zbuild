@@ -1,18 +1,25 @@
-[package]
-edition     = "2024"
-name        = "zbuild"
-description = "Make-like build system"
-license     = "MIT OR Apache-2.0"
-version     = "0.1.10"
-repository  = "https://github.com/zenithsiz/zbuild"
-publish     = ["filipejr"]
+[workspace]
 
-[dependencies]
+members  = ["zbuild"]
+resolver = "2"
+
+[workspace.package]
+description = "Make-like build system"
+edition     = "2024"
+license     = "MIT OR Apache-2.0"
+publish     = ["filipejr"]
+repository  = "https://github.com/zenithsiz/zbuild"
+version     = "0.1.10"
+
+[workspace.dependencies]
+
+# Workspace
+zbuild = { path = "zbuild" }
 
 app-error             = { git = "https://github.com/Zenithsiz/app-error", rev = "9a7c202f54ef449d02e2b6ace74ad916f6e6720e" }
 async-broadcast       = "0.7.2"
-clap                  = { features = ["derive"], version = "4.5.47" }
-console-subscriber    = { optional = true, version = "0.4.1" }
+clap                  = "4.5.47"
+console-subscriber    = "0.4.1"
 dashmap               = "6.1.0"
 futures               = "0.3.31"
 indexmap              = "2.11.1"
@@ -21,37 +28,30 @@ itertools             = "0.14.0"
 notify                = "8.2.0"
 notify-debouncer-full = "0.6.0"
 pin-project           = "1.1.10"
-smallvec              = { features = ["may_dangle"], version = "1.15.1" }
-tokio                 = { features = ["full"], version = "1.47.1" }
+smallvec              = "1.15.1"
+tempfile              = "3.22.0"
+tokio                 = "1.47.1"
 tokio-stream          = "0.1.17"
 tracing               = "0.1.41"
 tracing-log           = "0.2.0"
-tracing-subscriber    = { features = ["env-filter"], version = "0.3.20" }
+tracing-subscriber    = "0.3.20"
+tracing-test          = "0.2.5"
 unicode-ident         = "1.0.19"
 yoke                  = "0.8.0"
 
-[dev-dependencies]
-
-tempfile     = "3.22.0"
-tracing-test = { version = "0.2.5", features = ["no-env-filter"] }
-
-[features]
-
-tokio-console = ["dep:console-subscriber"]
-
-[lints]
+[workspace.lints]
 
 # This project doesn't require unsafe code (outside of some modules)
 rust.unsafe_code            = "deny"
 rust.unsafe_op_in_unsafe_fn = "deny"
 
 # Group lints
-clippy.pedantic = { level = "warn", priority = -1 }
 clippy.nursery  = { level = "warn", priority = -1 }
+clippy.pedantic = { level = "warn", priority = -1 }
 
 # Prefer `expect` instead of `unwrap`
-clippy.unwrap_used = "deny"
 clippy.expect_used = "allow"
+clippy.unwrap_used = "deny"
 
 # We must specify `'_` to avoid surprises
 rust.elided_lifetimes_in_paths = "deny"
@@ -61,34 +61,34 @@ rust.missing_copy_implementations  = "warn"
 rust.missing_debug_implementations = "warn"
 
 # Misc.
-rust.noop_method_call               = "warn"
-rust.unused_results                 = "warn"
+clippy.let_underscore_untyped       = "warn"
 rust.explicit_outlives_requirements = "warn"
 rust.meta_variable_misuse           = "warn"
 rust.must_not_suspend               = "warn"
+rust.noop_method_call               = "warn"
 rust.single_use_lifetimes           = "warn"
 rust.trivial_numeric_casts          = "warn"
 rust.unused_lifetimes               = "warn"
 rust.unused_macro_rules             = "warn"
+rust.unused_results                 = "warn"
 rust.variant_size_differences       = "warn"
-clippy.let_underscore_untyped       = "warn"
 
 # False positives
 clippy.significant_drop_tightening = "allow"
 
 # Style
 clippy.implicit_return          = "allow"
-clippy.multiple_inherent_impl   = "allow"
-clippy.pattern_type_mismatch    = "allow"
-clippy.match_bool               = "allow"
-clippy.single_match_else        = "allow" # Note: `match` reads easier than `if / else`
-clippy.option_if_let_else       = "allow"
-clippy.self_named_module_files  = "allow"
 clippy.items_after_statements   = "allow"
-clippy.module_name_repetitions  = "allow"
+clippy.match_bool               = "allow"
 clippy.module_inception         = "allow"
-clippy.separated_literal_suffix = "allow"
+clippy.module_name_repetitions  = "allow"
+clippy.multiple_inherent_impl   = "allow"
+clippy.option_if_let_else       = "allow"
+clippy.pattern_type_mismatch    = "allow"
 clippy.ref_patterns             = "allow" # Matching on a vale and adding `ref` is easier than matching on ref and de-referencing values within the body
+clippy.self_named_module_files  = "allow"
+clippy.separated_literal_suffix = "allow"
+clippy.single_match_else        = "allow" # Note: `match` reads easier than `if / else`
 
 
 # Callers don't care about which error happened.

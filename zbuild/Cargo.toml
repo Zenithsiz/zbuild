@@ -1,0 +1,44 @@
+[package]
+edition     = { workspace = true }
+name        = "zbuild"
+description = { workspace = true }
+license     = { workspace = true }
+version     = { workspace = true }
+repository  = { workspace = true }
+publish     = { workspace = true }
+
+
+[features]
+
+tokio-console = ["dep:console-subscriber"]
+
+[dependencies]
+
+app-error             = { workspace = true }
+async-broadcast       = { workspace = true }
+clap                  = { features = ["derive"], workspace = true }
+console-subscriber    = { optional = true, workspace = true }
+dashmap               = { workspace = true }
+futures               = { workspace = true }
+indexmap              = { workspace = true }
+indicatif             = { workspace = true }
+itertools             = { workspace = true }
+notify                = { workspace = true }
+notify-debouncer-full = { workspace = true }
+pin-project           = { workspace = true }
+smallvec              = { features = ["may_dangle"], workspace = true }
+tokio                 = { features = ["full"], workspace = true }
+tokio-stream          = { workspace = true }
+tracing               = { workspace = true }
+tracing-log           = { workspace = true }
+tracing-subscriber    = { features = ["env-filter"], workspace = true }
+unicode-ident         = { workspace = true }
+yoke                  = { workspace = true }
+
+[dev-dependencies]
+
+tempfile     = { workspace = true }
+tracing-test = { workspace = true, features = ["no-env-filter"] }
+
+[lints]
+workspace = true
