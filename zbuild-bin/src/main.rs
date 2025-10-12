@@ -22,12 +22,8 @@
 	reason = "We're a binary that should talk to the user"
 )]
 
-// Modules
-mod logger;
-
 // Imports
 use {
-	self::logger::Logger,
 	app_error::Context,
 	clap::Parser,
 	std::{
@@ -36,6 +32,7 @@ use {
 	},
 	tokio::runtime,
 	zbuild::{Args, ExitResult},
+	zutil_logger::Logger,
 };
 
 #[expect(
@@ -44,14 +41,17 @@ use {
 )]
 fn main() -> ExitResult {
 	// Initialize stderr-only logging
-	let logger = Logger::init_temp();
+	let logger = {
+		let default_filters = |default| [(None, default), (Some("wreq"), "info")];
+		Logger::new(std::io::stderr, (), default_filters("info"), default_filters("debug"))
+	};
 
 	// Get all args
 	let args = Args::parse();
 	tracing::debug!(?args, "Arguments");
 
-	// Initialize the logger properly now
-	logger.init_global(args.log_file.as_deref());
+	// Set the logger file
+	logger.set_file(args.log_file.as_deref());
 
 	// Build the tokio runtime
 	let mut runtime_builder = runtime::Builder::new_multi_thread();

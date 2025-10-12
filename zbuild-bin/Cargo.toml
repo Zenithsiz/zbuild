@@ -28,6 +28,7 @@ tokio              = { features = ["full"], workspace = true }
 tracing            = { workspace = true }
 tracing-log        = { workspace = true }
 tracing-subscriber = { features = ["env-filter"], workspace = true }
+zutil-logger       = { workspace = true }
 
 [lints]
 workspace = true
