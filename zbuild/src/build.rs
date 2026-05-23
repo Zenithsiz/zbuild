@@ -20,12 +20,20 @@ use {
 		util::{self, ArcStr},
 	},
 	app_error::{AllErrs, Context, app_error},
+	core::time::Duration,
 	dashmap::DashMap,
 	futures::{StreamExt, TryStreamExt, stream::FuturesUnordered},
 	indicatif::ProgressBar,
 	itertools::Itertools,
 	smallvec::SmallVec,
-	std::{collections::HashMap, fmt, future::Future, process::Stdio, sync::Arc, time::SystemTime},
+	std::{
+		collections::HashMap,
+		fmt,
+		future::Future,
+		process::Stdio,
+		sync::{Arc, nonpoison::Mutex},
+		time::SystemTime,
+	},
 	tokio::{fs, io::AsyncReadExt, process, sync::Semaphore, task},
 };
 
@@ -46,10 +54,64 @@ pub enum Event {
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub struct TargetRule {
 	/// Name
-	name: ArcStr,
+	pub name: ArcStr,
 
 	/// Patterns
-	pats: SmallVec<[(ArcStr, ArcStr); 1]>,
+	pub pats: SmallVec<[(ArcStr, ArcStr); 1]>,
+}
+
+/// Rule durations
+#[derive(PartialEq, Eq, Clone, Default, Debug)]
+pub struct RuleDurations {
+	pub find:     Duration,
+	pub check_fs: Duration,
+	pub exec:     Vec<Duration>,
+}
+
+impl RuleDurations {
+	/// Returns the total duration
+	pub fn total(&self) -> Duration {
+		let Self {
+			find,
+			check_fs,
+			ref exec,
+		} = *self;
+
+		find + check_fs + exec.iter().sum()
+	}
+}
+
+/// Rule statistics
+#[derive(PartialEq, Eq, Clone, Default, Debug)]
+pub struct RuleStats {
+	/// Total builds
+	pub builds: usize,
+
+	/// Durations
+	pub durations: RuleDurations,
+}
+
+impl RuleStats {
+	/// Formats details on these rules as an indented list.
+	pub fn fmt_details(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+		writeln!(f, "\tBuilds: {}", self.builds)?;
+		writeln!(f, "\tDurations:")?;
+
+		{
+			let RuleDurations {
+				find,
+				check_fs,
+				ref exec,
+			} = self.durations;
+			writeln!(f, "\t\tfind: {find:.2?}")?;
+			writeln!(f, "\t\tcheck_fs: {check_fs:.2?}")?;
+			for (exec_idx, exec) in exec.iter().enumerate() {
+				writeln!(f, "\t\texec[{exec_idx}]: {exec:.2?}")?;
+			}
+		}
+
+		Ok(())
+	}
 }
 
 /// Builder
@@ -89,6 +151,9 @@ pub struct Builder {
 
 	/// Progress bar
 	progress_bar: Option<ProgressBar>,
+
+	/// Rules durations
+	rules_stats: Option<DashMap<Option<ArcStr>, Mutex<RuleStats>>>,
 }
 
 impl Builder {
@@ -100,6 +165,7 @@ impl Builder {
 		stop_builds_on_first_err: bool,
 		always_build: bool,
 		progress_bar: Option<ProgressBar>,
+		track_rule_stats: bool,
 	) -> Result<Self, AppError> {
 		let (event_tx, event_rx) = async_broadcast::broadcast(jobs);
 		let event_rx = event_rx.deactivate();
@@ -143,6 +209,7 @@ impl Builder {
 			stop_builds_on_first_err,
 			always_build,
 			progress_bar,
+			rules_stats: track_rule_stats.then(DashMap::new),
 		})
 	}
 
@@ -154,6 +221,29 @@ impl Builder {
 			.collect::<FuturesUnordered<_>>()
 			.collect()
 			.await
+	}
+
+	/// Returns all rule stats
+	pub fn rules_stats(&self) -> Vec<(Option<ArcStr>, RuleStats)> {
+		let Some(rules_stats) = &self.rules_stats else {
+			return vec![];
+		};
+
+		rules_stats
+			.iter()
+			.map(|entry| (entry.key().clone(), entry.value().lock().clone()))
+			.collect()
+	}
+
+	/// Accesses a rule statistics
+	fn with_rule_stats(&self, rule_name: Option<&ArcStr>, f: impl FnOnce(&mut RuleStats)) {
+		let Some(rules_stats) = &self.rules_stats else {
+			return;
+		};
+
+		let rule_stats = rules_stats.entry(rule_name.cloned()).or_default();
+		let mut rule_stats = rule_stats.lock();
+		f(&mut rule_stats);
 	}
 
 	/// Sends an event, if any are subscribers
@@ -253,6 +343,7 @@ impl Builder {
 	}
 
 	/// Builds a target
+	#[expect(clippy::too_many_lines, reason = "TODO: Split this function into smaller ones")]
 	pub async fn build<'a>(
 		self: &'a Arc<Self>,
 		target: &'a Target<ArcStr>,
@@ -269,42 +360,52 @@ impl Builder {
 		reason.check_recursively(&target)?;
 
 		// Get the rule for the target
-		let Some((rule, target_rule)) = self.target_rule(&target)? else {
+		let (find_rule_duration, Some((rule, target_rule))) = util::try_measure(|| self.target_rule(&target))? else {
 			match *target {
-				Target::File { ref file, .. } => match fs::symlink_metadata(&**file).await {
-					Ok(metadata) => {
-						let build_time = metadata
-							.modified()
-							.with_context(|| format!("Unable to get file modified time: {file:?}"))?;
-						tracing::trace!(%target, ?build_time, "Found target file");
-						return Ok((
-							BuildResult {
-								build_time,
-								built: false,
-							},
-							None,
-						));
-					},
-					Err(_) if ignore_missing => {
-						tracing::info!(?file, "Ignoring missing target file");
-						return Ok((
-							BuildResult {
-								// Note: We simply pretend the file was built right now
-								// TODO: Check if we should instead use a really old time?
-								build_time: SystemTime::now(),
-								built:      false,
-							},
-							None,
-						));
-					},
-					Err(err) =>
-						do yeet AppError::new(&err)
-							.with_context(|| format!("Missing file {file:?} and no rule to build it found")),
+				Target::File { ref file, .. } => {
+					let (check_duration, res) = util::measure_async(fs::symlink_metadata(&**file)).await;
+					self.with_rule_stats(None, |target_rules| {
+						target_rules.durations.check_fs += check_duration;
+					});
+
+					match res {
+						Ok(metadata) => {
+							let build_time = metadata
+								.modified()
+								.with_context(|| format!("Unable to get file modified time: {file:?}"))?;
+							tracing::trace!(%target, ?build_time, "Found target file");
+							return Ok((
+								BuildResult {
+									build_time,
+									built: false,
+								},
+								None,
+							));
+						},
+						Err(_) if ignore_missing => {
+							tracing::info!(?file, "Ignoring missing target file");
+							return Ok((
+								BuildResult {
+									// Note: We simply pretend the file was built right now
+									// TODO: Check if we should instead use a really old time?
+									build_time: SystemTime::now(),
+									built:      false,
+								},
+								None,
+							));
+						},
+						Err(err) =>
+							do yeet AppError::new(&err)
+								.with_context(|| format!("Missing file {file:?} and no rule to build it found")),
+					}
 				},
 				// Note: If `target_rule` returns `Err` if this was a rule, so we can never reach here
 				Target::Rule { .. } => unreachable!(),
 			}
 		};
+		self.with_rule_stats(Some(&target_rule.name), |rule_stats| {
+			rule_stats.durations.find += find_rule_duration;
+		});
 
 		// Get the built lock, or create it
 		let build_lock = self
@@ -361,7 +462,7 @@ impl Builder {
 						.await
 				}
 			}
-			build_inner(this, target, rule, ignore_missing, reason, target_rule)
+			build_inner(this, target, rule, ignore_missing, reason, target_rule.clone())
 		})
 		.await
 		.context("Unable to join task")?;
@@ -369,6 +470,7 @@ impl Builder {
 		match res {
 			Ok(res) => {
 				build_guard.finish(res);
+				self.with_rule_stats(Some(&target_rule.name), |rule_stats| rule_stats.builds += 1);
 
 				Ok((res, Some(build_guard.into_dep())))
 			},
@@ -438,11 +540,14 @@ impl Builder {
 
 		// Then get the build time
 		// Note: If we don't have any outputs, just use the current time as the build time
-		let cur_build_time = self::rule_last_build_time(rule).await?.unwrap_or_else(SystemTime::now);
+		let (build_time_duration, cur_build_time) = util::try_measure_async(self::rule_last_build_time(rule)).await?;
 		let res = BuildResult {
-			build_time: cur_build_time,
+			build_time: cur_build_time.unwrap_or_else(SystemTime::now),
 			built:      needs_rebuilt,
 		};
+		self.with_rule_stats(Some(&target_rule.name), |rule_stats| {
+			rule_stats.durations.check_fs += build_time_duration;
+		});
 
 		if let Some(progress_bar) = &self.progress_bar {
 			progress_bar.inc(1);
@@ -452,7 +557,7 @@ impl Builder {
 	}
 
 	/// Builds all dependencies of `target`
-	#[expect(clippy::too_many_lines, reason = "TODO: Split this function onto smaller ones")]
+	#[expect(clippy::too_many_lines, reason = "TODO: Split this function into smaller ones")]
 	async fn build_deps_unchecked(
 		self: &Arc<Self>,
 		target: &Target<ArcStr>,
@@ -752,8 +857,9 @@ impl Builder {
 		};
 
 		let mut stdout_aliases = HashMap::new();
-		for cmd in &rule.exec.cmds {
-			self.exec_cmd(rule, cmd, target_rule, &mut stdout_aliases).await?;
+		for (cmd_idx, cmd) in rule.exec.cmds.iter().enumerate() {
+			self.exec_cmd(rule, cmd_idx, cmd, target_rule, &mut stdout_aliases)
+				.await?;
 		}
 
 		Ok(())
@@ -764,6 +870,7 @@ impl Builder {
 	async fn exec_cmd(
 		&self,
 		rule: &Rule<ArcStr>,
+		cmd_idx: usize,
 		cmd: &Command<Expr>,
 		target_rule: &TargetRule,
 		stdout_aliases: &mut HashMap<ArcStr, Expr>,
@@ -820,6 +927,10 @@ impl Builder {
 		})
 		.await?;
 		tracing::trace!(target: "zbuild_exec", rule_name=?rule.name, ?program, ?args, ?duration, "Execution duration");
+		self.with_rule_stats(Some(&target_rule.name), |rule_stats| {
+			rule_stats.durations.exec.resize_with(cmd_idx + 1, Duration::default);
+			rule_stats.durations.exec[cmd_idx] += duration;
+		});
 
 		if let Some(stdout_alias) = &cmd.stdout {
 			// Read the stdout

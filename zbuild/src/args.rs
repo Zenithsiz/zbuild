@@ -59,6 +59,10 @@ pub struct Args {
 	#[clap(long = "always-build")]
 	pub always_build: bool,
 
+	/// Tracks statistics for each rule processed
+	#[clap(long = "track-rule-stats")]
+	pub track_rule_stats: bool,
+
 	/// Disables the progress bar
 	#[clap(long = "no-progress-bar")]
 	pub no_progress_bar: bool,
@@ -93,6 +97,7 @@ impl Default for Args {
 			ignore_missing: false,
 			keep_going: false,
 			always_build: false,
+			track_rule_stats: false,
 			no_progress_bar: false,
 			watch: false,
 			watcher_debouncer_timeout_ms: None,

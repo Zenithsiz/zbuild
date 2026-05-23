@@ -15,7 +15,9 @@
 	unwrap_infallible,
 	never_type,
 	try_trait_v2_yeet,
-	coverage_attribute
+	coverage_attribute,
+	nonpoison_mutex,
+	sync_nonpoison
 )]
 // Lints
 #![allow(
@@ -49,6 +51,7 @@ use {
 		rules::Rules,
 	},
 	app_error::Context,
+	core::cmp,
 	futures::{StreamExt, TryFutureExt, stream::FuturesUnordered},
 	indicatif::ProgressBar,
 	smallvec::SmallVec,
@@ -169,6 +172,7 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 		!args.watch && !args.keep_going,
 		args.always_build,
 		progress_bar.clone(),
+		args.track_rule_stats,
 	)
 	.context("Unable to create builder")?;
 	let builder = Arc::new(builder);
@@ -224,6 +228,23 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 		.count();
 	tracing::info!("Built {built_targets} targets in {elapsed:.2?}");
 	tracing::info!("Checked {total_targets} targets in {elapsed:.2?}");
+
+	let mut rules_durations = builder.rules_stats();
+	rules_durations.sort_by_cached_key(|(_, rule_stats)| cmp::Reverse(rule_stats.durations.total()));
+	for (target_rule, rule_stats) in rules_durations {
+		match target_rule {
+			Some(target_rule) => tracing::info!(
+				"Rule {target_rule:?} took {:.2?}\n{}",
+				rule_stats.durations.total(),
+				fmt::from_fn(|f| rule_stats.fmt_details(f))
+			),
+			None => tracing::info!(
+				"Non-rule targets took {:.2?}\n{}",
+				rule_stats.durations.total(),
+				fmt::from_fn(|f| rule_stats.fmt_details(f))
+			),
+		}
+	}
 
 	match failed_targets.is_empty() {
 		true => Ok(()),

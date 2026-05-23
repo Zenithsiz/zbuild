@@ -106,6 +106,10 @@ clippy.future_not_send = "allow"
 # We want to format paths with quotes
 clippy.unnecessary_debug_formatting = "allow"
 
+# This triggers when removing plurals in the middle
+# of a variable, so we can't use it
+clippy.similar_names = "allow"
+
 # TODO: Warn on this always once we resolve the issues of it triggering
 #       on integration tests
 # rust.unused_crate_dependencies      = "warn"

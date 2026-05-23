@@ -42,8 +42,29 @@ pub async fn fs_try_exists_symlink(path: impl AsRef<Path> + Send) -> Result<bool
 	}
 }
 
+/// Measures the duration of a fallible function
+pub fn try_measure<F: FnOnce() -> Result<T, E>, T, E>(f: F) -> Result<(Duration, T), E> {
+	let (duration, res) = self::measure(f);
+	Ok((duration, res?))
+}
+
+/// Measures the duration of a function
+pub fn measure<F: FnOnce() -> T, T>(f: F) -> (Duration, T) {
+	let start = Instant::now();
+	let res = f();
+	let elapsed = start.elapsed();
+
+	(elapsed, res)
+}
+
 /// Measures the duration of a fallible future
 pub async fn try_measure_async<F: Future<Output = Result<T, E>>, T, E>(fut: F) -> Result<(Duration, T), E> {
+	let (duration, res) = self::measure_async(fut).await;
+	Ok((duration, res?))
+}
+
+/// Measures the duration of a future
+pub async fn measure_async<F: Future<Output = T>, T>(fut: F) -> (Duration, T) {
 	/// Wrapper future for measuring the future
 	#[pin_project]
 	struct Wrapper<F> {
@@ -55,17 +76,14 @@ pub async fn try_measure_async<F: Future<Output = Result<T, E>>, T, E>(fut: F) -
 		start: Option<Instant>,
 	}
 
-	impl<F: Future<Output = Result<T, E>>, T, E> Future for Wrapper<F> {
-		type Output = Result<(Duration, T), E>;
+	impl<F: Future<Output = T>, T> Future for Wrapper<F> {
+		type Output = (Duration, T);
 
 		fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<Self::Output> {
 			let mut this = self.project();
 			let start = this.start.get_or_insert_with(Instant::now);
 
-			this.fut
-				.as_mut()
-				.poll(cx)
-				.map(|res| res.map(|value| (start.elapsed(), value)))
+			this.fut.as_mut().poll(cx).map(|value| (start.elapsed(), value))
 		}
 	}
 
