@@ -299,7 +299,7 @@ impl Builder {
 					},
 					Err(err) =>
 						do yeet AppError::new(&err)
-							.context(format!("Missing file {file:?} and no rule to build it found")),
+							.with_context(|| format!("Missing file {file:?} and no rule to build it found")),
 				},
 				// Note: If `target_rule` returns `Err` if this was a rule, so we can never reach here
 				Target::Rule { .. } => unreachable!(),
@@ -706,8 +706,8 @@ impl Builder {
 		// Build all dependencies
 		// Note: We don't want to fail-early, see the note on `deps` in `build_unchecked`
 		let deps_res = deps
-			.into_iter()
-			.flat_map(|(_, deps)| deps)
+			.into_values()
+			.flatten()
 			.map(|dep| {
 				let dep = ArcStr::from(util::normalize_path(&dep));
 				tracing::trace!(?rule.name, ?dep, "Found rule dependency");

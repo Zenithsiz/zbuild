@@ -744,7 +744,7 @@ macro decl_any_of($Name:ident, $($T:ident),* $(,)?) {
 				}.expect("Failed to write into string");
 			)*
 
-			Err(app_error::AppError::msg(err))
+			Err(AppError::fmt(err))
 		}
 	}
 }

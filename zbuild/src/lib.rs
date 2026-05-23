@@ -4,16 +4,10 @@
 #![feature(
 	exit_status_error,
 	decl_macro,
-	box_patterns,
 	yeet_expr,
 	must_not_suspend,
-	assert_matches,
 	try_trait_v2,
-	if_let_guard,
 	pattern,
-	vec_into_raw_parts,
-	ptr_metadata,
-	extend_one,
 	try_blocks,
 	macro_metavar_expr,
 	macro_metavar_expr_concat,
@@ -224,8 +218,8 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 	let targets = builder.build_results().await;
 	let total_targets = targets.len();
 	let built_targets = targets
-		.iter()
-		.filter_map(|(_, res)| res.as_ref())
+		.values()
+		.filter_map(|res| res.as_ref())
 		.filter(|res| res.as_ref().is_ok_and(|res| res.built))
 		.count();
 	tracing::info!("Built {built_targets} targets in {elapsed:.2?}");

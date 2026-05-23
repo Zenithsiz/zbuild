@@ -18,29 +18,29 @@ zbuild      = { path = "zbuild" }
 zbuild-bin  = { path = "zbuild-bin" }
 zbuild-test = { path = "zbuild-test" }
 
-app-error             = { git = "https://github.com/Zenithsiz/app-error", rev = "9a7c202f54ef449d02e2b6ace74ad916f6e6720e" }
+app-error             = "0.1.0"
 async-broadcast       = "0.7.2"
-clap                  = "4.5.47"
-console-subscriber    = "0.4.1"
-dashmap               = "6.1.0"
-futures               = "0.3.31"
-indexmap              = "2.11.1"
-indicatif             = "0.18.0"
+clap                  = "4.6.1"
+console-subscriber    = "0.5.0"
+dashmap               = "6.2.1"
+futures               = "0.3.32"
+indexmap              = "2.14.0"
+indicatif             = "0.18.4"
 itertools             = "0.14.0"
 notify                = "8.2.0"
-notify-debouncer-full = "0.6.0"
-pin-project           = "1.1.10"
+notify-debouncer-full = "0.7.0"
+pin-project           = "1.1.13"
 smallvec              = "1.15.1"
-tempfile              = "3.22.0"
-tokio                 = "1.47.1"
-tokio-stream          = "0.1.17"
-tracing               = "0.1.41"
+tempfile              = "3.27.0"
+tokio                 = "1.52.3"
+tokio-stream          = "0.1.18"
+tracing               = "0.1.44"
 tracing-log           = "0.2.0"
-tracing-subscriber    = "0.3.20"
-tracing-test          = "0.2.5"
-unicode-ident         = "1.0.19"
-yoke                  = "0.8.0"
-zutil-logger          = { git = "https://github.com/Zenithsiz/zutil", rev = "2913756373a37f36e50c2ffc90090b2ff1a7ce49" }
+tracing-subscriber    = "0.3.23"
+tracing-test          = "0.2.6"
+unicode-ident         = "1.0.24"
+yoke                  = "0.8.2"
+zutil-logger          = "0.1.0"
 
 [workspace.lints]
 

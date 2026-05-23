@@ -1,20 +1,7 @@
 //! `Zbuild` build system
 
 // Features
-#![feature(
-	exit_status_error,
-	decl_macro,
-	box_patterns,
-	yeet_expr,
-	must_not_suspend,
-	assert_matches,
-	try_trait_v2,
-	if_let_guard,
-	pattern,
-	vec_into_raw_parts,
-	ptr_metadata,
-	type_alias_impl_trait
-)]
+#![feature(must_not_suspend)]
 // Lints
 #![allow(
 	clippy::print_stdout,
@@ -40,11 +27,8 @@ use {
 	reason = "Runtime builder method provides a lot of unused `&mut Builder`"
 )]
 fn main() -> ExitResult {
-	// Initialize stderr-only logging
-	let logger = {
-		let default_filters = |default| [(None, default), (Some("wreq"), "info")];
-		Logger::new(std::io::stderr, (), default_filters("info"), default_filters("debug"))
-	};
+	// Initialize the logger
+	let logger = Logger::new();
 
 	// Get all args
 	let args = Args::parse();

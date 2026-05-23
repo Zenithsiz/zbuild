@@ -44,7 +44,8 @@ impl ArcStr {
 			// If we're backed by anything, check in relation to it
 			Some(inner) => inner
 				.substr_range(self)
-				.expect("String pointer should be within allocation"),
+				.expect("String pointer should be within allocation")
+				.into(),
 
 			// Otherwise, we're all of ourselves
 			None => 0..self.len(),
@@ -77,7 +78,7 @@ impl ArcStr {
 					// If we're unique, slice the parts we don't care about and return
 					Some(s) => {
 						s.truncate(range.end);
-						let _ = s.drain(..range.start);
+						drop(s.drain(..range.start));
 
 						s
 					},
@@ -217,7 +218,7 @@ impl From<ArcStr> for String {
 				// If we're unique, slice the parts we don't care about and return
 				Ok(mut inner) => {
 					inner.truncate(range.end);
-					let _ = inner.drain(..range.start);
+					drop(inner.drain(..range.start));
 
 					inner
 				},

@@ -3,7 +3,7 @@
 // Imports
 use {
 	std::{
-		assert_matches::assert_matches,
+		assert_matches,
 		mem,
 		sync::{
 			Arc,

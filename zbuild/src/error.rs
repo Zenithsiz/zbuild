@@ -60,5 +60,5 @@ impl FromResidual<Yeet<AppError>> for ExitResult {
 
 /// Function to setup pretty printing
 pub fn pretty(err: &AppError) -> app_error::PrettyDisplay<'_, AppErrorData> {
-	err.pretty().with_ignore_err(|_, data| data.should_ignore)
+	err.pretty().with_ignore_err(|data| data.should_ignore)
 }
