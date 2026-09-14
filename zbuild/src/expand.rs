@@ -113,7 +113,8 @@ impl Expander {
 					is_deps_file,
 				}),
 			})
-			.collect::<AllErrs<_, _>>()?;
+			.collect::<AllErrs<_, _>>()
+			.context("Unable to expand outputs")?;
 
 		let deps = rule
 			.deps
@@ -132,7 +133,8 @@ impl Expander {
 				}),
 				DepItem::Rule { ref name } => Ok(DepItem::Rule { name: name.clone() }),
 			})
-			.collect::<AllErrs<_, _>>()?;
+			.collect::<AllErrs<_, _>>()
+			.context("Unable to expand dependencies")?;
 
 		Ok(Rule {
 			name: rule.name.clone(),
@@ -156,7 +158,8 @@ impl Expander {
 				.args
 				.iter()
 				.map(|arg| self.expand_expr(arg, visitor))
-				.collect::<AllErrs<_, _>>()?,
+				.collect::<AllErrs<_, _>>()
+				.context("Unable to expand arguments")?,
 		})
 	}
 
@@ -183,7 +186,8 @@ impl Expander {
 								.with_context(|| format!("Unable to expand expression {expr}"))?,
 						))
 					})
-					.collect::<AllErrs<_, _>>()?;
+					.collect::<AllErrs<_, _>>()
+					.context("Unable to expand expressions")?;
 				Target::Rule {
 					rule: self
 						.expand_expr(rule, visitor)

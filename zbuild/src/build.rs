@@ -608,7 +608,8 @@ impl Builder {
 			})
 			.collect::<FuturesUnordered<_>>()
 			.collect::<AllErrs<Vec<_>, _>>()
-			.await?;
+			.await
+			.context("Unable to gather normal dependencies")?;
 
 		// And all output dependencies
 		#[expect(
@@ -639,7 +640,8 @@ impl Builder {
 			.collect::<FuturesUnordered<_>>()
 			.filter_map(move |res| async move { res.transpose() })
 			.collect::<AllErrs<Vec<_>, _>>()
-			.await?;
+			.await
+			.context("Unable to gather output dependencies")?;
 
 		// Then build all dependencies, as well as any dependency files
 		let deps = util::chain!(normal_deps, out_deps)
@@ -738,7 +740,8 @@ impl Builder {
 			.map_ok(futures::stream::iter)
 			.try_flatten()
 			.collect::<AllErrs<Vec<_>, _>>()
-			.await?;
+			.await
+			.context("Unable to build dependencies")?;
 
 		Ok(deps)
 	}
@@ -793,7 +796,10 @@ impl Builder {
 		match oks.is_empty() {
 			true => {
 				// If we had no matching outputs, try to return all errors
-				errs.into_iter().map(|(_, err)| Err(err)).collect::<AllErrs<(), _>>()?;
+				errs.into_iter()
+					.map(|(_, err)| Err(err))
+					.collect::<AllErrs<(), _>>()
+					.context("No valid output found for this dependency file")?;
 
 				// If no errors existed, return an error for that
 				app_error::bail!("Dependencies file {deps_file:?} had no dependencies");
@@ -837,7 +843,8 @@ impl Builder {
 			})
 			.collect::<FuturesUnordered<_>>()
 			.collect::<AllErrs<_, _>>()
-			.await?;
+			.await
+			.context("Unable to build all dependencies from dependency file")?;
 
 		Ok(deps_res)
 	}
@@ -990,7 +997,8 @@ async fn parse_deps_file(file: &str) -> Result<HashMap<ArcStr, Vec<ArcStr>>, App
 
 			Ok((output, deps))
 		})
-		.collect::<AllErrs<_, _>>()?;
+		.collect::<AllErrs<_, _>>()
+		.with_context(|| format!("Unable to parse dependency file {file:?}"))?;
 
 	Ok(deps)
 }
@@ -1020,7 +1028,8 @@ async fn rule_last_build_time(rule: &Rule<ArcStr>) -> Result<Option<SystemTime>,
 		})
 		.collect::<FuturesUnordered<_>>()
 		.collect::<AllErrs<Vec<_>, _>>()
-		.await?
+		.await
+		.context("Unable to find modified time for any output")?
 		.into_iter()
 		.min();
 	Ok(built_time)
