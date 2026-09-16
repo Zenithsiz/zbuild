@@ -85,7 +85,10 @@ pub struct Command<T> {
 	/// Stdout
 	pub stdout: Option<ArcStr>,
 
-	/// All arguments
+	/// Program
+	pub program: T,
+
+	/// Arguments
 	pub args: Vec<T>,
 }
 
@@ -93,9 +96,10 @@ impl Command<Expr> {
 	/// Creates a new command from it's ast
 	pub fn from_ast(cmd: ast::Command) -> Self {
 		Self {
-			cwd:    cmd.cwd.map(Expr::from_ast),
-			stdout: cmd.stdout.map(|stdout| stdout.0),
-			args:   cmd.args.0.into_iter().map(Expr::from_ast).collect(),
+			cwd:     cmd.cwd.map(Expr::from_ast),
+			stdout:  cmd.stdout.map(|stdout| stdout.0),
+			program: Expr::from_ast(cmd.program),
+			args:    cmd.args.0.into_iter().map(Expr::from_ast).collect(),
 		}
 	}
 }

@@ -15,7 +15,8 @@
 	try_trait_v2_yeet,
 	coverage_attribute,
 	nonpoison_mutex,
-	sync_nonpoison
+	sync_nonpoison,
+	vec_try_remove
 )]
 // Lints
 #![allow(

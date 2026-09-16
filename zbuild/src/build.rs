@@ -892,15 +892,9 @@ impl Builder {
 			.expand_cmd::<ArcStr>(cmd, &expand_visitor)
 			.with_context(|| format!("Unable to expand rule command {:?}", rule.name))?;
 
-		// Get the program name
-		let (program, args) = cmd
-			.args
-			.split_first()
-			.ok_or_else(|| app_error!("Rule {:?} executable was empty", rule.name))?;
-
 		// Create the command and feed in all the arguments
-		let mut os_cmd = process::Command::new(&**program);
-		os_cmd.args(args.iter().map(|arg| &**arg));
+		let mut os_cmd = process::Command::new(&*cmd.program);
+		os_cmd.args(cmd.args.iter().map(|arg| &**arg));
 
 		// Set the working directory, if we have any
 		if let Some(cwd) = &cmd.cwd {
@@ -913,8 +907,9 @@ impl Builder {
 		}
 
 		// Then spawn it and measure
-		tracing::debug!(target: "zbuild_exec", "{program} {}",
-			args.iter().join(" ")
+		tracing::debug!(target: "zbuild_exec", "{} {}",
+			cmd.program,
+			cmd.args.iter().join(" ")
 		);
 		let (duration, output) = util::try_measure_async::<_, _, AppError>(async {
 			// Spawn
@@ -933,7 +928,7 @@ impl Builder {
 			Ok(output)
 		})
 		.await?;
-		tracing::trace!(target: "zbuild_exec", rule_name=?rule.name, ?program, ?args, ?duration, "Execution duration");
+		tracing::trace!(target: "zbuild_exec", rule_name=?rule.name, program=?cmd.program, args=?cmd.args, ?duration, "Execution duration");
 		self.with_rule_stats(Some(&target_rule.name), |rule_stats| {
 			rule_stats.durations.exec.resize_with(cmd_idx + 1, Duration::default);
 			rule_stats.durations.exec[cmd_idx] += duration;
@@ -1038,5 +1033,5 @@ async fn rule_last_build_time(rule: &Rule<ArcStr>) -> Result<Option<SystemTime>,
 /// Helper function to format a `Command` for errors
 fn cmd_to_string<T: fmt::Display>(cmd: &Command<T>) -> String {
 	let inner = cmd.args.iter().map(|arg| format!("\"{arg}\"")).join(" ");
-	format!("[{inner}]")
+	format!("[{} {inner}]", cmd.program)
 }

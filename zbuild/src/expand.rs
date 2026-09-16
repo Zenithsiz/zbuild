@@ -152,9 +152,12 @@ impl Expander {
 		T: TryFromExpr,
 	{
 		Ok(Command {
-			cwd:    cmd.cwd.as_ref().map(|cwd| self.expand_expr(cwd, visitor)).transpose()?,
-			stdout: cmd.stdout.clone(),
-			args:   cmd
+			cwd:     cmd.cwd.as_ref().map(|cwd| self.expand_expr(cwd, visitor)).transpose()?,
+			stdout:  cmd.stdout.clone(),
+			program: self
+				.expand_expr(&cmd.program, visitor)
+				.context("Unable to expand program")?,
+			args:    cmd
 				.args
 				.iter()
 				.map(|arg| self.expand_expr(arg, visitor))

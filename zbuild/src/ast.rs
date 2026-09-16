@@ -222,6 +222,9 @@ pub struct Command {
 	/// Stdout
 	pub stdout: Option<Ident>,
 
+	/// Program
+	pub program: Expr,
+
 	/// Arguments
 	pub args: Array<Expr>,
 }
@@ -230,7 +233,7 @@ impl Parsable for Command {
 	fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
 		let mut cwd = None;
 		let mut stdout = None;
-		let mut args = None;
+		let mut program_args = None;
 
 		match parser.try_parse::<TokenBracesOpen>() {
 			// If it starts with a `{`, it's a full
@@ -254,8 +257,9 @@ impl Parsable for Command {
 						},
 						AnyOf3::T2(_) => {
 							parser.parse::<TokenArgs>()?;
-							app_error::ensure!(args.is_none(), "Arguments were already specified");
-							args = Some(parser.parse::<Array<Expr>>()?);
+							app_error::ensure!(program_args.is_none(), "Arguments were already specified");
+
+							program_args = Some(parser.parse::<Array<Expr>>()?);
 							parser.parse::<TokenSemi>()?;
 						},
 					}
@@ -263,13 +267,20 @@ impl Parsable for Command {
 
 			// Otherwise, just parse an array of expressions
 			Err(_) => {
-				args = Some(parser.parse::<Array<Expr>>()?);
+				program_args = Some(parser.parse::<Array<Expr>>()?);
 			},
 		}
 
-		let args = args.context("Missing command `args`")?;
+		let mut program_args = program_args.context("Missing command program / arguments")?;
+		let program = program_args.0.try_remove(0).context("Expected a program")?;
+		let args = program_args;
 
-		Ok(Self { cwd, stdout, args })
+		Ok(Self {
+			cwd,
+			stdout,
+			program,
+			args,
+		})
 	}
 }
 
@@ -318,11 +329,7 @@ where
 				}
 			},
 			Err(_) => {
-				// Parse at least one value
-				let first_value = parser.parse::<T>()?;
-				values.push(first_value);
-
-				// Then keep parsing until we can't anymore
+				// Keep parsing until we can't anymore
 				while let Ok(value) = parser.try_parse::<T>() {
 					values.push(value);
 				}
@@ -923,9 +930,10 @@ mod tests {
 						out:     vec![expr_string("out")],
 						deps:    vec![DepStmt::File(expr_string("dep"))],
 						exec:    vec![Command {
-							cwd:    None,
-							stdout: None,
-							args:   Array(vec![expr_string("cmd")]),
+							cwd:     None,
+							stdout:  None,
+							program: expr_string("cmd"),
+							args:    Array(vec![]),
 						}],
 					}],
 					..EMPTY_AST
@@ -963,19 +971,28 @@ mod tests {
 	fn parse_cmd() {
 		self::check_cases([
 			(r#""cmd""#, Command {
-				cwd:    None,
-				stdout: None,
-				args:   Array(vec![expr_string("cmd")]),
+				cwd:     None,
+				stdout:  None,
+				program: expr_string("cmd"),
+				args:    Array(vec![]),
 			}),
 			(r#""cmd" "a" "b""#, Command {
-				cwd:    None,
-				stdout: None,
-				args:   Array(vec![expr_string("cmd"), expr_string("a"), expr_string("b")]),
+				cwd:     None,
+				stdout:  None,
+				program: expr_string("cmd"),
+				args:    Array(vec![expr_string("a"), expr_string("b")]),
+			}),
+			(r#"["cmd", "a", "b"]"#, Command {
+				cwd:     None,
+				stdout:  None,
+				program: expr_string("cmd"),
+				args:    Array(vec![expr_string("a"), expr_string("b")]),
 			}),
 			(r#"{ cwd "a/b/c"; stdout output; args "cmd" "a" "b"; }"#, Command {
-				cwd:    Some(expr_string("a/b/c")),
-				stdout: Some(ident("output")),
-				args:   Array(vec![expr_string("cmd"), expr_string("a"), expr_string("b")]),
+				cwd:     Some(expr_string("a/b/c")),
+				stdout:  Some(ident("output")),
+				program: expr_string("cmd"),
+				args:    Array(vec![expr_string("a"), expr_string("b")]),
 			}),
 		]);
 	}
