@@ -979,6 +979,25 @@ impl Builder {
 						})?;
 					}
 				},
+
+				ExprBuiltin::Touch => {
+					app_error::ensure!(cmd.stdout.is_none(), "Cannot capture stdout on `builtin.touch`");
+
+					for arg_path in &cmd.args {
+						let path = match &cmd.cwd {
+							Some(cwd) => Cow::Owned(Path::new(&**cwd).join(&**arg_path)),
+							None => Cow::Borrowed(Path::new(&**arg_path)),
+						};
+
+						_ = fs::OpenOptions::new()
+							.create(true)
+							.truncate(false)
+							.append(true)
+							.open(&path)
+							.await
+							.with_context(|| format!("Unable to touch file {}", path.display()))?;
+					}
+				},
 			},
 		}
 

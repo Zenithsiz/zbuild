@@ -144,6 +144,7 @@ impl Expr {
 				ast::ExprCmpt::String(s) => ExprCmpt::String(s),
 				ast::ExprCmpt::Builtin(builtin) => ExprCmpt::Builtin(match builtin {
 					ast::ExprBuiltin::MkdirParents => ExprBuiltin::MkdirParents,
+					ast::ExprBuiltin::Touch => ExprBuiltin::Touch,
 				}),
 				ast::ExprCmpt::Ident { ident, ops } => ExprCmpt::Ident {
 					name: ident.0,
@@ -226,12 +227,18 @@ pub enum ExprBuiltin {
 	/// from all arguments passed in, including any
 	/// parent directories
 	MkdirParents,
+
+	/// When used as a program, creates an empty file,
+	/// or updates the modification date of all files
+	/// passed in as arguments.
+	Touch,
 }
 
 impl fmt::Display for ExprBuiltin {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::MkdirParents => write!(f, "mkdir_parents"),
+			Self::Touch => write!(f, "touch"),
 		}
 	}
 }

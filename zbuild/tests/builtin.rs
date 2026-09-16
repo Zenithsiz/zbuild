@@ -4,7 +4,7 @@
 #![expect(clippy::tests_outside_test_module, reason = "We're an integration test")]
 
 // Imports
-use {app_error::Context, zbuild::ExitResult};
+use {app_error::Context, std::fs, zbuild::ExitResult};
 
 /// Test for `builtin.mkdir_parents`
 #[tokio::test]
@@ -51,6 +51,44 @@ rule create_dir {
 	if !file_out.try_exists().context("Unable to check if output file exists")? {
 		app_error::bail!("Output file {file_out:?} was missing");
 	}
+
+	ExitResult::Ok
+}
+
+/// Test for `builtin.touch`
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn builtin_touch() -> ExitResult {
+	let temp_dir = zbuild_test::with_zbuild_multiple(
+		r#"
+rule create_dir {
+	out "a";
+	out "b";
+	exec builtin.touch "a" "b";
+}
+		"#,
+		[("a", "abc")],
+		["a", "b"],
+	)
+	.await?;
+
+	for file_out in [temp_dir.path().join("a"), temp_dir.path().join("b")] {
+		if !file_out.try_exists().context("Unable to check if output file exists")? {
+			app_error::bail!("Output file {file_out:?} was missing");
+		}
+	}
+
+	let a_contents = fs::read_to_string(temp_dir.path().join("a")).context("Unable to read output file")?;
+	if a_contents != "abc" {
+		app_error::bail!("Output file a was tampered");
+	}
+
+	let b_contents = fs::read_to_string(temp_dir.path().join("b")).context("Unable to read output file")?;
+	if !b_contents.is_empty() {
+		app_error::bail!("Output file b wasn't empty");
+	}
+
+	// TODO: Test that the time was updated.
 
 	ExitResult::Ok
 }

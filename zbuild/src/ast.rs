@@ -485,6 +485,7 @@ impl Parsable for Ident {
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum ExprBuiltin {
 	MkdirParents,
+	Touch,
 }
 
 impl Parsable for ExprBuiltin {
@@ -497,6 +498,7 @@ impl Parsable for ExprBuiltin {
 
 		let builtin = match &*builtin.0 {
 			"mkdir_parents" => Self::MkdirParents,
+			"touch" => Self::Touch,
 			_ => app_error::bail!("Unknown builtin: {builtin:?}"),
 		};
 		Ok(builtin)

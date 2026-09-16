@@ -245,6 +245,10 @@ impl TryFromExpr for Expr {
 
 /// Either an expanded string, or a single builtin
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
+#[expect(
+	variant_size_differences,
+	reason = "The size of the enum is the same as it's largest entry, so it's fine"
+)]
 pub enum StrOrBuiltin {
 	Str(ArcStr),
 	Builtin(ExprBuiltin),
