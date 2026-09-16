@@ -390,6 +390,9 @@ pub enum ExprCmpt {
 	/// Identifier
 	Ident { ident: Ident, ops: Vec<ExprOp> },
 
+	/// Builtin
+	Builtin(ExprBuiltin),
+
 	/// String literal
 	String(ArcStr),
 }
@@ -398,11 +401,17 @@ impl ExprCmpt {
 	/// Parses a list of expression components from a parser
 	pub fn parse_many(parser: &mut Parser, cmpts: &mut Vec<Self>) -> Result<(), AppError> {
 		match parser
-			.peek::<AnyOf2<TokenXIDStart, TokenDoubleQuote>>()
+			.peek::<AnyOf3<TokenBuiltin, TokenXIDStart, TokenDoubleQuote>>()
 			.context("Expected an identifier or literal")?
 		{
+			AnyOf3::T0(_) => {
+				let builtin = parser.parse::<ExprBuiltin>()?;
+
+				cmpts.push(Self::Builtin(builtin));
+			},
+
 			// If we get a sole identifier, that's the only component
-			AnyOf2::T0(_) => {
+			AnyOf3::T1(_) => {
 				let ident = parser.parse::<Ident>()?;
 
 				// Parse all of the operators
@@ -418,7 +427,7 @@ impl ExprCmpt {
 				cmpts.push(Self::Ident { ident, ops });
 			},
 			// If we get a literal, split all format strings inside of it.
-			AnyOf2::T1(_) => {
+			AnyOf3::T2(_) => {
 				parser.parse::<TokenDoubleQuote>()?;
 				while parser.try_parse::<TokenDoubleQuote>().is_err() {
 					let Some(end_idx) = parser.remaining().find(['{', '"']) else {
@@ -472,12 +481,35 @@ impl Parsable for Ident {
 	}
 }
 
+/// Expression builtin
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub enum ExprBuiltin {
+	MkdirParents,
+}
+
+impl Parsable for ExprBuiltin {
+	fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
+		parser.parse::<TokenBuiltin>()?;
+		parser.parse::<TokenDot>().context("Expected `builtin.`")?;
+		let builtin = parser
+			.parse::<Ident>()
+			.context("Expected identifier after `builtin.`")?;
+
+		let builtin = match &*builtin.0 {
+			"mkdir_parents" => Self::MkdirParents,
+			_ => app_error::bail!("Unknown builtin: {builtin:?}"),
+		};
+		Ok(builtin)
+	}
+}
+
 /// String literal
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct StringLiteral(ArcStr);
 
 impl Parsable for StringLiteral {
 	fn parse_from(parser: &mut Parser) -> Result<Self, AppError> {
+		// TODO: Escapes
 		parser.parse::<TokenDoubleQuote>()?;
 		let len = parser.remaining().find('"').context("Expected `\"` after `\"`")?;
 		let s = parser.advance_by(len);
@@ -519,6 +551,7 @@ decl_tokens! {
 	TokenRule = "rule";
 	TokenStatic = "static";
 	TokenStdout = "stdout";
+	TokenBuiltin = "builtin";
 
 	TokenBracesOpen = '{';
 	TokenBracesClose = '}';

@@ -15,8 +15,8 @@ use {
 		Expander,
 		Rules,
 		error::{self, AppErrorData},
-		expand,
-		rules::{Command, DepItem, Expr, ExprTree, OutItem, Rule, Target},
+		expand::{self, StrOrBuiltin},
+		rules::{Command, DepItem, Expr, ExprBuiltin, ExprTree, OutItem, Rule, Target},
 		util::{self, ArcStr},
 	},
 	app_error::{AllErrs, Context, app_error},
@@ -27,9 +27,11 @@ use {
 	itertools::Itertools,
 	smallvec::SmallVec,
 	std::{
+		borrow::Cow,
 		collections::HashMap,
 		fmt,
 		future::Future,
+		path::Path,
 		process::Stdio,
 		sync::{Arc, nonpoison::Mutex},
 		time::SystemTime,
@@ -889,70 +891,95 @@ impl Builder {
 		);
 		let cmd = self
 			.expander
-			.expand_cmd::<ArcStr>(cmd, &expand_visitor)
+			.expand_cmd::<ArcStr, StrOrBuiltin>(cmd, &expand_visitor)
 			.with_context(|| format!("Unable to expand rule command {:?}", rule.name))?;
 
-		// Create the command and feed in all the arguments
-		let mut os_cmd = process::Command::new(&*cmd.program);
-		os_cmd.args(cmd.args.iter().map(|arg| &**arg));
+		match &cmd.program {
+			StrOrBuiltin::Str(program) => {
+				// Create the command and feed in all the arguments
+				let mut os_cmd = process::Command::new(&**program);
+				os_cmd.args(cmd.args.iter().map(|arg| &**arg));
 
-		// Set the working directory, if we have any
-		if let Some(cwd) = &cmd.cwd {
-			os_cmd.current_dir(&**cwd);
-		}
+				// Set the working directory, if we have any
+				if let Some(cwd) = &cmd.cwd {
+					os_cmd.current_dir(&**cwd);
+				}
 
-		// Capture stdout, if we should
-		if cmd.stdout.is_some() {
-			os_cmd.stdout(Stdio::piped());
-		}
+				// Capture stdout, if we should
+				if cmd.stdout.is_some() {
+					os_cmd.stdout(Stdio::piped());
+				}
 
-		// Then spawn it and measure
-		tracing::debug!(target: "zbuild_exec", "{} {}",
-			cmd.program,
-			cmd.args.iter().join(" ")
-		);
-		let (duration, output) = util::try_measure_async::<_, _, AppError>(async {
-			// Spawn
-			let mut output = os_cmd
-				.spawn()
-				.with_context(|| format!("Unable to spawn {}", self::cmd_to_string(&cmd)))?;
+				// Then spawn it and measure
+				tracing::debug!(target: "zbuild_exec", "{program} {}",
+					cmd.args.iter().join(" ")
+				);
+				let (duration, output) = util::try_measure_async::<_, _, AppError>(async {
+					// Spawn
+					let mut output = os_cmd
+						.spawn()
+						.with_context(|| format!("Unable to spawn {}", self::cmd_to_string(&cmd)))?;
 
-			// Then wait for it to finish
-			output
-				.wait()
-				.await
-				.with_context(|| format!("Command failed to start {}", self::cmd_to_string(&cmd)))?
-				.exit_ok()
-				.with_context(|| format!("Command failed to run {}", self::cmd_to_string(&cmd)))?;
+					// Then wait for it to finish
+					output
+						.wait()
+						.await
+						.with_context(|| format!("Command failed to start {}", self::cmd_to_string(&cmd)))?
+						.exit_ok()
+						.with_context(|| format!("Command failed to run {}", self::cmd_to_string(&cmd)))?;
 
-			Ok(output)
-		})
-		.await?;
-		tracing::trace!(target: "zbuild_exec", rule_name=?rule.name, program=?cmd.program, args=?cmd.args, ?duration, "Execution duration");
-		self.with_rule_stats(Some(&target_rule.name), |rule_stats| {
-			rule_stats.durations.exec.resize_with(cmd_idx + 1, Duration::default);
-			rule_stats.durations.exec[cmd_idx] += duration;
-		});
+					Ok(output)
+				})
+				.await?;
+				tracing::trace!(target: "zbuild_exec", rule_name=?rule.name, program=?cmd.program, args=?cmd.args, ?duration, "Execution duration");
+				self.with_rule_stats(Some(&target_rule.name), |rule_stats| {
+					rule_stats.durations.exec.resize_with(cmd_idx + 1, Duration::default);
+					rule_stats.durations.exec[cmd_idx] += duration;
+				});
 
-		if let Some(stdout_alias) = &cmd.stdout {
-			// Read the stdout
-			let mut stdout = String::new();
-			output
-				.stdout
-				.expect("Stdout was not set")
-				.read_to_string(&mut stdout)
-				.await
-				.with_context(|| format!("Unable to read command stdout {}", self::cmd_to_string(&cmd)))?;
+				if let Some(stdout_alias) = &cmd.stdout {
+					// Read the stdout
+					let mut stdout = String::new();
+					output
+						.stdout
+						.expect("Stdout was not set")
+						.read_to_string(&mut stdout)
+						.await
+						.with_context(|| format!("Unable to read command stdout {}", self::cmd_to_string(&cmd)))?;
 
-			// Trim the last newline, if any
-			// TODO: This feels like the right behavior, since most tools output a newline at the end, but
-			//       should we have a configuration to avoid it?
-			if stdout.ends_with('\n') {
-				stdout.pop();
-			}
+					// Trim the last newline, if any
+					// TODO: This feels like the right behavior, since most tools output a newline at the end, but
+					//       should we have a configuration to avoid it?
+					if stdout.ends_with('\n') {
+						stdout.pop();
+					}
 
-			// Then save it under the alias.
-			stdout_aliases.insert(stdout_alias.clone(), Expr::string(stdout));
+					// Then save it under the alias.
+					stdout_aliases.insert(stdout_alias.clone(), Expr::string(stdout));
+				}
+			},
+			StrOrBuiltin::Builtin(builtin) => match builtin {
+				ExprBuiltin::MkdirParents => {
+					app_error::ensure!(cmd.stdout.is_none(), "Cannot capture stdout on `builtin.mkdir_parents`");
+
+					for arg_path in &cmd.args {
+						// TODO: If `cwd` doesn't exist yet, is it fine to create it here?
+						let path = match &cmd.cwd {
+							Some(cwd) => Cow::Owned(Path::new(&**cwd).join(&**arg_path)),
+							None => Cow::Borrowed(Path::new(&**arg_path)),
+						};
+
+						std::fs::create_dir_all(&path).with_context(|| match &cmd.cwd {
+							Some(cwd) => format!(
+								"Unable to create directory {} (Note: attempted to create {arg_path} from working \
+								 directory {cwd})",
+								path.display()
+							),
+							None => format!("Unable to create directory {}", path.display()),
+						})?;
+					}
+				},
+			},
 		}
 
 		Ok(())
@@ -1031,7 +1058,12 @@ async fn rule_last_build_time(rule: &Rule<ArcStr>) -> Result<Option<SystemTime>,
 }
 
 /// Helper function to format a `Command` for errors
-fn cmd_to_string<T: fmt::Display>(cmd: &Command<T>) -> String {
-	let inner = cmd.args.iter().map(|arg| format!("\"{arg}\"")).join(" ");
-	format!("[{} {inner}]", cmd.program)
+fn cmd_to_string(cmd: &Command<ArcStr, StrOrBuiltin>) -> String {
+	let program = fmt::from_fn(|f| match &cmd.program {
+		StrOrBuiltin::Str(s) => write!(f, "{s}"),
+		StrOrBuiltin::Builtin(builtin) => write!(f, "builtin.{builtin}"),
+	});
+
+	let args = cmd.args.iter().map(|arg| format!("\"{arg}\"")).join(" ");
+	format!("[{program} {args}]")
 }

@@ -9,7 +9,7 @@ mod target;
 
 // Exports
 pub use {
-	expr::{Expr, ExprCmpt, ExprOp, ExprTree},
+	expr::{Expr, ExprBuiltin, ExprCmpt, ExprOp, ExprTree},
 	item::{DepItem, OutItem},
 	pattern::Pattern,
 	rule::{Command, Rule},

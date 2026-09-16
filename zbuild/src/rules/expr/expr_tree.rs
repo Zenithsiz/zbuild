@@ -43,11 +43,10 @@ impl<K> ExprTree<K> {
 		// Get the (possible) pattern in the middle
 		let pat = cmpts
 			.peeking_next(|cmpt| match cmpt {
-				super::ExprCmpt::String(_) => false,
 				super::ExprCmpt::Ident { name, .. } => pats.iter().any(|pats| pats.contains_key(name)),
+				_ => false,
 			})
 			.map(|cmpt| match cmpt {
-				super::ExprCmpt::String(_) => unreachable!("Just checked"),
 				super::ExprCmpt::Ident { name, .. } => {
 					for pats in pats {
 						if let Some(pat) = pats.get(name) {
@@ -57,6 +56,7 @@ impl<K> ExprTree<K> {
 
 					unreachable!("Just checked")
 				},
+				_ => unreachable!("Just checked"),
 			})
 			.cloned();
 

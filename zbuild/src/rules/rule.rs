@@ -78,7 +78,7 @@ pub struct Exec<T> {
 
 /// Command
 #[derive(Clone, Debug)]
-pub struct Command<T> {
+pub struct Command<T, P = T> {
 	/// Working directory
 	pub cwd: Option<T>,
 
@@ -86,7 +86,7 @@ pub struct Command<T> {
 	pub stdout: Option<ArcStr>,
 
 	/// Program
-	pub program: T,
+	pub program: P,
 
 	/// Arguments
 	pub args: Vec<T>,

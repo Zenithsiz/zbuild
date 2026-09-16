@@ -18,6 +18,9 @@ pub enum ExprCmpt {
 	/// String
 	String(ArcStr),
 
+	/// Builtin
+	Builtin(ExprBuiltin),
+
 	/// Identifier
 	Ident {
 		/// Name
@@ -40,7 +43,7 @@ impl ExprCmpt {
 	pub const fn as_string(&self) -> Option<&ArcStr> {
 		match self {
 			Self::String(v) => Some(v),
-			Self::Ident { .. } => None,
+			_ => None,
 		}
 	}
 
@@ -48,7 +51,7 @@ impl ExprCmpt {
 	pub fn try_into_string(self) -> Result<ArcStr, Self> {
 		match self {
 			Self::String(v) => Ok(v),
-			Self::Ident { .. } => Err(self),
+			_ => Err(self),
 		}
 	}
 }
@@ -80,7 +83,7 @@ impl Expr {
 			// If it's a string, try to use `push_str` for merging strings.
 			ExprCmpt::String(s) => self.push_str(s),
 
-			cmpt @ ExprCmpt::Ident { .. } => self.cmpts.push(cmpt.clone()),
+			cmpt => self.cmpts.push(cmpt.clone()),
 		}
 	}
 
@@ -94,6 +97,16 @@ impl Expr {
 		self.cmpts.reserve(cmpts.len());
 		for cmpt in cmpts {
 			self.push(&cmpt);
+		}
+	}
+
+	/// Converts this expression into a builtin, if it's just a single builtin
+	pub fn try_into_builtin(self) -> Result<ExprBuiltin, Self> {
+		match <[_; 1]>::try_from(self.cmpts) {
+			Ok([ExprCmpt::Builtin(builtin)]) => Ok(builtin),
+			// TODO: Be more efficient in this case?
+			Ok([cmpt]) => Err(Self { cmpts: vec![cmpt] }),
+			Err(cmpts) => Err(Self { cmpts }),
 		}
 	}
 
@@ -129,6 +142,9 @@ impl Expr {
 			.into_iter()
 			.map(|cmpt| match cmpt {
 				ast::ExprCmpt::String(s) => ExprCmpt::String(s),
+				ast::ExprCmpt::Builtin(builtin) => ExprCmpt::Builtin(match builtin {
+					ast::ExprBuiltin::MkdirParents => ExprBuiltin::MkdirParents,
+				}),
 				ast::ExprCmpt::Ident { ident, ops } => ExprCmpt::Ident {
 					name: ident.0,
 					ops:  ops
@@ -172,6 +188,7 @@ impl fmt::Display for ExprCmpt {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::String(s) => write!(f, "{s}"),
+			Self::Builtin(builtin) => write!(f, "builtin.{builtin}"),
 			Self::Ident { name, ops } => {
 				write!(f, "{{{name}")?;
 				for op in ops {
@@ -193,10 +210,28 @@ pub enum ExprOp {
 	DirName,
 }
 
+// TODO: Is this impl necessary?
 impl fmt::Display for ExprOp {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::DirName => write!(f, ".dir_name"),
+		}
+	}
+}
+
+/// Expression Builtin
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
+pub enum ExprBuiltin {
+	/// When used as a program, creates directories
+	/// from all arguments passed in, including any
+	/// parent directories
+	MkdirParents,
+}
+
+impl fmt::Display for ExprBuiltin {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::MkdirParents => write!(f, "mkdir_parents"),
 		}
 	}
 }

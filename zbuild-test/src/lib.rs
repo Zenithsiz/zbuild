@@ -6,10 +6,17 @@
 // Imports
 use {
 	app_error::Context,
+	futures::lock::Mutex,
 	std::fs,
 	tempfile::TempDir,
 	zbuild::{AppError, Args},
 };
+
+/// Lock for testing.
+///
+/// Unfortunately necessary as we change our current directory
+/// and tests run in multiple threads
+static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 /// Creates a directory with a zbuild manifest, then runs it, and returns the directory
 pub async fn with_zbuild<'a, T>(zbuild_manifest: &str, targets: T) -> Result<TempDir, AppError>
@@ -44,6 +51,8 @@ where
 		..Args::default()
 	};
 	tracing::info!(?args, "Arguments");
+
+	let _guard = TEST_LOCK.lock().await;
 	zbuild::run(args).await.context("Unable to run zbuild")?;
 
 	Ok(temp_dir)

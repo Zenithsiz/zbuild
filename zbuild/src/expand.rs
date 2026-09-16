@@ -4,7 +4,7 @@
 use {
 	crate::{
 		AppError,
-		rules::{Command, DepItem, Expr, ExprCmpt, ExprOp, OutItem, Pattern, Rule, Target},
+		rules::{Command, DepItem, Expr, ExprBuiltin, ExprCmpt, ExprOp, OutItem, Pattern, Rule, Target},
 		util::ArcStr,
 	},
 	app_error::{AllErrs, Context, app_error},
@@ -36,6 +36,9 @@ impl Expander {
 				match cmpt {
 					// If it's a string, we keep it
 					ExprCmpt::String(s) => expr.push_str(s),
+
+					// If it's a builtin, we keep it
+					ExprCmpt::Builtin(_) => expr.push(cmpt),
 
 					// If it's a pattern, we visit it
 					ExprCmpt::Ident { name, ops } => match visitor.visit_ident(name) {
@@ -147,9 +150,10 @@ impl Expander {
 	}
 
 	/// Expands a command
-	pub fn expand_cmd<T>(&self, cmd: &Command<Expr>, visitor: &Visitor<'_>) -> Result<Command<T>, AppError>
+	pub fn expand_cmd<T, P>(&self, cmd: &Command<Expr>, visitor: &Visitor<'_>) -> Result<Command<T, P>, AppError>
 	where
 		T: TryFromExpr,
+		P: TryFromExpr,
 	{
 		Ok(Command {
 			cwd:     cmd.cwd.as_ref().map(|cwd| self.expand_expr(cwd, visitor)).transpose()?,
@@ -236,6 +240,29 @@ pub trait TryFromExpr: Sized {
 impl TryFromExpr for Expr {
 	fn try_from_expr(expr: Expr) -> Result<Self, AppError> {
 		Ok(expr)
+	}
+}
+
+/// Either an expanded string, or a single builtin
+#[derive(PartialEq, Eq, Clone, Hash, Debug)]
+pub enum StrOrBuiltin {
+	Str(ArcStr),
+	Builtin(ExprBuiltin),
+}
+
+impl TryFromExpr for StrOrBuiltin {
+	fn try_from_expr(expr: Expr) -> Result<Self, AppError> {
+		match expr.try_into_string() {
+			Ok(s) => Ok(Self::Str(s)),
+			Err(expr) => match expr.try_into_builtin() {
+				Ok(builtin) => Ok(Self::Builtin(builtin)),
+				Err(expr) => app_error::bail!(
+					"Expression had unresolved aliases, patterns or builtins (note that you cannot use builtin inside \
+					 of strings currently): {expr} ({:?})",
+					expr.cmpts.iter().map(ExprCmpt::to_string).collect::<Vec<_>>()
+				),
+			},
+		}
 	}
 }
 
