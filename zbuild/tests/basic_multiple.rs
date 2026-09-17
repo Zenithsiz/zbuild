@@ -30,8 +30,7 @@ rule create_file {
 
 	for file_out in ["file1.out", "file2.out"] {
 		if !fs
-			.try_exists_symlink(&file_out)
-			.await
+			.try_exists_symlink(file_out)
 			.context("Unable to check if output file exists")?
 		{
 			Err(app_error!("Output file {file_out:?} was missing"))?;

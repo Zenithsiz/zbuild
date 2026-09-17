@@ -2,13 +2,12 @@
 
 use {
 	core::clone::Share,
-	futures::lock::Mutex,
 	std::{
 		collections::{HashMap, hash_map},
 		fs,
 		io,
 		path::{Path, PathBuf},
-		sync::Arc,
+		sync::{Arc, nonpoison::Mutex},
 		time::SystemTime,
 	},
 };
@@ -19,52 +18,40 @@ pub trait Fs: Share + Send + Sync + 'static {
 	type Metadata: FsMetadata;
 
 	/// Reads `path` to a string
-	fn read_to_string(&self, path: impl AsRef<Path> + Send) -> impl Future<Output = Result<String, io::Error>> + Send;
+	fn read_to_string(&self, path: impl AsRef<Path>) -> Result<String, io::Error>;
 
 	/// Gets the metadata of `path`, without following symlinks
-	fn symlink_metadata(
-		&self,
-		path: impl AsRef<Path> + Send,
-	) -> impl Future<Output = Result<Self::Metadata, io::Error>> + Send;
+	fn symlink_metadata(&self, path: impl AsRef<Path>) -> Result<Self::Metadata, io::Error>;
 
 	/// Returns if `path` exists, without following symlinks
-	fn try_exists_symlink(
-		&self,
-		path: impl AsRef<Path> + Send,
-	) -> impl Future<Output = Result<bool, io::Error>> + Send {
-		async {
-			match self.symlink_metadata(path).await {
-				Ok(_) => Ok(true),
-				Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
-				Err(err) => Err(err),
-			}
+	fn try_exists_symlink(&self, path: impl AsRef<Path>) -> Result<bool, io::Error> {
+		match self.symlink_metadata(path) {
+			Ok(_) => Ok(true),
+			Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+			Err(err) => Err(err),
 		}
 	}
 
 	/// Writes `contents` to `path`
-	fn write(
-		&self,
-		path: impl AsRef<Path> + Send,
-		contents: &[u8],
-	) -> impl Future<Output = Result<(), io::Error>> + Send;
+	fn write(&self, path: impl AsRef<Path>, contents: &[u8]) -> Result<(), io::Error>;
 
 	/// Canonicalizes a path
-	fn canonicalize(&self, path: impl AsRef<Path> + Send) -> Result<PathBuf, io::Error>;
+	fn canonicalize(&self, path: impl AsRef<Path>) -> Result<PathBuf, io::Error>;
 
 	/// Gets the current directory
-	fn current_dir(&self) -> impl Future<Output = Result<PathBuf, io::Error>>;
+	fn current_dir(&self) -> Result<PathBuf, io::Error>;
 
 	/// Sets the current directory
-	fn set_current_dir(&self, path: impl AsRef<Path> + Send) -> impl Future<Output = Result<(), io::Error>>;
+	fn set_current_dir(&self, path: impl AsRef<Path>) -> Result<(), io::Error>;
 
 	/// Creates the directory `path`, along with all parents
-	fn create_dir_all(&self, path: impl AsRef<Path> + Send) -> impl Future<Output = Result<(), io::Error>> + Send;
+	fn create_dir_all(&self, path: impl AsRef<Path>) -> Result<(), io::Error>;
 
 	/// Touches the file `path`.
 	///
 	/// If it exists, updates it's modified date, otherwise
 	/// creates it as empty
-	fn touch(&self, path: impl AsRef<Path> + Send) -> impl Future<Output = Result<(), io::Error>> + Send;
+	fn touch(&self, path: impl AsRef<Path>) -> Result<(), io::Error>;
 }
 
 /// Metadata
@@ -92,44 +79,40 @@ impl Share for OsFs {}
 impl Fs for OsFs {
 	type Metadata = fs::Metadata;
 
-	fn read_to_string(&self, path: impl AsRef<Path> + Send) -> impl Future<Output = Result<String, io::Error>> {
-		tokio::fs::read_to_string(path)
+	fn read_to_string(&self, path: impl AsRef<Path>) -> Result<String, io::Error> {
+		std::fs::read_to_string(path)
 	}
 
-	fn symlink_metadata(
-		&self,
-		path: impl AsRef<Path> + Send,
-	) -> impl Future<Output = Result<Self::Metadata, io::Error>> {
-		tokio::fs::symlink_metadata(path)
+	fn symlink_metadata(&self, path: impl AsRef<Path>) -> Result<Self::Metadata, io::Error> {
+		std::fs::symlink_metadata(path)
 	}
 
-	fn write(&self, path: impl AsRef<Path> + Send, contents: &[u8]) -> impl Future<Output = Result<(), io::Error>> {
-		tokio::fs::write(path, contents)
+	fn write(&self, path: impl AsRef<Path>, contents: &[u8]) -> Result<(), io::Error> {
+		std::fs::write(path, contents)
 	}
 
-	fn canonicalize(&self, path: impl AsRef<Path> + Send) -> Result<PathBuf, io::Error> {
+	fn canonicalize(&self, path: impl AsRef<Path>) -> Result<PathBuf, io::Error> {
 		std::fs::canonicalize(path)
 	}
 
-	fn current_dir(&self) -> impl Future<Output = Result<PathBuf, io::Error>> {
-		std::future::ready(std::env::current_dir())
+	fn current_dir(&self) -> Result<PathBuf, io::Error> {
+		std::env::current_dir()
 	}
 
-	fn set_current_dir(&self, path: impl AsRef<Path> + Send) -> impl Future<Output = Result<(), io::Error>> {
-		std::future::ready(std::env::set_current_dir(path))
+	fn set_current_dir(&self, path: impl AsRef<Path>) -> Result<(), io::Error> {
+		std::env::set_current_dir(path)
 	}
 
-	fn create_dir_all(&self, path: impl AsRef<Path> + Send) -> impl Future<Output = Result<(), io::Error>> {
-		tokio::fs::create_dir_all(path)
+	fn create_dir_all(&self, path: impl AsRef<Path>) -> Result<(), io::Error> {
+		std::fs::create_dir_all(path)
 	}
 
-	async fn touch(&self, path: impl AsRef<Path> + Send) -> Result<(), io::Error> {
-		_ = tokio::fs::OpenOptions::new()
+	fn touch(&self, path: impl AsRef<Path>) -> Result<(), io::Error> {
+		_ = std::fs::OpenOptions::new()
 			.create(true)
 			.truncate(false)
 			.append(true)
-			.open(path)
-			.await?;
+			.open(path)?;
 
 		Ok(())
 	}
@@ -177,8 +160,8 @@ impl Share for MemFs {}
 impl Fs for MemFs {
 	type Metadata = MemFsMetadata;
 
-	async fn read_to_string(&self, path: impl AsRef<Path> + Send) -> Result<String, io::Error> {
-		let inner = self.inner.lock().await;
+	fn read_to_string(&self, path: impl AsRef<Path>) -> Result<String, io::Error> {
+		let inner = self.inner.lock();
 		let path = inner.cur_dir.join(path);
 		let Some(file) = inner.files.get(&path) else {
 			return Err(io::Error::new(
@@ -191,8 +174,8 @@ impl Fs for MemFs {
 		Ok(s)
 	}
 
-	async fn symlink_metadata(&self, path: impl AsRef<Path> + Send) -> Result<Self::Metadata, io::Error> {
-		let inner = self.inner.lock().await;
+	fn symlink_metadata(&self, path: impl AsRef<Path>) -> Result<Self::Metadata, io::Error> {
+		let inner = self.inner.lock();
 		let path = inner.cur_dir.join(path);
 		let Some(file) = inner.files.get(&path) else {
 			return Err(io::Error::new(
@@ -206,8 +189,8 @@ impl Fs for MemFs {
 		})
 	}
 
-	async fn write(&self, path: impl AsRef<Path> + Send, contents: &[u8]) -> Result<(), io::Error> {
-		let mut inner = self.inner.lock().await;
+	fn write(&self, path: impl AsRef<Path>, contents: &[u8]) -> Result<(), io::Error> {
+		let mut inner = self.inner.lock();
 		let path = inner.cur_dir.join(path);
 		_ = inner.files.insert(path, MemFsFile {
 			modified: SystemTime::now(),
@@ -216,23 +199,23 @@ impl Fs for MemFs {
 		Ok(())
 	}
 
-	fn canonicalize(&self, path: impl AsRef<Path> + Send) -> Result<PathBuf, io::Error> {
+	fn canonicalize(&self, path: impl AsRef<Path>) -> Result<PathBuf, io::Error> {
 		Ok(path.as_ref().to_path_buf())
 	}
 
-	async fn current_dir(&self) -> Result<PathBuf, io::Error> {
-		let inner = self.inner.lock().await;
+	fn current_dir(&self) -> Result<PathBuf, io::Error> {
+		let inner = self.inner.lock();
 		Ok(inner.cur_dir.clone())
 	}
 
-	async fn set_current_dir(&self, path: impl AsRef<Path> + Send) -> Result<(), io::Error> {
-		let mut inner = self.inner.lock().await;
+	fn set_current_dir(&self, path: impl AsRef<Path>) -> Result<(), io::Error> {
+		let mut inner = self.inner.lock();
 		inner.cur_dir = path.as_ref().to_path_buf();
 		Ok(())
 	}
 
-	async fn create_dir_all(&self, path: impl AsRef<Path> + Send) -> Result<(), io::Error> {
-		let mut inner = self.inner.lock().await;
+	fn create_dir_all(&self, path: impl AsRef<Path>) -> Result<(), io::Error> {
+		let mut inner = self.inner.lock();
 		let path = inner.cur_dir.join(path);
 		for path in path.ancestors().collect::<Vec<_>>().into_iter().rev() {
 			if path.is_empty() {
@@ -252,8 +235,8 @@ impl Fs for MemFs {
 		Ok(())
 	}
 
-	async fn touch(&self, path: impl AsRef<Path> + Send) -> Result<(), io::Error> {
-		let mut inner = self.inner.lock().await;
+	fn touch(&self, path: impl AsRef<Path>) -> Result<(), io::Error> {
+		let mut inner = self.inner.lock();
 		let path = inner.cur_dir.join(path);
 		match inner.files.entry(path) {
 			hash_map::Entry::Occupied(entry) => entry.into_mut().modified = SystemTime::now(),

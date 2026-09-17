@@ -75,7 +75,7 @@ pub async fn run<FS: Fs>(fs: &FS, args: Args) -> Result<(), AppError> {
 	// TODO: Not adjust the zbuild path and read it before?
 	let zbuild_path = match args.zbuild_path {
 		Some(path) => fs.canonicalize(&path).context("Unable to canonicalize zbuild path")?,
-		None => self::find_zbuild(fs).await?,
+		None => self::find_zbuild(fs)?,
 	};
 	tracing::debug!(?zbuild_path, "Found zbuild path");
 	let zbuild_dir = zbuild_path.parent().expect("Zbuild path had no parent");
@@ -83,7 +83,6 @@ pub async fn run<FS: Fs>(fs: &FS, args: Args) -> Result<(), AppError> {
 	let zbuild_path = Path::new(zbuild_path);
 	tracing::debug!(?zbuild_dir, "Moving to zbuild directory");
 	fs.set_current_dir(zbuild_dir)
-		.await
 		.with_context(|| format!("Unable to set current directory to {zbuild_dir:?}"))?;
 
 	// Parse the ast
@@ -268,16 +267,15 @@ pub async fn run<FS: Fs>(fs: &FS, args: Args) -> Result<(), AppError> {
 }
 
 /// Finds the nearest zbuild file
-async fn find_zbuild<FS: Fs>(fs: &FS) -> Result<PathBuf, AppError> {
+fn find_zbuild<FS: Fs>(fs: &FS) -> Result<PathBuf, AppError> {
 	// TODO: This should be part of the filesystem too
-	let cur_path = fs.current_dir().await.context("Unable to get current directory")?;
+	let cur_path = fs.current_dir().context("Unable to get current directory")?;
 	let mut cur_path = cur_path.as_path();
 
 	loop {
 		let zbuild_path = cur_path.join("zbuild.zb");
 		match fs
 			.try_exists_symlink(&zbuild_path)
-			.await
 			.with_context(|| format!("Unable to check if file exists {zbuild_path:?}"))?
 		{
 			true => return Ok(zbuild_path),

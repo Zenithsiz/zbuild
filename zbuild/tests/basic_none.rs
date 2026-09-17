@@ -27,8 +27,7 @@ rule create_file {
 
 	// Note: We're making sure it *doesn't* exist, since we didn't want to build it.
 	if fs
-		.try_exists_symlink(&"file.out")
-		.await
+		.try_exists_symlink("file.out")
 		.context("Unable to check if output file exists")?
 	{
 		Err(app_error!("Output file was present"))?;

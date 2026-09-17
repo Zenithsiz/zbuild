@@ -331,7 +331,7 @@ impl<V: Visitor> Builder<V> {
 		let (find_rule_duration, Some((rule, target_rule))) = util::try_measure(|| self.target_rule(&target))? else {
 			match *target {
 				Target::File { ref file, .. } => {
-					let (check_duration, res) = util::measure_async(fs.symlink_metadata(&**file)).await;
+					let (check_duration, res) = util::measure(|| fs.symlink_metadata(&**file));
 					self.with_rule_stats(None, |target_rules| {
 						target_rules.durations.check_fs += check_duration;
 					});
@@ -495,7 +495,7 @@ impl<V: Visitor> Builder<V> {
 
 		// Afterwards check the last time we've built the rule and compare it with
 		// the dependency build times.
-		let rule_last_build_time = self::rule_last_build_time(fs, rule).await;
+		let rule_last_build_time = self::rule_last_build_time(fs, rule);
 		let needs_rebuilt = match (deps_last_build_time, &rule_last_build_time) {
 			// If any files were missing, or we had no outputs, build
 			(_, Err(_) | Ok(None)) => true,
@@ -520,8 +520,7 @@ impl<V: Visitor> Builder<V> {
 
 		// Then get the build time
 		// Note: If we don't have any outputs, just use the current time as the build time
-		let (build_time_duration, cur_build_time) =
-			util::try_measure_async(self::rule_last_build_time(fs, rule)).await?;
+		let (build_time_duration, cur_build_time) = util::try_measure(|| self::rule_last_build_time(fs, rule))?;
 		let res = BuildResult {
 			build_time: cur_build_time.unwrap_or_else(SystemTime::now),
 			built:      needs_rebuilt,
@@ -568,30 +567,25 @@ impl<V: Visitor> Builder<V> {
 		let normal_deps = rule
 			.deps
 			.iter()
-			.map(move |dep| async move {
-				match *dep {
-					DepItem::File {
-						ref file,
-						is_optional,
-						is_static,
-						is_deps_file,
-					} => Ok(Dep::File {
-						file: file.clone(),
-						is_static,
-						is_deps_file,
-						is_output: false,
-						is_optional,
-						exists: fs
-							.try_exists_symlink(&**file)
-							.await
-							.with_context(|| format!("Unable to check if file exists {file:?}"))?,
-					}),
-					DepItem::Rule { ref name } => Ok(Dep::Rule { name: name.clone() }),
-				}
+			.map(move |dep| match *dep {
+				DepItem::File {
+					ref file,
+					is_optional,
+					is_static,
+					is_deps_file,
+				} => Ok(Dep::File {
+					file: file.clone(),
+					is_static,
+					is_deps_file,
+					is_output: false,
+					is_optional,
+					exists: fs
+						.try_exists_symlink(&**file)
+						.with_context(|| format!("Unable to check if file exists {file:?}"))?,
+				}),
+				DepItem::Rule { ref name } => Ok(Dep::Rule { name: name.clone() }),
 			})
-			.collect::<FuturesUnordered<_>>()
 			.collect::<AllErrs<Vec<_>, _>>()
-			.await
 			.context("Unable to gather normal dependencies")?;
 
 		// And all output dependencies
@@ -602,29 +596,24 @@ impl<V: Visitor> Builder<V> {
 		let out_deps = rule
 			.output
 			.iter()
-			.map(move |out| async move {
-				match out {
-					OutItem::File {
-						file,
-						is_deps_file: true,
-					} => Ok(Some(Dep::File {
-						file:         file.clone(),
-						is_static:    false,
-						is_deps_file: true,
-						is_output:    true,
-						is_optional:  false,
-						exists:       fs
-							.try_exists_symlink(&**file)
-							.await
-							.with_context(|| format!("Unable to check if file exists {file:?}"))?,
-					})),
-					_ => Ok(None),
-				}
+			.map(move |out| match out {
+				OutItem::File {
+					file,
+					is_deps_file: true,
+				} => Ok(Some(Dep::File {
+					file:         file.clone(),
+					is_static:    false,
+					is_deps_file: true,
+					is_output:    true,
+					is_optional:  false,
+					exists:       fs
+						.try_exists_symlink(&**file)
+						.with_context(|| format!("Unable to check if file exists {file:?}"))?,
+				})),
+				_ => Ok(None),
 			})
-			.collect::<FuturesUnordered<_>>()
-			.filter_map(move |res| async move { res.transpose() })
+			.flatten_ok()
 			.collect::<AllErrs<Vec<_>, _>>()
-			.await
 			.context("Unable to gather output dependencies")?;
 
 		// Then build all dependencies, as well as any dependency files
@@ -739,7 +728,7 @@ impl<V: Visitor> Builder<V> {
 		reason: &BuildReason,
 	) -> Result<Vec<(Target<ArcStr>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {
 		tracing::trace!(target=?parent_target, ?rule.name, ?deps_file, "Building dependencies of target rule dependency-file");
-		let mut deps = self::parse_deps_file(fs, deps_file).await?;
+		let mut deps = self::parse_deps_file(fs, deps_file)?;
 		tracing::trace!(target=?parent_target, ?rule.name, ?deps_file, ?deps, "Found dependencies of target rule dependency-file");
 
 		// Ensure that at least one dependency output matches the rule
@@ -955,7 +944,7 @@ impl<V: Visitor> Builder<V> {
 							None => Cow::Borrowed(Path::new(&**arg_path)),
 						};
 
-						fs.create_dir_all(&path).await.with_context(|| match &cmd.cwd {
+						fs.create_dir_all(&path).with_context(|| match &cmd.cwd {
 							Some(cwd) => format!(
 								"Unable to create directory {} (Note: attempted to create {arg_path} from working \
 								 directory {cwd})",
@@ -976,7 +965,6 @@ impl<V: Visitor> Builder<V> {
 						};
 
 						fs.touch(&path)
-							.await
 							.with_context(|| format!("Unable to touch file {}", path.display()))?;
 					}
 				},
@@ -988,11 +976,10 @@ impl<V: Visitor> Builder<V> {
 }
 
 /// Parses a dependencies file
-async fn parse_deps_file<FS: Fs>(fs: &FS, file: &str) -> Result<HashMap<ArcStr, Vec<ArcStr>>, AppError> {
+fn parse_deps_file<FS: Fs>(fs: &FS, file: &str) -> Result<HashMap<ArcStr, Vec<ArcStr>>, AppError> {
 	// Read it
 	let mut contents = fs
 		.read_to_string(file)
-		.await
 		.with_context(|| format!("Unable to read file {file:?}"))?;
 
 	// Replace all backslashes at the end of a line with spaces
@@ -1031,19 +1018,18 @@ async fn parse_deps_file<FS: Fs>(fs: &FS, file: &str) -> Result<HashMap<ArcStr, 
 ///
 /// Returns `Err` if any files didn't exist,
 /// Returns `Ok(None)` if rule has no outputs
-async fn rule_last_build_time<FS: Fs>(fs: &FS, rule: &Rule<ArcStr>) -> Result<Option<SystemTime>, AppError> {
+fn rule_last_build_time<FS: Fs>(fs: &FS, rule: &Rule<ArcStr>) -> Result<Option<SystemTime>, AppError> {
 	// Note: We get the time of the oldest file in order to ensure all
 	//       files are at-least that old
 	let built_time = rule
 		.output
 		.iter()
-		.map(move |item| async move {
+		.map(move |item| {
 			let file = match item {
 				OutItem::File { file, .. } => file,
 			};
 			let metadata = fs
 				.symlink_metadata(&**file)
-				.await
 				.with_context(|| format!("Unable to read file metadata (not following symlinks) of {file:?}"))?;
 			let modified_time = metadata
 				.modified()
@@ -1051,9 +1037,7 @@ async fn rule_last_build_time<FS: Fs>(fs: &FS, rule: &Rule<ArcStr>) -> Result<Op
 
 			Ok(modified_time)
 		})
-		.collect::<FuturesUnordered<_>>()
 		.collect::<AllErrs<Vec<_>, _>>()
-		.await
 		.context("Unable to find modified time for any output")?
 		.into_iter()
 		.min();

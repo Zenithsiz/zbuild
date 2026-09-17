@@ -28,13 +28,11 @@ where
 {
 	let fs = MemFs::new();
 	let zbuild_zb = "zbuild.zb";
-	fs.write(&zbuild_zb, zbuild_manifest.as_bytes())
-		.await
+	fs.write(zbuild_zb, zbuild_manifest.as_bytes())
 		.context("Unable to write zbuild manifest")?;
 
 	for (name, contents) in others {
 		fs.write(name, contents.as_bytes())
-			.await
 			.context("Unable to write zbuild file")?;
 	}
 

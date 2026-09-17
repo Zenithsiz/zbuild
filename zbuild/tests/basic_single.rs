@@ -26,7 +26,6 @@ rule create_file {
 
 	if !fs
 		.try_exists_symlink("file.out")
-		.await
 		.context("Unable to check if output file exists")?
 	{
 		Err(app_error!("Output file was missing"))?;

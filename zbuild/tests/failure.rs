@@ -19,7 +19,7 @@ async fn failure() -> ExitResult {
 	// TODO: Instead of sleeping, use `inotify` to wait for other
 	//       actions to happen?
 	fs.write(
-		&zbuild_zb,
+		zbuild_zb,
 		br#"
 rule a {
 	out "a";
@@ -28,7 +28,6 @@ rule a {
 }
 		"#,
 	)
-	.await
 	.context("Unable to write zbuild manifest")?;
 
 	let args = Args {
@@ -42,7 +41,6 @@ rule a {
 
 	app_error::ensure!(
 		!fs.try_exists_symlink("a")
-			.await
 			.context("Unable to check if output file exists")?,
 		"Output file \"a\" was created when it shouldn't've"
 	);

@@ -799,7 +799,6 @@ decl_any_of!(AnyOf5, T0, T1, T2, T3, T4);
 pub async fn parse<FS: Fs>(fs: &FS, path: &Path) -> Result<Ast, AppError> {
 	let input = fs
 		.read_to_string(path)
-		.await
 		.with_context(|| format!("Unable to read zbuild file {path:?}"))?;
 	let mut parser = Parser::new(ArcStr::from(input));
 

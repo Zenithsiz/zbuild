@@ -49,7 +49,7 @@ async fn inner(keep_going: bool) -> Result<(), AppError> {
 	// TODO: Instead of sleeping, use `inotify` to wait for other
 	//       actions to happen?
 	fs.write(
-		&zbuild_zb,
+		zbuild_zb,
 		br#"
 rule a {
 	out "a";
@@ -78,7 +78,6 @@ rule c2 {
 }
 		"#,
 	)
-	.await
 	.context("Unable to write zbuild manifest")?;
 
 	let args = Args {
@@ -94,13 +93,11 @@ rule c2 {
 
 	app_error::ensure!(
 		!fs.try_exists_symlink("a")
-			.await
 			.context("Unable to check if output file exists")?,
 		"Output file \"a\" was created"
 	);
 	app_error::ensure!(
 		!fs.try_exists_symlink("b")
-			.await
 			.context("Unable to check if output file exists")?,
 		"Output file \"b\" was created"
 	);
@@ -108,13 +105,11 @@ rule c2 {
 	match keep_going {
 		true => app_error::ensure!(
 			fs.try_exists_symlink("c1")
-				.await
 				.context("Unable to check if output file exists")?,
 			"Output file \"c1\" was missing"
 		),
 		false => app_error::ensure!(
 			!fs.try_exists_symlink("c1")
-				.await
 				.context("Unable to check if output file exists")?,
 			"Output file \"c1\" was created"
 		),
@@ -122,7 +117,6 @@ rule c2 {
 
 	app_error::ensure!(
 		fs.try_exists_symlink("c2")
-			.await
 			.context("Unable to check if output file exists")?,
 		"Output file \"c2\" was missing"
 	);
