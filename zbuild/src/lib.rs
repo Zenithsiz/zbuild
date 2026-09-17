@@ -86,9 +86,7 @@ pub async fn run<FS: Fs>(fs: &FS, args: Args) -> Result<(), AppError> {
 		.with_context(|| format!("Unable to set current directory to {zbuild_dir:?}"))?;
 
 	// Parse the ast
-	let ast = ast::parse(fs, zbuild_path)
-		.await
-		.context("Unable to parse zbuild file")?;
+	let ast = ast::parse(fs, zbuild_path).context("Unable to parse zbuild file")?;
 	tracing::trace!(?ast, "Parsed ast");
 
 	// Create the expander
