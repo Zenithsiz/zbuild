@@ -41,19 +41,6 @@ use {
 	tokio::{io::AsyncReadExt, process, sync::Semaphore, task},
 };
 
-/// Event
-#[derive(Clone, Debug)]
-pub enum Event {
-	/// Target dependency built
-	TargetDepBuilt {
-		/// Target that was being built
-		target: Target<ArcStr>,
-
-		/// Dependency that was built
-		dep: Target<ArcStr>,
-	},
-}
-
 /// Target rule
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub struct TargetRule {
@@ -120,15 +107,9 @@ impl RuleStats {
 
 /// Builder
 #[derive(Debug)]
-pub struct Builder {
-	/// Event sender
-	event_tx: async_broadcast::Sender<Event>,
-
-	/// Event receiver
-	// Note: We don't care about the receiver, since we can
-	//       just create them from the sender, but if dropped
-	//       it closes the channel, so we need to keep it around.
-	_event_rx: async_broadcast::InactiveReceiver<Event>,
+pub struct Builder<V> {
+	/// Visitor
+	visitor: V,
 
 	/// Rules
 	rules: Rules,
@@ -160,8 +141,9 @@ pub struct Builder {
 	rules_stats: Option<DashMap<Option<ArcStr>, Mutex<RuleStats>>>,
 }
 
-impl Builder {
+impl<V> Builder<V> {
 	/// Creates a new builder
+	#[expect(clippy::too_many_arguments, reason = "TODO: Package some together")]
 	pub fn new(
 		jobs: usize,
 		rules: Rules,
@@ -170,10 +152,8 @@ impl Builder {
 		always_build: bool,
 		progress_bar: Option<ProgressBar>,
 		track_rule_stats: bool,
+		visitor: V,
 	) -> Result<Self, AppError> {
-		let (event_tx, event_rx) = async_broadcast::broadcast(jobs);
-		let event_rx = event_rx.deactivate();
-
 		// Create the rule output tree
 		let mut rule_output_tree = ExprTree::new();
 		for (rule_name, rule) in &rules.rules {
@@ -203,8 +183,7 @@ impl Builder {
 		}
 
 		Ok(Self {
-			event_tx,
-			_event_rx: event_rx,
+			visitor,
 			rules,
 			expander,
 			rules_lock: DashMap::new(),
@@ -249,26 +228,9 @@ impl Builder {
 		let mut rule_stats = rule_stats.lock();
 		f(&mut rule_stats);
 	}
+}
 
-	/// Sends an event, if any are subscribers
-	async fn send_event(&self, make_event: impl FnOnce() -> Event + Send) {
-		// Note: We only send them if there are any receivers (excluding ours, which is inactive),
-		//       to ensure we don't deadlock waiting for someone to read the events
-		if self.event_tx.receiver_count() > 0 {
-			// Note: We don't care about the event
-			let _: Option<Event> = self
-				.event_tx
-				.broadcast(make_event())
-				.await
-				.expect("Event channel was closed");
-		}
-	}
-
-	/// Subscribes to builder events
-	pub fn subscribe_events(&self) -> async_broadcast::Receiver<Event> {
-		self.event_tx.new_receiver()
-	}
-
+impl<V: Visitor> Builder<V> {
 	/// Finds a target's rule
 	fn target_rule(&self, target: &Target<ArcStr>) -> Result<Option<(Rule<ArcStr>, TargetRule)>, AppError> {
 		let target_rule = match *target {
@@ -455,8 +417,8 @@ impl Builder {
 				reason = "For some reason, without this wrapper, the compiler can't see that `build_inner`'s future \
 				          is `Send` without explicitly annotating it in the return type"
 			)]
-			fn build_inner<FS: Fs>(
-				this: Arc<Builder>,
+			fn build_inner<FS: Fs, V: Visitor>(
+				this: Arc<Builder<V>>,
 				fs: FS,
 				target: Arc<Target<ArcStr>>,
 				rule: Rule<ArcStr>,
@@ -708,12 +670,7 @@ impl Builder {
 								.with_context(|| format!("Unable to build target {dep_target}"))?;
 							tracing::trace!(%target, ?rule.name, ?dep, ?res, "Built target rule dependency");
 
-							self.send_event(|| Event::TargetDepBuilt {
-								target: target.clone(),
-								dep:    dep_target.clone(),
-							})
-							.await;
-
+							self.visitor.target_dep_built(target, &dep_target);
 							Some((dep_target, res, dep_guard))
 						},
 
@@ -861,12 +818,7 @@ impl Builder {
 						.await
 						.with_context(|| format!("Unable to build target {dep_target}"))?;
 
-					self.send_event(|| Event::TargetDepBuilt {
-						target: parent_target.clone(),
-						dep:    dep_target.clone(),
-					})
-					.await;
-
+					self.visitor.target_dep_built(parent_target, &dep_target);
 					Ok((dep_target, res, dep_guard))
 				}
 			})
@@ -1117,4 +1069,10 @@ fn cmd_to_string(cmd: &Command<ArcStr, StrOrBuiltin>) -> String {
 
 	let args = cmd.args.iter().map(|arg| format!("\"{arg}\"")).join(" ");
 	format!("[{program} {args}]")
+}
+
+/// Visitor
+pub trait Visitor: 'static + Send + Sync {
+	/// Called when a target dependency was built
+	fn target_dep_built(&self, target: &Target<ArcStr>, dep: &Target<ArcStr>);
 }

@@ -10,7 +10,6 @@ publish     = { workspace = true }
 [dependencies]
 
 app-error             = { workspace = true }
-async-broadcast       = { workspace = true }
 clap                  = { features = ["derive"], workspace = true }
 dashmap               = { workspace = true }
 futures               = { workspace = true }

@@ -40,13 +40,14 @@ pub struct Watcher {
 	fs_event_stream: ReceiverStream<notify_debouncer_full::DebouncedEvent>,
 
 	/// Builder event receiver
-	builder_event_rx: async_broadcast::Receiver<build::Event>,
+	// TODO: Don't receive these via a channel, receive them via a method instead.
+	builder_event_rx: mpsc::UnboundedReceiver<BuildEvent>,
 }
 
 impl Watcher {
 	/// Creates a new watcher
 	pub fn new(
-		builder_event_rx: async_broadcast::Receiver<build::Event>,
+		builder_event_rx: mpsc::UnboundedReceiver<BuildEvent>,
 		debouncer_timeout: Duration,
 	) -> Result<Self, AppError> {
 		// Create the watcher
@@ -75,15 +76,20 @@ impl Watcher {
 
 	/// Watches over all files and rebuilds any changed files
 	#[expect(clippy::too_many_lines, reason = "TODO: Refactor")]
-	pub async fn watch_rebuild<FS: Fs>(mut self, fs: &FS, builder: &Arc<Builder>, ignore_missing: bool) {
+	pub async fn watch_rebuild<FS: Fs, V: build::Visitor>(
+		mut self,
+		fs: &FS,
+		builder: &Arc<Builder<V>>,
+		ignore_missing: bool,
+	) {
 		let rev_deps = &self.rev_deps;
 		futures::future::join(
 			async move {
-				self.builder_event_rx
+				tokio_stream::wrappers::UnboundedReceiverStream::new(self.builder_event_rx)
 					.map(move |event| {
 						tracing::trace!(?event, "Watcher build event");
 						match event {
-							build::Event::TargetDepBuilt { target, dep } => {
+							BuildEvent::TargetDepBuilt { target, dep } => {
 								// Ignore static dependencies
 								// TODO: If the event is a removal event, we might care about a removal, or should
 								//       we enforce to the user that static items really should live for as long as
@@ -243,4 +249,18 @@ impl Watcher {
 		)
 		.await;
 	}
+}
+
+
+/// Build event
+#[derive(Clone, Debug)]
+pub enum BuildEvent {
+	/// Target dependency built
+	TargetDepBuilt {
+		/// Target that was being built
+		target: Target<ArcStr>,
+
+		/// Dependency that was built
+		dep: Target<ArcStr>,
+	},
 }

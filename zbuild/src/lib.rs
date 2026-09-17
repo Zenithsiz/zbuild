@@ -64,6 +64,7 @@ use {
 		thread,
 		time::{Duration, Instant, SystemTime},
 	},
+	tokio::sync::mpsc,
 	util::ArcStr,
 	watcher::Watcher,
 };
@@ -166,8 +167,21 @@ pub async fn run<FS: Fs>(fs: &FS, args: Args) -> Result<(), AppError> {
 		},
 	};
 
+	// Then create the watcher, if we're watching
+	let (watch_build_event_tx, watch_build_event_rx) = mpsc::unbounded_channel();
+	let watcher = args
+		.watch
+		.then(|| {
+			// TODO: Better default?
+			let debouncer_timeout_ms = args.watcher_debouncer_timeout_ms.unwrap_or(10.0_f64);
+			let debouncer_timeout = { Duration::from_secs_f64(debouncer_timeout_ms / 1000.0) };
+
+			Watcher::new(watch_build_event_rx, debouncer_timeout)
+		})
+		.transpose()?;
 
 	// Create the builder
+	let builder_visitor = BuilderVisitor { watch_build_event_tx };
 	let builder = Builder::new(
 		jobs,
 		rules,
@@ -178,21 +192,10 @@ pub async fn run<FS: Fs>(fs: &FS, args: Args) -> Result<(), AppError> {
 		args.always_build,
 		progress_bar.clone(),
 		args.track_rule_stats,
+		builder_visitor,
 	)
 	.context("Unable to create builder")?;
 	let builder = Arc::new(builder);
-
-	// Then create the watcher, if we're watching
-	let watcher = args
-		.watch
-		.then(|| {
-			// TODO: Better default?
-			let debouncer_timeout_ms = args.watcher_debouncer_timeout_ms.unwrap_or(10.0_f64);
-			let debouncer_timeout = { Duration::from_secs_f64(debouncer_timeout_ms / 1000.0) };
-
-			Watcher::new(builder.subscribe_events(), debouncer_timeout)
-		})
-		.transpose()?;
 
 	// Finally build all targets and start watching
 	let start_time = Instant::now();
@@ -290,9 +293,9 @@ async fn find_zbuild<FS: Fs>(fs: &FS) -> Result<PathBuf, AppError> {
 }
 
 /// Builds a target.
-async fn build_target<FS: Fs, T: BuildableTargetInner + fmt::Display + fmt::Debug>(
+async fn build_target<FS: Fs, V: build::Visitor, T: BuildableTargetInner + fmt::Display + fmt::Debug>(
 	fs: &FS,
-	builder: &Arc<Builder>,
+	builder: &Arc<Builder<V>>,
 	target: &rules::Target<T>,
 	ignore_missing: bool,
 ) -> Result<(), AppError> {
@@ -327,20 +330,20 @@ async fn build_target<FS: Fs, T: BuildableTargetInner + fmt::Display + fmt::Debu
 /// A buildable target inner type
 trait BuildableTargetInner: Sized {
 	/// Builds this target
-	async fn build<FS: Fs>(
+	async fn build<FS: Fs, V: build::Visitor>(
 		fs: &FS,
 		target: &rules::Target<Self>,
-		builder: &Arc<Builder>,
+		builder: &Arc<Builder<V>>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError>;
 }
 
 impl BuildableTargetInner for rules::Expr {
-	async fn build<FS: Fs>(
+	async fn build<FS: Fs, V: build::Visitor>(
 		fs: &FS,
 		target: &rules::Target<Self>,
-		builder: &Arc<Builder>,
+		builder: &Arc<Builder<V>>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError> {
@@ -352,10 +355,10 @@ impl BuildableTargetInner for rules::Expr {
 }
 
 impl BuildableTargetInner for ArcStr {
-	async fn build<FS: Fs>(
+	async fn build<FS: Fs, V: build::Visitor>(
 		fs: &FS,
 		target: &rules::Target<Self>,
-		builder: &Arc<Builder>,
+		builder: &Arc<Builder<V>>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError> {
@@ -363,5 +366,23 @@ impl BuildableTargetInner for ArcStr {
 			.build(fs, target, ignore_missing, reason)
 			.await
 			.map(|(build_res, _)| build_res)
+	}
+}
+
+#[derive(Debug)]
+struct BuilderVisitor {
+	watch_build_event_tx: mpsc::UnboundedSender<watcher::BuildEvent>,
+}
+
+impl build::Visitor for BuilderVisitor {
+	fn target_dep_built(&self, target: &rules::Target<ArcStr>, dep: &rules::Target<ArcStr>) {
+		if self.watch_build_event_tx.is_closed() {
+			return;
+		}
+
+		_ = self.watch_build_event_tx.send(watcher::BuildEvent::TargetDepBuilt {
+			target: target.clone(),
+			dep:    dep.clone(),
+		});
 	}
 }
