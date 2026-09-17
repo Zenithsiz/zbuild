@@ -8,9 +8,9 @@
 
 // Imports
 use {
-	crate::{AppError, util::ArcStr},
+	crate::{AppError, Fs, util::ArcStr},
 	app_error::Context,
-	std::{fmt::Write, fs, mem, path::Path, ptr, str::pattern::Pattern},
+	std::{fmt::Write, mem, path::Path, ptr, str::pattern::Pattern},
 };
 
 /// Zbuild ast
@@ -796,8 +796,11 @@ decl_any_of!(AnyOf3, T0, T1, T2);
 decl_any_of!(AnyOf5, T0, T1, T2, T3, T4);
 
 /// Fully parses the ast from `path`.
-pub fn parse(path: &Path) -> Result<Ast, AppError> {
-	let input = fs::read_to_string(path).with_context(|| format!("Unable to read zbuild file {path:?}"))?;
+pub async fn parse<FS: Fs>(fs: &FS, path: &Path) -> Result<Ast, AppError> {
+	let input = fs
+		.read_to_string(path)
+		.await
+		.with_context(|| format!("Unable to read zbuild file {path:?}"))?;
 	let mut parser = Parser::new(ArcStr::from(input));
 
 	// Parse the initial AST
@@ -820,8 +823,9 @@ pub fn parse(path: &Path) -> Result<Ast, AppError> {
 			.parent()
 			.expect("File had no parent directory")
 			.join(&*include.path.0);
-		let mut include_ast =
-			self::parse(&include_path).with_context(|| format!("Unable to parse {include_path:?}"))?;
+		let mut include_ast = Box::pin(self::parse(fs, &include_path))
+			.await
+			.with_context(|| format!("Unable to parse {include_path:?}"))?;
 
 		ast.aliases.append(&mut include_ast.aliases);
 		ast.pats.append(&mut include_ast.pats);

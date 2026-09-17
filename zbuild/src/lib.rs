@@ -16,7 +16,8 @@
 	coverage_attribute,
 	nonpoison_mutex,
 	sync_nonpoison,
-	vec_try_remove
+	vec_try_remove,
+	share_trait
 )]
 // Lints
 #![allow(
@@ -31,6 +32,7 @@ mod ast;
 mod build;
 mod error;
 mod expand;
+mod fs;
 mod rules;
 mod util;
 mod watcher;
@@ -39,6 +41,7 @@ mod watcher;
 pub use self::{
 	args::Args,
 	error::{AppError, ExitResult},
+	fs::{Fs, FsMetadata, MemFs, OsFs},
 };
 
 // Imports
@@ -55,7 +58,6 @@ use {
 	indicatif::ProgressBar,
 	smallvec::SmallVec,
 	std::{
-		env,
 		fmt,
 		path::{Path, PathBuf},
 		sync::Arc,
@@ -67,22 +69,26 @@ use {
 };
 
 #[expect(clippy::too_many_lines, reason = "TODO: Split it up more")]
-pub async fn run(args: Args) -> Result<(), AppError> {
+pub async fn run<FS: Fs>(fs: &FS, args: Args) -> Result<(), AppError> {
 	// Find the zbuild location and change the current directory to it
 	// TODO: Not adjust the zbuild path and read it before?
 	let zbuild_path = match args.zbuild_path {
-		Some(path) => path.canonicalize().context("Unable to canonicalize zbuild path")?,
-		None => self::find_zbuild().await?,
+		Some(path) => fs.canonicalize(&path).context("Unable to canonicalize zbuild path")?,
+		None => self::find_zbuild(fs).await?,
 	};
 	tracing::debug!(?zbuild_path, "Found zbuild path");
 	let zbuild_dir = zbuild_path.parent().expect("Zbuild path had no parent");
 	let zbuild_path = zbuild_path.file_name().expect("Zbuild path had no file name");
 	let zbuild_path = Path::new(zbuild_path);
 	tracing::debug!(?zbuild_dir, "Moving to zbuild directory");
-	env::set_current_dir(zbuild_dir).with_context(|| format!("Unable to set current directory to {zbuild_dir:?}"))?;
+	fs.set_current_dir(zbuild_dir)
+		.await
+		.with_context(|| format!("Unable to set current directory to {zbuild_dir:?}"))?;
 
 	// Parse the ast
-	let ast = ast::parse(zbuild_path).context("Unable to parse zbuild file")?;
+	let ast = ast::parse(fs, zbuild_path)
+		.await
+		.context("Unable to parse zbuild file")?;
 	tracing::trace!(?ast, "Parsed ast");
 
 	// Create the expander
@@ -195,7 +201,7 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 			targets_to_build
 				.iter()
 				.map(|target| {
-					self::build_target(&builder, target, args.ignore_missing).map_err(|err| (target.clone(), err))
+					self::build_target(fs, &builder, target, args.ignore_missing).map_err(|err| (target.clone(), err))
 				})
 				.collect::<FuturesUnordered<_>>()
 				.collect::<Vec<Result<(), _>>>()
@@ -207,7 +213,7 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 		async {
 			if let Some(watcher) = watcher {
 				tracing::info!("Starting to watch for all targets");
-				watcher.watch_rebuild(&builder, args.ignore_missing).await;
+				watcher.watch_rebuild(fs, &builder, args.ignore_missing).await;
 			}
 		}
 	);
@@ -259,13 +265,15 @@ pub async fn run(args: Args) -> Result<(), AppError> {
 }
 
 /// Finds the nearest zbuild file
-async fn find_zbuild() -> Result<PathBuf, AppError> {
-	let cur_path = env::current_dir().context("Unable to get current directory")?;
+async fn find_zbuild<FS: Fs>(fs: &FS) -> Result<PathBuf, AppError> {
+	// TODO: This should be part of the filesystem too
+	let cur_path = fs.current_dir().await.context("Unable to get current directory")?;
 	let mut cur_path = cur_path.as_path();
 
 	loop {
 		let zbuild_path = cur_path.join("zbuild.zb");
-		match util::fs_try_exists_symlink(&zbuild_path)
+		match fs
+			.try_exists_symlink(&zbuild_path)
 			.await
 			.with_context(|| format!("Unable to check if file exists {zbuild_path:?}"))?
 		{
@@ -282,7 +290,8 @@ async fn find_zbuild() -> Result<PathBuf, AppError> {
 }
 
 /// Builds a target.
-async fn build_target<T: BuildableTargetInner + fmt::Display + fmt::Debug>(
+async fn build_target<FS: Fs, T: BuildableTargetInner + fmt::Display + fmt::Debug>(
+	fs: &FS,
 	builder: &Arc<Builder>,
 	target: &rules::Target<T>,
 	ignore_missing: bool,
@@ -291,7 +300,7 @@ async fn build_target<T: BuildableTargetInner + fmt::Display + fmt::Debug>(
 
 	// Try to build the target
 	let build_start_time = SystemTime::now();
-	let res = T::build(target, builder, ignore_missing, BuildReason::empty()).await;
+	let res = T::build(fs, target, builder, ignore_missing, BuildReason::empty()).await;
 
 	// Then check the status
 	match res {
@@ -318,7 +327,8 @@ async fn build_target<T: BuildableTargetInner + fmt::Display + fmt::Debug>(
 /// A buildable target inner type
 trait BuildableTargetInner: Sized {
 	/// Builds this target
-	async fn build(
+	async fn build<FS: Fs>(
+		fs: &FS,
 		target: &rules::Target<Self>,
 		builder: &Arc<Builder>,
 		ignore_missing: bool,
@@ -327,28 +337,30 @@ trait BuildableTargetInner: Sized {
 }
 
 impl BuildableTargetInner for rules::Expr {
-	async fn build(
+	async fn build<FS: Fs>(
+		fs: &FS,
 		target: &rules::Target<Self>,
 		builder: &Arc<Builder>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError> {
 		builder
-			.build_expr(target, ignore_missing, reason)
+			.build_expr(fs, target, ignore_missing, reason)
 			.await
 			.map(|(build_res, _)| build_res)
 	}
 }
 
 impl BuildableTargetInner for ArcStr {
-	async fn build(
+	async fn build<FS: Fs>(
+		fs: &FS,
 		target: &rules::Target<Self>,
 		builder: &Arc<Builder>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError> {
 		builder
-			.build(target, ignore_missing, reason)
+			.build(fs, target, ignore_missing, reason)
 			.await
 			.map(|(build_res, _)| build_res)
 	}

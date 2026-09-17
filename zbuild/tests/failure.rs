@@ -6,45 +6,45 @@
 // Imports
 use {
 	app_error::Context,
-	std::fs,
-	tempfile::TempDir,
-	zbuild::{Args, ExitResult},
+	zbuild::{Args, ExitResult, Fs, MemFs},
 };
 
 #[tokio::test]
 #[tracing_test::traced_test]
 async fn failure() -> ExitResult {
-	let temp_dir = TempDir::with_prefix("zbuild").context("Unable to create temporary directory")?;
-	let zbuild_zb = temp_dir.path().join("zbuild.zb");
+	let fs = MemFs::new();
+
+	let zbuild_zb = "zbuild.zb";
 
 	// TODO: Instead of sleeping, use `inotify` to wait for other
 	//       actions to happen?
-	fs::write(
+	fs.write(
 		&zbuild_zb,
-		r#"
+		br#"
 rule a {
 	out "a";
 	exec "false";
-	exec "touch" "a";
+	exec builtin.touch "a";
 }
 		"#,
 	)
+	.await
 	.context("Unable to write zbuild manifest")?;
 
 	let args = Args {
 		targets: ["a".to_owned()].into(),
-		zbuild_path: Some(zbuild_zb),
+		zbuild_path: Some(zbuild_zb.into()),
 		..Args::default()
 	};
 	tracing::info!(?args, "Arguments");
-	let res = zbuild::run(args).await;
+	let res = zbuild::run(&fs, args).await;
 	app_error::ensure!(res.is_err(), "Expected zbuild error");
 
-
-	let a = temp_dir.path().join("a");
 	app_error::ensure!(
-		!a.try_exists().context("Unable to check if output file exists")?,
-		"Output file {a:?} was created when it shouldn't've"
+		!fs.try_exists_symlink("a")
+			.await
+			.context("Unable to check if output file exists")?,
+		"Output file \"a\" was created when it shouldn't've"
 	);
 
 	ExitResult::Ok

@@ -8,17 +8,12 @@
 
 // Imports
 use {
-	crate::{AppError, Builder, build, rules::Target, util::ArcStr},
+	crate::{AppError, Builder, Fs, build, rules::Target, util::ArcStr},
 	app_error::Context,
 	dashmap::{DashMap, DashSet},
 	futures::{StreamExt, stream::FuturesUnordered},
 	notify_debouncer_full::Debouncer,
-	std::{
-		io,
-		path::{Path, PathBuf},
-		sync::Arc,
-		time::Duration,
-	},
+	std::{io, path::PathBuf, sync::Arc, time::Duration},
 	tokio::sync::mpsc,
 	tokio_stream::wrappers::ReceiverStream,
 };
@@ -80,7 +75,7 @@ impl Watcher {
 
 	/// Watches over all files and rebuilds any changed files
 	#[expect(clippy::too_many_lines, reason = "TODO: Refactor")]
-	pub async fn watch_rebuild(mut self, builder: &Arc<Builder>, ignore_missing: bool) {
+	pub async fn watch_rebuild<FS: Fs>(mut self, fs: &FS, builder: &Arc<Builder>, ignore_missing: bool) {
 		let rev_deps = &self.rev_deps;
 		futures::future::join(
 			async move {
@@ -101,7 +96,7 @@ impl Watcher {
 
 								// Ignore non-file targets and canonicalize file ones
 								let dep_path = match &dep {
-									Target::File { file, .. } => match Path::new(&**file).canonicalize() {
+									Target::File { file, .. } => match fs.canonicalize(&**file) {
 										Ok(path) => path,
 										Err(err) => {
 											tracing::warn!(?file, ?err, "Unable to canonicalize");
@@ -178,7 +173,7 @@ impl Watcher {
 				.flat_map(|event| futures::stream::iter(event.event.paths))
 				.then(move |path| async move {
 					// Canonicalize the path
-					let path = match path.canonicalize() {
+					let path = match fs.canonicalize(&path) {
 						Ok(path) => path,
 						Err(err) => {
 							// TODO: Warn on all occasions once this code path isn't hit
@@ -236,7 +231,7 @@ impl Watcher {
 					dep_parents
 						.iter()
 						.map(|target| async {
-							let _: Result<(), _> = crate::build_target(builder, target, ignore_missing).await;
+							let _: Result<(), _> = crate::build_target(fs, builder, target, ignore_missing).await;
 						})
 						.collect::<FuturesUnordered<_>>()
 						.collect::<()>()

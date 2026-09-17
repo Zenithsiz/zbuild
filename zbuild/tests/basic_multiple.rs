@@ -6,21 +6,21 @@
 // Imports
 use {
 	app_error::{Context, app_error},
-	zbuild::ExitResult,
+	zbuild::{ExitResult, Fs},
 };
 
 /// Single rule with multiple outputs
 #[tokio::test]
 #[tracing_test::traced_test]
 async fn basic_multiple() -> ExitResult {
-	let temp_dir = zbuild_test::with_zbuild(
+	let fs = zbuild_test::with_zbuild(
 		r#"
 rule create_file {
 	out "file1.out";
 	out "file2.out";
 
-	exec "touch" "file1.out";
-	exec "touch" "file2.out";
+	exec builtin.touch "file1.out";
+	exec builtin.touch "file2.out";
 }
 		"#,
 		// Note: Only request `file1.out`
@@ -28,10 +28,12 @@ rule create_file {
 	)
 	.await?;
 
-	let file1_out = temp_dir.path().join("file1.out");
-	let file2_out = temp_dir.path().join("file2.out");
-	for file_out in [file1_out, file2_out] {
-		if !file_out.try_exists().context("Unable to check if output file exists")? {
+	for file_out in ["file1.out", "file2.out"] {
+		if !fs
+			.try_exists_symlink(&file_out)
+			.await
+			.context("Unable to check if output file exists")?
+		{
 			Err(app_error!("Output file {file_out:?} was missing"))?;
 		}
 	}

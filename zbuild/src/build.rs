@@ -13,6 +13,8 @@ use {
 	crate::{
 		AppError,
 		Expander,
+		Fs,
+		FsMetadata,
 		Rules,
 		error::{self, AppErrorData},
 		expand::{self, StrOrBuiltin},
@@ -36,7 +38,7 @@ use {
 		sync::{Arc, nonpoison::Mutex},
 		time::SystemTime,
 	},
-	tokio::{fs, io::AsyncReadExt, process, sync::Semaphore, task},
+	tokio::{io::AsyncReadExt, process, sync::Semaphore, task},
 };
 
 /// Event
@@ -327,8 +329,9 @@ impl Builder {
 	}
 
 	/// Builds an expression-encoded target
-	pub async fn build_expr(
+	pub async fn build_expr<FS: Fs>(
 		self: &Arc<Self>,
+		fs: &FS,
 		target: &Target<Expr>,
 		ignore_missing: bool,
 		reason: BuildReason,
@@ -341,13 +344,14 @@ impl Builder {
 			.with_context(|| format!("Unable to expand target {target}"))?;
 
 		// Then build
-		self.build(&target, ignore_missing, reason).await
+		self.build(fs, &target, ignore_missing, reason).await
 	}
 
 	/// Builds a target
 	#[expect(clippy::too_many_lines, reason = "TODO: Split this function into smaller ones")]
-	pub async fn build<'a>(
+	pub async fn build<'a, FS: Fs>(
 		self: &'a Arc<Self>,
+		fs: &FS,
 		target: &'a Target<ArcStr>,
 		ignore_missing: bool,
 		reason: BuildReason,
@@ -365,7 +369,7 @@ impl Builder {
 		let (find_rule_duration, Some((rule, target_rule))) = util::try_measure(|| self.target_rule(&target))? else {
 			match *target {
 				Target::File { ref file, .. } => {
-					let (check_duration, res) = util::measure_async(fs::symlink_metadata(&**file)).await;
+					let (check_duration, res) = util::measure_async(fs.symlink_metadata(&**file)).await;
 					self.with_rule_stats(None, |target_rules| {
 						target_rules.durations.check_fs += check_duration;
 					});
@@ -451,8 +455,9 @@ impl Builder {
 				reason = "For some reason, without this wrapper, the compiler can't see that `build_inner`'s future \
 				          is `Send` without explicitly annotating it in the return type"
 			)]
-			fn build_inner(
+			fn build_inner<FS: Fs>(
 				this: Arc<Builder>,
+				fs: FS,
 				target: Arc<Target<ArcStr>>,
 				rule: Rule<ArcStr>,
 				ignore_missing: bool,
@@ -460,11 +465,19 @@ impl Builder {
 				target_rule: TargetRule,
 			) -> impl Future<Output = Result<BuildResult, AppError>> + Send {
 				async move {
-					this.build_unchecked(&target, &rule, ignore_missing, reason, &target_rule)
+					this.build_unchecked(&fs, &target, &rule, ignore_missing, reason, &target_rule)
 						.await
 				}
 			}
-			build_inner(this, target, rule, ignore_missing, reason, target_rule.clone())
+			build_inner(
+				this,
+				fs.share(),
+				target,
+				rule,
+				ignore_missing,
+				reason,
+				target_rule.clone(),
+			)
 		})
 		.await
 		.context("Unable to join task")?;
@@ -493,8 +506,9 @@ impl Builder {
 	}
 
 	/// Builds a target without checking if the target is already being built.
-	async fn build_unchecked(
+	async fn build_unchecked<FS: Fs>(
 		self: &Arc<Self>,
+		fs: &FS,
 		target: &Target<ArcStr>,
 		rule: &Rule<ArcStr>,
 		ignore_missing: bool,
@@ -506,7 +520,9 @@ impl Builder {
 		}
 
 		// Build all dependencies
-		let deps = self.build_deps_unchecked(target, rule, ignore_missing, reason).await?;
+		let deps = self
+			.build_deps_unchecked(fs, target, rule, ignore_missing, reason)
+			.await?;
 
 		let deps_last_build_time = deps
 			.iter()
@@ -517,7 +533,7 @@ impl Builder {
 
 		// Afterwards check the last time we've built the rule and compare it with
 		// the dependency build times.
-		let rule_last_build_time = self::rule_last_build_time(rule).await;
+		let rule_last_build_time = self::rule_last_build_time(fs, rule).await;
 		let needs_rebuilt = match (deps_last_build_time, &rule_last_build_time) {
 			// If any files were missing, or we had no outputs, build
 			(_, Err(_) | Ok(None)) => true,
@@ -535,14 +551,15 @@ impl Builder {
 		// Then rebuild, if needed
 		if needs_rebuilt {
 			tracing::trace!(%target, ?rule.name, ?deps_last_build_time, ?rule_last_build_time, "Rebuilding target rule");
-			self.rebuild_rule(rule, target_rule)
+			self.rebuild_rule(fs, rule, target_rule)
 				.await
 				.with_context(|| format!("Unable to build rule {:?}", rule.name))?;
 		}
 
 		// Then get the build time
 		// Note: If we don't have any outputs, just use the current time as the build time
-		let (build_time_duration, cur_build_time) = util::try_measure_async(self::rule_last_build_time(rule)).await?;
+		let (build_time_duration, cur_build_time) =
+			util::try_measure_async(self::rule_last_build_time(fs, rule)).await?;
 		let res = BuildResult {
 			build_time: cur_build_time.unwrap_or_else(SystemTime::now),
 			built:      needs_rebuilt,
@@ -560,8 +577,9 @@ impl Builder {
 
 	/// Builds all dependencies of `target`
 	#[expect(clippy::too_many_lines, reason = "TODO: Split this function into smaller ones")]
-	async fn build_deps_unchecked(
+	async fn build_deps_unchecked<FS: Fs>(
 		self: &Arc<Self>,
+		fs: &FS,
 		target: &Target<ArcStr>,
 		rule: &Rule<ArcStr>,
 		ignore_missing: bool,
@@ -601,7 +619,8 @@ impl Builder {
 						is_deps_file,
 						is_output: false,
 						is_optional,
-						exists: util::fs_try_exists_symlink(&**file)
+						exists: fs
+							.try_exists_symlink(&**file)
 							.await
 							.with_context(|| format!("Unable to check if file exists {file:?}"))?,
 					}),
@@ -632,7 +651,8 @@ impl Builder {
 						is_deps_file: true,
 						is_output:    true,
 						is_optional:  false,
-						exists:       util::fs_try_exists_symlink(&**file)
+						exists:       fs
+							.try_exists_symlink(&**file)
 							.await
 							.with_context(|| format!("Unable to check if file exists {file:?}"))?,
 					})),
@@ -679,6 +699,7 @@ impl Builder {
 						Some(dep_target) => {
 							let (res, dep_guard) = self
 								.build(
+									fs,
 									&dep_target,
 									ignore_missing | matches!(dep, Dep::File { is_optional: true, .. }),
 									reason.with_target(target.clone()),
@@ -725,7 +746,7 @@ impl Builder {
 							exists: true,
 							..
 						} => self
-							.build_deps_file(target, file, rule, ignore_missing, reason)
+							.build_deps_file(fs, target, file, rule, ignore_missing, reason)
 							.await
 							.with_context(|| format!("Unable to build dependencies file {file:?}"))?,
 						Dep::File { .. } | Dep::Rule { .. } => vec![],
@@ -751,8 +772,9 @@ impl Builder {
 	/// Builds all dependencies of a `deps` file.
 	///
 	/// Returns the latest modification date of the dependencies
-	async fn build_deps_file(
+	async fn build_deps_file<FS: Fs>(
 		self: &Arc<Self>,
+		fs: &FS,
 		parent_target: &Target<ArcStr>,
 		deps_file: &str,
 		rule: &Rule<ArcStr>,
@@ -760,7 +782,7 @@ impl Builder {
 		reason: &BuildReason,
 	) -> Result<Vec<(Target<ArcStr>, BuildResult, Option<BuildLockDepGuard>)>, AppError> {
 		tracing::trace!(target=?parent_target, ?rule.name, ?deps_file, "Building dependencies of target rule dependency-file");
-		let mut deps = self::parse_deps_file(deps_file).await?;
+		let mut deps = self::parse_deps_file(fs, deps_file).await?;
 		tracing::trace!(target=?parent_target, ?rule.name, ?deps_file, ?deps, "Found dependencies of target rule dependency-file");
 
 		// Ensure that at least one dependency output matches the rule
@@ -830,7 +852,12 @@ impl Builder {
 				};
 				async move {
 					let (res, dep_guard) = self
-						.build(&dep_target, ignore_missing, reason.with_target(parent_target.clone()))
+						.build(
+							fs,
+							&dep_target,
+							ignore_missing,
+							reason.with_target(parent_target.clone()),
+						)
 						.await
 						.with_context(|| format!("Unable to build target {dep_target}"))?;
 
@@ -852,7 +879,12 @@ impl Builder {
 	}
 
 	/// Rebuilds a rule
-	pub async fn rebuild_rule(&self, rule: &Rule<ArcStr>, target_rule: &TargetRule) -> Result<(), AppError> {
+	pub async fn rebuild_rule<FS: Fs>(
+		&self,
+		fs: &FS,
+		rule: &Rule<ArcStr>,
+		target_rule: &TargetRule,
+	) -> Result<(), AppError> {
 		// Lock the semaphore
 		// Note: If we locked it per-command, we could exit earlier
 		//       when closed, but that would break some executions.
@@ -867,7 +899,7 @@ impl Builder {
 
 		let mut stdout_aliases = HashMap::new();
 		for (cmd_idx, cmd) in rule.exec.cmds.iter().enumerate() {
-			self.exec_cmd(rule, cmd_idx, cmd, target_rule, &mut stdout_aliases)
+			self.exec_cmd(fs, rule, cmd_idx, cmd, target_rule, &mut stdout_aliases)
 				.await?;
 		}
 
@@ -876,8 +908,9 @@ impl Builder {
 
 	/// Executes `cmd`.
 	#[expect(unused_results, reason = "Due to the builder pattern of `Command`")]
-	async fn exec_cmd(
+	async fn exec_cmd<FS: Fs>(
 		&self,
+		fs: &FS,
 		rule: &Rule<ArcStr>,
 		cmd_idx: usize,
 		cmd: &Command<Expr>,
@@ -897,6 +930,7 @@ impl Builder {
 		match &cmd.program {
 			StrOrBuiltin::Str(program) => {
 				// Create the command and feed in all the arguments
+				// TODO: Should this be accessed via `fs` too?
 				let mut os_cmd = process::Command::new(&**program);
 				os_cmd.args(cmd.args.iter().map(|arg| &**arg));
 
@@ -969,7 +1003,7 @@ impl Builder {
 							None => Cow::Borrowed(Path::new(&**arg_path)),
 						};
 
-						std::fs::create_dir_all(&path).with_context(|| match &cmd.cwd {
+						fs.create_dir_all(&path).await.with_context(|| match &cmd.cwd {
 							Some(cwd) => format!(
 								"Unable to create directory {} (Note: attempted to create {arg_path} from working \
 								 directory {cwd})",
@@ -989,11 +1023,7 @@ impl Builder {
 							None => Cow::Borrowed(Path::new(&**arg_path)),
 						};
 
-						_ = fs::OpenOptions::new()
-							.create(true)
-							.truncate(false)
-							.append(true)
-							.open(&path)
+						fs.touch(&path)
 							.await
 							.with_context(|| format!("Unable to touch file {}", path.display()))?;
 					}
@@ -1006,9 +1036,10 @@ impl Builder {
 }
 
 /// Parses a dependencies file
-async fn parse_deps_file(file: &str) -> Result<HashMap<ArcStr, Vec<ArcStr>>, AppError> {
+async fn parse_deps_file<FS: Fs>(fs: &FS, file: &str) -> Result<HashMap<ArcStr, Vec<ArcStr>>, AppError> {
 	// Read it
-	let mut contents = fs::read_to_string(file)
+	let mut contents = fs
+		.read_to_string(file)
 		.await
 		.with_context(|| format!("Unable to read file {file:?}"))?;
 
@@ -1048,7 +1079,7 @@ async fn parse_deps_file(file: &str) -> Result<HashMap<ArcStr, Vec<ArcStr>>, App
 ///
 /// Returns `Err` if any files didn't exist,
 /// Returns `Ok(None)` if rule has no outputs
-async fn rule_last_build_time(rule: &Rule<ArcStr>) -> Result<Option<SystemTime>, AppError> {
+async fn rule_last_build_time<FS: Fs>(fs: &FS, rule: &Rule<ArcStr>) -> Result<Option<SystemTime>, AppError> {
 	// Note: We get the time of the oldest file in order to ensure all
 	//       files are at-least that old
 	let built_time = rule
@@ -1058,7 +1089,8 @@ async fn rule_last_build_time(rule: &Rule<ArcStr>) -> Result<Option<SystemTime>,
 			let file = match item {
 				OutItem::File { file, .. } => file,
 			};
-			let metadata = fs::symlink_metadata(&**file)
+			let metadata = fs
+				.symlink_metadata(&**file)
 				.await
 				.with_context(|| format!("Unable to read file metadata (not following symlinks) of {file:?}"))?;
 			let modified_time = metadata

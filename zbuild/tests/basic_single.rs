@@ -6,27 +6,30 @@
 // Imports
 use {
 	app_error::{Context, app_error},
-	zbuild::ExitResult,
+	zbuild::{ExitResult, Fs},
 };
 
 /// Single rule and target
 #[tokio::test]
 #[tracing_test::traced_test]
 async fn basic_single() -> ExitResult {
-	let temp_dir = zbuild_test::with_zbuild(
+	let fs = zbuild_test::with_zbuild(
 		r#"
 rule create_file {
 	out "file.out";
-	exec "touch" "file.out";
+	exec builtin.touch "file.out";
 }
 		"#,
 		["file.out"],
 	)
 	.await?;
 
-	let file_out = temp_dir.path().join("file.out");
-	if !file_out.try_exists().context("Unable to check if output file exists")? {
-		Err(app_error!("Output file {file_out:?} was missing"))?;
+	if !fs
+		.try_exists_symlink("file.out")
+		.await
+		.context("Unable to check if output file exists")?
+	{
+		Err(app_error!("Output file was missing"))?;
 	}
 
 	ExitResult::Ok

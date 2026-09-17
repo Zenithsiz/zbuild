@@ -6,20 +6,11 @@
 // Imports
 use {
 	app_error::Context,
-	futures::lock::Mutex,
-	std::fs,
-	tempfile::TempDir,
-	zbuild::{AppError, Args},
+	zbuild::{AppError, Args, Fs, MemFs},
 };
 
-/// Lock for testing.
-///
-/// Unfortunately necessary as we change our current directory
-/// and tests run in multiple threads
-static TEST_LOCK: Mutex<()> = Mutex::new(());
-
 /// Creates a directory with a zbuild manifest, then runs it, and returns the directory
-pub async fn with_zbuild<'a, T>(zbuild_manifest: &str, targets: T) -> Result<TempDir, AppError>
+pub async fn with_zbuild<'a, T>(zbuild_manifest: &str, targets: T) -> Result<MemFs, AppError>
 where
 	T: AsRef<[&'a str]>,
 {
@@ -31,29 +22,30 @@ pub async fn with_zbuild_multiple<'a, T>(
 	zbuild_manifest: &str,
 	others: impl IntoIterator<Item = (&str, &str)>,
 	targets: T,
-) -> Result<TempDir, AppError>
+) -> Result<MemFs, AppError>
 where
 	T: AsRef<[&'a str]>,
 {
-	let temp_dir = TempDir::with_prefix("zbuild").context("Unable to create temporary directory")?;
-
-	let zbuild_zb = temp_dir.path().join("zbuild.zb");
-	fs::write(&zbuild_zb, zbuild_manifest).context("Unable to write zbuild manifest")?;
+	let fs = MemFs::new();
+	let zbuild_zb = "zbuild.zb";
+	fs.write(&zbuild_zb, zbuild_manifest.as_bytes())
+		.await
+		.context("Unable to write zbuild manifest")?;
 
 	for (name, contents) in others {
-		let file = temp_dir.path().join(name);
-		fs::write(&file, contents).context("Unable to write zbuild file")?;
+		fs.write(name, contents.as_bytes())
+			.await
+			.context("Unable to write zbuild file")?;
 	}
 
 	let args = Args {
 		targets: targets.as_ref().iter().copied().map(str::to_owned).collect(),
-		zbuild_path: Some(zbuild_zb),
+		zbuild_path: Some(zbuild_zb.into()),
 		..Args::default()
 	};
 	tracing::info!(?args, "Arguments");
 
-	let _guard = TEST_LOCK.lock().await;
-	zbuild::run(args).await.context("Unable to run zbuild")?;
+	zbuild::run(&fs, args).await.context("Unable to run zbuild")?;
 
-	Ok(temp_dir)
+	Ok(fs)
 }

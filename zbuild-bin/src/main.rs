@@ -18,7 +18,7 @@ use {
 		sync::atomic::{self, AtomicUsize},
 	},
 	tokio::runtime,
-	zbuild::{Args, ExitResult},
+	zbuild::{Args, ExitResult, OsFs},
 	zutil_logger::Logger,
 };
 
@@ -65,6 +65,7 @@ fn main() -> ExitResult {
 
 	let runtime = runtime_builder.build().context("Failed building the Runtime")?;
 
-	runtime.block_on(zbuild::run(args))?;
+	let fs = OsFs::new();
+	runtime.block_on(zbuild::run(&fs, args))?;
 	ExitResult::Ok
 }

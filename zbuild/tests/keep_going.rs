@@ -6,9 +6,7 @@
 // Imports
 use {
 	app_error::Context,
-	std::fs,
-	tempfile::TempDir,
-	zbuild::{AppError, Args, ExitResult},
+	zbuild::{AppError, Args, ExitResult, Fs, MemFs},
 };
 
 /// Test for `--keep-going`
@@ -44,81 +42,89 @@ async fn keep_going() -> ExitResult {
 /// When testing with `keep_going = false`, we ensure that `C1` is not built,
 /// since `C2` exits after `B` errors, so nothing else should be built.
 async fn inner(keep_going: bool) -> Result<(), AppError> {
-	let temp_dir = TempDir::with_prefix("zbuild").context("Unable to create temporary directory")?;
-	let zbuild_zb = temp_dir.path().join("zbuild.zb");
+	let fs = MemFs::new();
+
+	let zbuild_zb = "zbuild.zb";
 
 	// TODO: Instead of sleeping, use `inotify` to wait for other
 	//       actions to happen?
-	fs::write(
+	fs.write(
 		&zbuild_zb,
-		r#"
+		br#"
 rule a {
 	out "a";
 	dep "b";
 	dep "c1";
-	exec "touch" "a";
+	exec builtin.touch "a";
 }
 
 rule b {
 	out "b";
 	exec "sleep" "0.1";
 	exec "false";
-	exec "touch" "b";
+	exec builtin.touch "b";
 }
 
 rule c1 {
 	out "c1";
 	dep "c2";
-	exec "touch" "c1";
+	exec builtin.touch "c1";
 }
 
 rule c2 {
 	out "c2";
 	exec "sleep" "0.2";
-	exec "touch" "c2";
+	exec builtin.touch "c2";
 }
 		"#,
 	)
+	.await
 	.context("Unable to write zbuild manifest")?;
 
 	let args = Args {
 		targets: ["a".to_owned()].into(),
-		zbuild_path: Some(zbuild_zb),
+		zbuild_path: Some(zbuild_zb.into()),
 		keep_going,
 		..Args::default()
 	};
 	tracing::info!(?args, "Arguments");
-	let res = zbuild::run(args).await;
+	let res = zbuild::run(&fs, args).await;
 	app_error::ensure!(res.is_err(), "Expected zbuild error");
 
 
-	let a = temp_dir.path().join("a");
-	let b = temp_dir.path().join("b");
-	let c1 = temp_dir.path().join("c1");
-	let c2 = temp_dir.path().join("c2");
 	app_error::ensure!(
-		!a.try_exists().context("Unable to check if output file exists")?,
-		"Output file {a:?} was created"
+		!fs.try_exists_symlink("a")
+			.await
+			.context("Unable to check if output file exists")?,
+		"Output file \"a\" was created"
 	);
 	app_error::ensure!(
-		!b.try_exists().context("Unable to check if output file exists")?,
-		"Output file {b:?} was created"
+		!fs.try_exists_symlink("b")
+			.await
+			.context("Unable to check if output file exists")?,
+		"Output file \"b\" was created"
 	);
 
 	match keep_going {
 		true => app_error::ensure!(
-			c1.try_exists().context("Unable to check if output file exists")?,
-			"Output file {c1:?} was missing"
+			fs.try_exists_symlink("c1")
+				.await
+				.context("Unable to check if output file exists")?,
+			"Output file \"c1\" was missing"
 		),
 		false => app_error::ensure!(
-			!c1.try_exists().context("Unable to check if output file exists")?,
-			"Output file {c1:?} was created"
+			!fs.try_exists_symlink("c1")
+				.await
+				.context("Unable to check if output file exists")?,
+			"Output file \"c1\" was created"
 		),
 	}
 
 	app_error::ensure!(
-		c2.try_exists().context("Unable to check if output file exists")?,
-		"Output file {c2:?} was missing"
+		fs.try_exists_symlink("c2")
+			.await
+			.context("Unable to check if output file exists")?,
+		"Output file \"c2\" was missing"
 	);
 
 	Ok(())

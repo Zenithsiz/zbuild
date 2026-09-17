@@ -31,7 +31,6 @@ yoke                  = { workspace = true }
 # Workspace
 zbuild-test = { workspace = true }
 
-tempfile     = { workspace = true }
 tracing-test = { workspace = true, features = ["no-env-filter"] }
 
 [lints]

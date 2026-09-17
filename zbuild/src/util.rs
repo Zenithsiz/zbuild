@@ -11,7 +11,6 @@ use {
 	futures::Future,
 	pin_project::pin_project,
 	std::{
-		io,
 		mem,
 		path::{self, Path, PathBuf},
 		pin::Pin,
@@ -19,7 +18,6 @@ use {
 		task,
 		time::{Duration, Instant},
 	},
-	tokio::fs,
 };
 
 /// Chains together any number of `IntoIterator`s
@@ -31,15 +29,6 @@ pub macro chain {
 	($lhs:expr, $rhs:expr, $($rest:expr),+ $(,)?) => {
 		::std::iter::Iterator::chain($lhs.into_iter(), $crate::util::chain!($rhs, $($rest),+))
 	},
-}
-
-/// Async `std::fs_try_exists` using [`symlink_metadata`](fs::symlink_metadata).
-pub async fn fs_try_exists_symlink(path: impl AsRef<Path> + Send) -> Result<bool, io::Error> {
-	match fs::symlink_metadata(path).await {
-		Ok(_) => Ok(true),
-		Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
-		Err(err) => Err(err),
-	}
 }
 
 /// Measures the duration of a fallible function
