@@ -53,7 +53,7 @@ use {
 		rules::Rules,
 	},
 	app_error::Context,
-	core::cmp,
+	core::{clone::Share, cmp},
 	futures::{StreamExt, TryFutureExt, stream::FuturesUnordered},
 	indicatif::ProgressBar,
 	smallvec::SmallVec,
@@ -164,18 +164,7 @@ pub async fn run<FS: Fs>(fs: &FS, args: Args) -> Result<(), AppError> {
 		},
 	};
 
-	// Then create the watcher, if we're watching
 	let (watch_build_event_tx, watch_build_event_rx) = mpsc::unbounded_channel();
-	let watcher = args
-		.watch
-		.then(|| {
-			// TODO: Better default?
-			let debouncer_timeout_ms = args.watcher_debouncer_timeout_ms.unwrap_or(10.0_f64);
-			let debouncer_timeout = { Duration::from_secs_f64(debouncer_timeout_ms / 1000.0) };
-
-			Watcher::new(watch_build_event_rx, debouncer_timeout)
-		})
-		.transpose()?;
 
 	// Create the builder
 	let builder_visitor = BuilderVisitor { watch_build_event_tx };
@@ -193,6 +182,23 @@ pub async fn run<FS: Fs>(fs: &FS, args: Args) -> Result<(), AppError> {
 	)
 	.context("Unable to create builder")?;
 	let builder = Arc::new(builder);
+
+	let watcher = args
+		.watch
+		.then(|| {
+			// TODO: Better default?
+			let debouncer_timeout_ms = args.watcher_debouncer_timeout_ms.unwrap_or(10.0_f64);
+			let debouncer_timeout = { Duration::from_secs_f64(debouncer_timeout_ms / 1000.0) };
+
+			Watcher::new(
+				watch_build_event_rx,
+				debouncer_timeout,
+				builder.share(),
+				args.ignore_missing,
+			)
+		})
+		.transpose()?;
+
 
 	// Finally build all targets and start watching
 	let start_time = Instant::now();
@@ -213,7 +219,7 @@ pub async fn run<FS: Fs>(fs: &FS, args: Args) -> Result<(), AppError> {
 		async {
 			if let Some(watcher) = watcher {
 				tracing::info!("Starting to watch for all targets");
-				watcher.watch_rebuild(fs, &builder, args.ignore_missing).await;
+				watcher.watch_rebuild(fs).await;
 			}
 		}
 	);

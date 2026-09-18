@@ -31,7 +31,7 @@ struct RevDep {
 }
 
 /// Target watcher
-pub struct Watcher {
+pub struct Watcher<V> {
 	/// Inner watcher
 	inner: Debouncer<notify::RecommendedWatcher, notify_debouncer_full::RecommendedCache>,
 
@@ -41,16 +41,21 @@ pub struct Watcher {
 	/// File event stream
 	fs_event_stream: ReceiverStream<notify_debouncer_full::DebouncedEvent>,
 
+	builder:        Arc<Builder<V>>,
+	ignore_missing: bool,
+
 	/// Builder event stream
 	// TODO: Don't receive these via a channel, receive them via a method instead.
 	builder_event_stream: UnboundedReceiverStream<BuildEvent>,
 }
 
-impl Watcher {
+impl<V> Watcher<V> {
 	/// Creates a new watcher
 	pub fn new(
 		builder_event_rx: mpsc::UnboundedReceiver<BuildEvent>,
 		debouncer_timeout: Duration,
+		builder: Arc<Builder<V>>,
+		ignore_missing: bool,
 	) -> Result<Self, AppError> {
 		// Create the watcher
 		let (fs_event_tx, fs_event_rx) = mpsc::channel(16);
@@ -69,13 +74,17 @@ impl Watcher {
 		.context("Unable to create file watcher")?;
 
 		Ok(Self {
-			inner:                watcher,
-			rev_deps:             DashMap::new(),
-			fs_event_stream:      ReceiverStream::new(fs_event_rx),
+			inner: watcher,
+			rev_deps: DashMap::new(),
+			fs_event_stream: ReceiverStream::new(fs_event_rx),
 			builder_event_stream: UnboundedReceiverStream::new(builder_event_rx),
+			builder,
+			ignore_missing,
 		})
 	}
+}
 
+impl<V: build::Visitor> Watcher<V> {
 	/// Receives a build event
 	fn on_build_event<FS: Fs>(
 		inner: &mut Debouncer<notify::RecommendedWatcher, notify_debouncer_full::RecommendedCache>,
@@ -134,7 +143,7 @@ impl Watcher {
 		}
 	}
 
-	async fn on_fs_event<FS: Fs, V: build::Visitor>(
+	async fn on_fs_event<FS: Fs>(
 		fs: &FS,
 		rev_deps: &DashMap<PathBuf, RevDep>,
 		builder: &Arc<Builder<V>>,
@@ -247,12 +256,7 @@ impl Watcher {
 	}
 
 	/// Watches over all files and rebuilds any changed files
-	pub async fn watch_rebuild<FS: Fs, V: build::Visitor>(
-		mut self,
-		fs: &FS,
-		builder: &Arc<Builder<V>>,
-		ignore_missing: bool,
-	) {
+	pub async fn watch_rebuild<FS: Fs>(mut self, fs: &FS) {
 		let rev_deps = &self.rev_deps;
 		futures::future::join(
 			async {
@@ -264,7 +268,9 @@ impl Watcher {
 			},
 			async {
 				self.fs_event_stream
-					.then(async |event| Self::on_fs_event(fs, rev_deps, builder, ignore_missing, &event).await)
+					.then(async |event| {
+						Self::on_fs_event(fs, rev_deps, &self.builder, self.ignore_missing, &event).await;
+					})
 					.collect::<()>()
 					.await;
 			},
