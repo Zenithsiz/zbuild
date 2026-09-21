@@ -10,14 +10,14 @@
 
 // Imports
 use {
-	crate::{AppError, Builder, Fs, build, rules::Target, util::ArcStr},
+	crate::{AppError, Builder, Fs, rules::Target, util::ArcStr},
 	app_error::Context,
+	core::clone::Share,
 	dashmap::{DashMap, DashSet},
 	futures::{StreamExt, stream::FuturesUnordered},
 	notify_debouncer_full::{DebouncedEvent, Debouncer},
 	std::{io, path::PathBuf, sync::Arc, time::Duration},
-	tokio::sync::mpsc,
-	tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream},
+	tokio::sync::Mutex,
 };
 
 /// A reverse dependency
@@ -31,125 +31,104 @@ struct RevDep {
 }
 
 /// Target watcher
-pub struct Watcher<V> {
-	/// Inner watcher
-	inner: Debouncer<notify::RecommendedWatcher, notify_debouncer_full::RecommendedCache>,
-
-	/// Reverse dependencies
-	rev_deps: DashMap<PathBuf, RevDep>,
-
-	/// File event stream
-	fs_event_stream: ReceiverStream<notify_debouncer_full::DebouncedEvent>,
-
-	builder:        Arc<Builder<V>>,
+#[derive(Debug)]
+pub struct Watcher {
+	inner:          Mutex<Option<Debouncer<notify::RecommendedWatcher, notify_debouncer_full::RecommendedCache>>>,
+	rev_deps:       DashMap<PathBuf, RevDep>,
+	builder:        Arc<Builder>,
 	ignore_missing: bool,
-
-	/// Builder event stream
-	// TODO: Don't receive these via a channel, receive them via a method instead.
-	builder_event_stream: UnboundedReceiverStream<BuildEvent>,
 }
 
-impl<V> Watcher<V> {
+impl Watcher {
 	/// Creates a new watcher
-	pub fn new(
-		builder_event_rx: mpsc::UnboundedReceiver<BuildEvent>,
+	pub async fn new<FS: Fs>(
+		fs: FS,
 		debouncer_timeout: Duration,
-		builder: Arc<Builder<V>>,
+		builder: Arc<Builder>,
 		ignore_missing: bool,
-	) -> Result<Self, AppError> {
-		// Create the watcher
-		let (fs_event_tx, fs_event_rx) = mpsc::channel(16);
-		let watcher = notify_debouncer_full::new_debouncer(debouncer_timeout, None, move |fs_events| match fs_events {
-			Ok(fs_events) =>
-				for fs_event in fs_events {
-					tracing::trace!(?fs_event, "Watcher fs event");
-
-					let _: Result<(), _> = fs_event_tx.blocking_send(fs_event);
-				},
-			Err(errs) =>
-				for err in &errs {
-					tracing::warn!(err=?AppError::from(err), "Error while watching");
-				},
-		})
-		.context("Unable to create file watcher")?;
-
-		Ok(Self {
-			inner: watcher,
+	) -> Result<Arc<Self>, AppError> {
+		let this = Self {
+			inner: Mutex::new(None),
 			rev_deps: DashMap::new(),
-			fs_event_stream: ReceiverStream::new(fs_event_rx),
-			builder_event_stream: UnboundedReceiverStream::new(builder_event_rx),
 			builder,
 			ignore_missing,
-		})
-	}
-}
+		};
+		let this = Arc::new(this);
 
-impl<V: build::Visitor> Watcher<V> {
-	/// Receives a build event
-	fn on_build_event<FS: Fs>(
-		inner: &mut Debouncer<notify::RecommendedWatcher, notify_debouncer_full::RecommendedCache>,
-		rev_deps: &DashMap<PathBuf, RevDep>,
-		fs: &FS,
-		event: BuildEvent,
-	) {
-		tracing::trace!(?event, "Watcher build event");
-		match event {
-			BuildEvent::TargetDepBuilt { target, dep } => {
-				// Ignore static dependencies
-				// TODO: If the event is a removal event, we might care about a removal, or should
-				//       we enforce to the user that static items really should live for as long as
-				//       zbuild lives for?
-				if let Target::File { is_static, .. } = dep &&
-					is_static
-				{
-					return;
-				}
-
-				// Ignore non-file targets and canonicalize file ones
-				let dep_path = match &dep {
-					Target::File { file, .. } => match fs.canonicalize(&**file) {
-						Ok(path) => path,
-						Err(err) => {
-							tracing::warn!(?file, ?err, "Unable to canonicalize");
-							return;
-						},
+		let tokio = tokio::runtime::Handle::current();
+		let fs_watcher = {
+			let this = this.share();
+			notify_debouncer_full::new_debouncer(debouncer_timeout, None, move |fs_events| match fs_events {
+				Ok(fs_events) =>
+					for event in fs_events {
+						tokio.block_on(this.on_fs_event(&fs, &event));
 					},
-					Target::Rule { .. } => return,
-				};
+				Err(errs) =>
+					for err in &errs {
+						tracing::warn!(err=?AppError::from(err), "Error while watching");
+					},
+			})
+			.context("Unable to create file watcher")?
+		};
+		*this.inner.lock().await = Some(fs_watcher);
 
-				// Watch the path's parent
-				// Note: We do this since we may not receive events if the file is deleted,
-				//       but by watching the parent directory, we ensure we get it.
-				// TODO: Is this enough? What if the parent directory also gets deleted?
-				//       should we watch directories until the root?
-				tracing::trace!(?dep_path, "Starting to watch path");
-				if let Err(err) = inner.watch(
+		Ok(this)
+	}
+
+	/// Notifies that a target dependency was built
+	pub async fn on_target_dep_built<FS: Fs>(&self, fs: &FS, target: &Target<ArcStr>, dep: &Target<ArcStr>) {
+		// Ignore static dependencies
+		// TODO: If the event is a removal event, we might care about a removal, or should
+		//       we enforce to the user that static items really should live for as long as
+		//       zbuild lives for?
+		if let Target::File { is_static, .. } = *dep &&
+			is_static
+		{
+			return;
+		}
+
+		// Ignore non-file targets and canonicalize file ones
+		let dep_path = match &dep {
+			Target::File { file, .. } => match fs.canonicalize(&**file) {
+				Ok(path) => path,
+				Err(err) => {
+					tracing::warn!(?file, ?err, "Unable to canonicalize");
+					return;
+				},
+			},
+			Target::Rule { .. } => return,
+		};
+
+		// Watch the path's parent
+		// Note: We do this since we may not receive events if the file is deleted,
+		//       but by watching the parent directory, we ensure we get it.
+		// TODO: Is this enough? What if the parent directory also gets deleted?
+		//       should we watch directories until the root?
+		tracing::trace!(?dep_path, "Starting to watch path");
+		match &mut *self.inner.lock().await {
+			Some(watcher) =>
+				if let Err(err) = watcher.watch(
 					dep_path.parent().unwrap_or(&dep_path),
 					notify::RecursiveMode::NonRecursive,
 				) {
 					tracing::warn!(?dep_path, ?err, "Unable to watch path");
-				}
-
-				// Note: We don't care if we add a duplicate target
-				let _: bool = rev_deps
-					.entry(dep_path)
-					.or_insert_with(|| RevDep {
-						target:  dep,
-						parents: Arc::new(DashSet::new()),
-					})
-					.parents
-					.insert(target);
-			},
+				},
+			None => tracing::warn!("Filesystem watcher is missing"),
 		}
+
+		// Note: We don't care if we add a duplicate target
+		let _: bool = self
+			.rev_deps
+			.entry(dep_path)
+			.or_insert_with(|| RevDep {
+				target:  dep.clone(),
+				parents: Arc::new(DashSet::new()),
+			})
+			.parents
+			.insert(target.clone());
 	}
 
-	async fn on_fs_event<FS: Fs>(
-		fs: &FS,
-		rev_deps: &DashMap<PathBuf, RevDep>,
-		builder: &Arc<Builder<V>>,
-		ignore_missing: bool,
-		event: &DebouncedEvent,
-	) {
+	async fn on_fs_event<FS: Fs>(&self, fs: &FS, event: &DebouncedEvent) {
 		#[expect(
 			clippy::match_same_arms,
 			reason = "It reads and is more easily modify-able like this"
@@ -200,7 +179,7 @@ impl<V: build::Visitor> Watcher<V> {
 			};
 
 			// Then get the reverse dependencies
-			let rev_dep = match rev_deps.get(&path) {
+			let rev_dep = match self.rev_deps.get(&path) {
 				Some(rev_dep) => rev_dep.clone(),
 				None => return,
 			};
@@ -218,7 +197,7 @@ impl<V: build::Visitor> Watcher<V> {
 			// Reset the dependency and all parents' builds
 			futures::join!(
 				async move {
-					builder
+					self.builder
 						.reset_build(&rev_dep.target)
 						.await
 						.expect("Unable to reset existing build");
@@ -226,7 +205,7 @@ impl<V: build::Visitor> Watcher<V> {
 				dep_parents
 					.iter()
 					.map(move |target| async move {
-						builder
+						self.builder
 							.reset_build(target)
 							.await
 							.expect("Unable to reset existing build");
@@ -245,7 +224,7 @@ impl<V: build::Visitor> Watcher<V> {
 			dep_parents
 				.iter()
 				.map(|target| async {
-					let _: Result<(), _> = crate::build_target(fs, builder, target, ignore_missing).await;
+					let _: Result<(), _> = crate::build_target(fs, &self.builder, target, self.ignore_missing).await;
 				})
 				.collect::<FuturesUnordered<_>>()
 				.collect::<()>()
@@ -254,41 +233,4 @@ impl<V: build::Visitor> Watcher<V> {
 			tracing::trace!(?path, "Rebuilt all reverse dependencies");
 		}
 	}
-
-	/// Watches over all files and rebuilds any changed files
-	pub async fn watch_rebuild<FS: Fs>(mut self, fs: &FS) {
-		let rev_deps = &self.rev_deps;
-		futures::future::join(
-			async {
-				self.builder_event_stream
-					.map(|event| Self::on_build_event(&mut self.inner, rev_deps, fs, event))
-					.collect::<()>()
-					.await;
-				tracing::trace!("Watcher task exited");
-			},
-			async {
-				self.fs_event_stream
-					.then(async |event| {
-						Self::on_fs_event(fs, rev_deps, &self.builder, self.ignore_missing, &event).await;
-					})
-					.collect::<()>()
-					.await;
-			},
-		)
-		.await;
-	}
-}
-
-
-/// Build event
-#[derive(Clone, Debug)]
-pub enum BuildEvent {
-	/// Target dependency built
-	TargetDepBuilt {
-		/// Target that was being built
-		target: Target<ArcStr>,
-
-		/// Dependency that was built
-		dep: Target<ArcStr>,
-	},
 }

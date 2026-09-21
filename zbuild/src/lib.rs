@@ -53,7 +53,7 @@ use {
 		rules::Rules,
 	},
 	app_error::Context,
-	core::{clone::Share, cmp},
+	core::cmp,
 	futures::{StreamExt, TryFutureExt, stream::FuturesUnordered},
 	indicatif::ProgressBar,
 	smallvec::SmallVec,
@@ -64,9 +64,7 @@ use {
 		thread,
 		time::{Duration, Instant, SystemTime},
 	},
-	tokio::sync::mpsc,
 	util::ArcStr,
-	watcher::Watcher,
 };
 
 #[expect(clippy::too_many_lines, reason = "TODO: Split it up more")]
@@ -164,10 +162,7 @@ pub async fn run<FS: Fs>(fs: &FS, args: Args) -> Result<(), AppError> {
 		},
 	};
 
-	let (watch_build_event_tx, watch_build_event_rx) = mpsc::unbounded_channel();
-
 	// Create the builder
-	let builder_visitor = BuilderVisitor { watch_build_event_tx };
 	let builder = Builder::new(
 		jobs,
 		rules,
@@ -178,51 +173,39 @@ pub async fn run<FS: Fs>(fs: &FS, args: Args) -> Result<(), AppError> {
 		args.always_build,
 		progress_bar.clone(),
 		args.track_rule_stats,
-		builder_visitor,
 	)
 	.context("Unable to create builder")?;
 	let builder = Arc::new(builder);
 
-	let watcher = args
-		.watch
-		.then(|| {
-			// TODO: Better default?
-			let debouncer_timeout_ms = args.watcher_debouncer_timeout_ms.unwrap_or(10.0_f64);
-			let debouncer_timeout = { Duration::from_secs_f64(debouncer_timeout_ms / 1000.0) };
-
-			Watcher::new(
-				watch_build_event_rx,
-				debouncer_timeout,
-				builder.share(),
-				args.ignore_missing,
-			)
-		})
-		.transpose()?;
-
+	if args.watch {
+		// TODO: Better default?
+		let debouncer_timeout_ms = args.watcher_debouncer_timeout_ms.unwrap_or(10.0_f64);
+		let debouncer_timeout = { Duration::from_secs_f64(debouncer_timeout_ms / 1000.0) };
+		builder
+			.create_watcher(fs, debouncer_timeout, args.ignore_missing)
+			.await
+			.context("Unable to create watcher")?;
+	}
 
 	// Finally build all targets and start watching
 	let start_time = Instant::now();
-	let (failed_targets, ()) = futures::join!(
-		async {
-			targets_to_build
-				.iter()
-				.map(|target| {
-					self::build_target(fs, &builder, target, args.ignore_missing).map_err(|err| (target.clone(), err))
-				})
-				.collect::<FuturesUnordered<_>>()
-				.collect::<Vec<Result<(), _>>>()
-				.await
-				.into_iter()
-				.filter_map(Result::err)
-				.collect::<Vec<_>>()
-		},
-		async {
-			if let Some(watcher) = watcher {
-				tracing::info!("Starting to watch for all targets");
-				watcher.watch_rebuild(fs).await;
-			}
-		}
-	);
+	let failed_targets = targets_to_build
+		.iter()
+		.map(|target| {
+			self::build_target(fs, &builder, target, args.ignore_missing).map_err(|err| (target.clone(), err))
+		})
+		.collect::<FuturesUnordered<_>>()
+		.collect::<Vec<Result<(), _>>>()
+		.await
+		.into_iter()
+		.filter_map(Result::err)
+		.collect::<Vec<_>>();
+
+	// TODO: We should break from this on a ctrl+c or something else
+	if args.watch {
+		std::future::pending::<!>().await;
+	}
+
 	let elapsed = start_time.elapsed();
 
 	if let Some(progress_bar) = progress_bar {
@@ -295,9 +278,9 @@ fn find_zbuild<FS: Fs>(fs: &FS) -> Result<PathBuf, AppError> {
 }
 
 /// Builds a target.
-async fn build_target<FS: Fs, V: build::Visitor, T: BuildableTargetInner + fmt::Display + fmt::Debug>(
+async fn build_target<FS: Fs, T: BuildableTargetInner + fmt::Display + fmt::Debug>(
 	fs: &FS,
-	builder: &Arc<Builder<V>>,
+	builder: &Arc<Builder>,
 	target: &rules::Target<T>,
 	ignore_missing: bool,
 ) -> Result<(), AppError> {
@@ -332,20 +315,20 @@ async fn build_target<FS: Fs, V: build::Visitor, T: BuildableTargetInner + fmt::
 /// A buildable target inner type
 trait BuildableTargetInner: Sized {
 	/// Builds this target
-	async fn build<FS: Fs, V: build::Visitor>(
+	async fn build<FS: Fs>(
 		fs: &FS,
 		target: &rules::Target<Self>,
-		builder: &Arc<Builder<V>>,
+		builder: &Arc<Builder>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError>;
 }
 
 impl BuildableTargetInner for rules::Expr {
-	async fn build<FS: Fs, V: build::Visitor>(
+	async fn build<FS: Fs>(
 		fs: &FS,
 		target: &rules::Target<Self>,
-		builder: &Arc<Builder<V>>,
+		builder: &Arc<Builder>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError> {
@@ -357,10 +340,10 @@ impl BuildableTargetInner for rules::Expr {
 }
 
 impl BuildableTargetInner for ArcStr {
-	async fn build<FS: Fs, V: build::Visitor>(
+	async fn build<FS: Fs>(
 		fs: &FS,
 		target: &rules::Target<Self>,
-		builder: &Arc<Builder<V>>,
+		builder: &Arc<Builder>,
 		ignore_missing: bool,
 		reason: BuildReason,
 	) -> Result<build::BuildResult, AppError> {
@@ -368,23 +351,5 @@ impl BuildableTargetInner for ArcStr {
 			.build(fs, target, ignore_missing, reason)
 			.await
 			.map(|(build_res, _)| build_res)
-	}
-}
-
-#[derive(Debug)]
-struct BuilderVisitor {
-	watch_build_event_tx: mpsc::UnboundedSender<watcher::BuildEvent>,
-}
-
-impl build::Visitor for BuilderVisitor {
-	fn target_dep_built(&self, target: &rules::Target<ArcStr>, dep: &rules::Target<ArcStr>) {
-		if self.watch_build_event_tx.is_closed() {
-			return;
-		}
-
-		_ = self.watch_build_event_tx.send(watcher::BuildEvent::TargetDepBuilt {
-			target: target.clone(),
-			dep:    dep.clone(),
-		});
 	}
 }

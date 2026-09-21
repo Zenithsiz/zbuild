@@ -42,7 +42,7 @@ rule compile_o {
 	# Execution
 	#
 	# Specifies an array of commands to execute to build this rule. Each command is an array of arguments. It will not be passed to a shell, but instead be executed as-is
-	exec "mkdir" "-p" build_dir;
+	exec builtin.mkdir_parents build_dir;
 	exec "gcc" "{src_dir}/{name}.c" "-c" "-o" "{build_dir}/{name}.o";
 }
 

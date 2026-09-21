@@ -1689,7 +1689,6 @@ dependencies = [
  "pin-project",
  "smallvec",
  "tokio",
- "tokio-stream",
  "tracing",
  "tracing-test",
  "unicode-ident",

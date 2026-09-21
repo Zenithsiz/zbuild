@@ -20,9 +20,10 @@ use {
 		expand::{self, StrOrBuiltin},
 		rules::{Command, DepItem, Expr, ExprBuiltin, ExprTree, OutItem, Rule, Target},
 		util::{self, ArcStr},
+		watcher::Watcher,
 	},
-	app_error::{AllErrs, Context, app_error},
-	core::time::Duration,
+	app_error::{AllErrs, Context, app_error, ensure},
+	core::{clone::Share, time::Duration},
 	dashmap::DashMap,
 	futures::{StreamExt, TryStreamExt, stream::FuturesUnordered},
 	indicatif::ProgressBar,
@@ -35,7 +36,7 @@ use {
 		future::Future,
 		path::Path,
 		process::Stdio,
-		sync::{Arc, nonpoison::Mutex},
+		sync::{Arc, OnceLock, nonpoison::Mutex},
 		time::SystemTime,
 	},
 	tokio::{io::AsyncReadExt, process, sync::Semaphore, task},
@@ -107,10 +108,7 @@ impl RuleStats {
 
 /// Builder
 #[derive(Debug)]
-pub struct Builder<V> {
-	/// Visitor
-	visitor: V,
-
+pub struct Builder {
 	/// Rules
 	rules: Rules,
 
@@ -139,11 +137,13 @@ pub struct Builder<V> {
 
 	/// Rules durations
 	rules_stats: Option<DashMap<Option<ArcStr>, Mutex<RuleStats>>>,
+
+	/// Watcher
+	watcher: OnceLock<Arc<Watcher>>,
 }
 
-impl<V> Builder<V> {
+impl Builder {
 	/// Creates a new builder
-	#[expect(clippy::too_many_arguments, reason = "TODO: Package some together")]
 	pub fn new(
 		jobs: usize,
 		rules: Rules,
@@ -152,7 +152,6 @@ impl<V> Builder<V> {
 		always_build: bool,
 		progress_bar: Option<ProgressBar>,
 		track_rule_stats: bool,
-		visitor: V,
 	) -> Result<Self, AppError> {
 		// Create the rule output tree
 		let mut rule_output_tree = ExprTree::new();
@@ -183,7 +182,6 @@ impl<V> Builder<V> {
 		}
 
 		Ok(Self {
-			visitor,
 			rules,
 			expander,
 			rules_lock: DashMap::new(),
@@ -193,6 +191,7 @@ impl<V> Builder<V> {
 			always_build,
 			progress_bar,
 			rules_stats: track_rule_stats.then(DashMap::new),
+			watcher: OnceLock::new(),
 		})
 	}
 
@@ -228,9 +227,23 @@ impl<V> Builder<V> {
 		let mut rule_stats = rule_stats.lock();
 		f(&mut rule_stats);
 	}
-}
 
-impl<V: Visitor> Builder<V> {
+	/// Creates a watcher for this builder
+	pub async fn create_watcher<FS: Fs>(
+		self: &Arc<Self>,
+		fs: &FS,
+		debouncer_timeout: Duration,
+		ignore_missing: bool,
+	) -> Result<(), AppError> {
+		let watcher = Watcher::new(fs.share(), debouncer_timeout, self.share(), ignore_missing).await?;
+		ensure!(
+			self.watcher.set(watcher).is_ok(),
+			"Cannot initialize watcher multiple times"
+		);
+
+		Ok(())
+	}
+
 	/// Finds a target's rule
 	fn target_rule(&self, target: &Target<ArcStr>) -> Result<Option<(Rule<ArcStr>, TargetRule)>, AppError> {
 		let target_rule = match *target {
@@ -417,8 +430,8 @@ impl<V: Visitor> Builder<V> {
 				reason = "For some reason, without this wrapper, the compiler can't see that `build_inner`'s future \
 				          is `Send` without explicitly annotating it in the return type"
 			)]
-			fn build_inner<FS: Fs, V: Visitor>(
-				this: Arc<Builder<V>>,
+			fn build_inner<FS: Fs>(
+				this: Arc<Builder>,
 				fs: FS,
 				target: Arc<Target<ArcStr>>,
 				rule: Rule<ArcStr>,
@@ -659,7 +672,9 @@ impl<V: Visitor> Builder<V> {
 								.with_context(|| format!("Unable to build target {dep_target}"))?;
 							tracing::trace!(%target, ?rule.name, ?dep, ?res, "Built target rule dependency");
 
-							self.visitor.target_dep_built(target, &dep_target);
+							if let Some(watcher) = self.watcher.get() {
+								watcher.on_target_dep_built(fs, target, &dep_target).await;
+							}
 							Some((dep_target, res, dep_guard))
 						},
 
@@ -807,7 +822,9 @@ impl<V: Visitor> Builder<V> {
 						.await
 						.with_context(|| format!("Unable to build target {dep_target}"))?;
 
-					self.visitor.target_dep_built(parent_target, &dep_target);
+					if let Some(watcher) = self.watcher.get() {
+						watcher.on_target_dep_built(fs, parent_target, &dep_target).await;
+					}
 					Ok((dep_target, res, dep_guard))
 				}
 			})
@@ -1053,10 +1070,4 @@ fn cmd_to_string(cmd: &Command<ArcStr, StrOrBuiltin>) -> String {
 
 	let args = cmd.args.iter().map(|arg| format!("\"{arg}\"")).join(" ");
 	format!("[{program} {args}]")
-}
-
-/// Visitor
-pub trait Visitor: 'static + Send + Sync {
-	/// Called when a target dependency was built
-	fn target_dep_built(&self, target: &Target<ArcStr>, dep: &Target<ArcStr>);
 }
