@@ -200,17 +200,7 @@ pub async fn run<FS: Fs>(fs: &FS, args: Args) -> Result<(), AppError> {
 		.into_iter()
 		.filter_map(Result::err)
 		.collect::<Vec<_>>();
-
-	// TODO: We should break from this on a ctrl+c or something else
-	if args.watch {
-		std::future::pending::<!>().await;
-	}
-
 	let elapsed = start_time.elapsed();
-
-	if let Some(progress_bar) = progress_bar {
-		progress_bar.finish_and_clear();
-	}
 
 	// Finally print some statistics
 	let targets = builder.build_results().await;
@@ -240,16 +230,26 @@ pub async fn run<FS: Fs>(fs: &FS, args: Args) -> Result<(), AppError> {
 		}
 	}
 
+	if !failed_targets.is_empty() {
+		tracing::error!("One or more builds failed:");
+		for (target, err) in &failed_targets {
+			tracing::error!(err=%error::pretty(err), "Failed to build target {target}");
+		}
+	}
+
+	if args.watch {
+		tracing::info!("Watching for file changes");
+		// TODO: We should break from this on a ctrl+c or something else
+		std::future::pending::<!>().await;
+	}
+
+	if let Some(progress_bar) = progress_bar {
+		progress_bar.finish_and_clear();
+	}
+
 	match failed_targets.is_empty() {
 		true => Ok(()),
-		false => {
-			tracing::error!("One or more builds failed:");
-			for (target, err) in failed_targets {
-				tracing::error!(err=%error::pretty(&err), "Failed to build target {target}");
-			}
-
-			Err(AppError::msg("Exiting with non-0 due to failed builds"))
-		},
+		false => Err(AppError::msg("Exiting with non-0 due to failed builds")),
 	}
 }
 
