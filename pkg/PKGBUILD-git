@@ -1,0 +1,45 @@
+# Maintainer: Filipe Rodrigues <filipejacintorodrigues1@gmail.com>
+pkgname=zbuild
+pkgver=0.1.10
+pkgrel=1
+pkgdesc="A make-like generic build system "
+arch=('x86_64')
+url="https://github.com/zenithsiz/zbuild"
+license=('MIT' 'APACHE-2')
+depends=('gcc-libs')
+makedepends=('cargo-nightly')
+provides=(${pkgname%-git}=$pkgver)
+conflicts=(${pkgname%-git})
+source=("git+https://github.com/zenithsiz/${pkgname%-git}.git")
+sha512sums=('SKIP')
+
+prepare() {
+	cd "$srcdir/${pkgname%-git}"
+
+	export RUSTUP_TOOLCHAIN=nightly
+	cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+	cd "$srcdir/${pkgname%-git}"
+
+	export RUSTUP_TOOLCHAIN=nightly
+	cargo build --frozen --release
+}
+
+check() {
+	cd "$srcdir/${pkgname%-git}"
+
+	export RUSTUP_TOOLCHAIN=nightly
+	cargo test --frozen
+}
+
+package() {
+	cd "$srcdir/${pkgname%-git}"
+
+	install -Dm0755 -t "$pkgdir/usr/bin/" "target/release/$pkgname"
+
+	install -Dm0644 -t "$pkgdir/usr/share/doc/${pkgname}" "README.md"
+	install -Dm0644 -t "$pkgdir/usr/share/licenses/${pkgname}" "LICENSE-MIT"
+	install -Dm0644 -t "$pkgdir/usr/share/licenses/${pkgname}" "LICENSE-APACHE"
+}
