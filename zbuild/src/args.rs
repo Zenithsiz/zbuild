@@ -41,6 +41,8 @@ pub struct Args {
 	/// file is no longer requires. The `.d` file only changes
 	/// after building the code, but zbuild assumes the file is
 	/// needed to build the code.
+	// TODO: Add a `ignore-missing-out` that will only ignore
+	//       output dependencies that are missing.
 	#[clap(long = "ignore-missing", short = 'i')]
 	pub ignore_missing: bool,
 
